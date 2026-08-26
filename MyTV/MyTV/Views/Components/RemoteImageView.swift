@@ -173,10 +173,10 @@ public struct CachedAsyncImage<Content: View, Placeholder: View>: View {
                 #endif
             } else {
                 placeholder()
-                    .task(id: url) {
-                        await fetchImage()
-                    }
             }
+        }
+        .task(id: url) {
+            await fetchImage()
         }
     }
 

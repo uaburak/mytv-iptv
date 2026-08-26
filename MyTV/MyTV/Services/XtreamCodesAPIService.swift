@@ -533,10 +533,32 @@ public enum DynamicBackdrop: Codable, Sendable {
     case string(String)
 
     public var firstUrl: String? {
+        let candidates: [String]
         switch self {
-        case .array(let list): return list.first
-        case .string(let s): return s.isEmpty ? nil : s
+        case .array(let list): candidates = list
+        case .string(let s): candidates = [s]
         }
+
+        for raw in candidates {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { continue }
+
+            // TMDB relative path desteği (/abc.jpg -> https://image.tmdb.org/t/p/w1280/abc.jpg)
+            if trimmed.hasPrefix("/") {
+                return "https://image.tmdb.org/t/p/w1280\(trimmed)"
+            }
+
+            // Yalın/geçersiz base URL filtreleri
+            if trimmed == "https://image.tmdb.org/t/p/w1280" || trimmed == "https://image.tmdb.org/t/p/w1280/" ||
+               trimmed == "https://image.tmdb.org/t/p/original" || trimmed == "https://image.tmdb.org/t/p/original/" {
+                continue
+            }
+
+            if trimmed.lowercased().hasPrefix("http") {
+                return trimmed
+            }
+        }
+        return nil
     }
 
     public init(from decoder: Decoder) throws {
