@@ -56,7 +56,7 @@ public struct MediaDetailView: View {
         let lowerName = currentItem.name.lowercased()
 
         if lowerName.contains("dual") || lowerName.contains("multi") {
-            tags.append("Dual Ses")
+            tags.append("Dual")
         }
         if lowerName.contains("dublaj") || lowerName.contains("tr dub") || lowerName.contains("[tr]") || lowerName.contains("turkce") || lowerName.contains("türkçe") {
             tags.append("TR Dublaj")
@@ -65,12 +65,12 @@ public struct MediaDetailView: View {
             tags.append("TR Altyazı")
         }
         if lowerName.contains("en") || lowerName.contains("eng") || lowerName.contains("english") {
-            if !tags.contains("Dual Ses") && !tags.contains("TR Dublaj") {
-                tags.append("Orijinal Dil")
+            if !tags.contains("Dual") && !tags.contains("TR Dublaj") {
+                tags.append("EN")
             }
         }
         if tags.isEmpty {
-            tags.append("Türkçe")
+            tags.append("TR")
         }
         return tags
     }
@@ -78,49 +78,31 @@ public struct MediaDetailView: View {
     public var body: some View {
         GeometryReader { screenGeo in
             ZStack(alignment: .top) {
-                // 1. Sticky Sabit Kapak Görseli (Ekrana tam oturan genişlik)
+                // 1. Sticky Sabit Kapak Görseli
                 stickyBackdropView(width: screenGeo.size.width)
 
-                // 2. Kaydırılabilir İçerik & Beraberinde Kayan Karartma Gradyanı
+                // 2. Kaydırılabilir İçerik
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
-                        // Logo, Başlık ve Poster Alanı
+                        // Afiş ve Yanındaki Büyük Puan / Meta Bilgiler
                         heroContent
                             .padding(.top, 220)
                             .padding(.bottom, 6)
 
-                        // Oynat Butonu
+                        // 3. Bölümü / Filmi İzle Butonu
                         actionButtons
                             .padding(.horizontal)
 
-                        // Konu Özeti (Başlık ile)
-                        if let plot = currentItem.overview, !plot.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(currentItem.name)
-                                    .font(.system(size: 17, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.primary)
-
-                                Text(plot)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                    .lineSpacing(5)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
+                        // 4. İçerik İsmi, Konu Özeti, Yönetmen ve Oyuncular
+                        storylineAndCastSection
                             .padding(.horizontal)
-                        }
 
-                        // Oyuncular ve Ekip
-                        if (director != nil && !director!.isEmpty) || (cast != nil && !cast!.isEmpty) {
-                            castAndCrewSection
-                                .padding(.horizontal)
-                        }
-
-                        // Dizi Sezon ve Bölümleri
+                        // 5. Dizi Sezon ve Bölümleri
                         if currentItem.type == .series {
                             seriesEpisodesSection
                         }
 
-                        // Benzer İçerikler
+                        // 6. Benzer İçerikler
                         if !relatedItems.isEmpty {
                             MediaShelfRow(
                                 title: "Benzer İçerikler",
@@ -209,101 +191,136 @@ public struct MediaDetailView: View {
         .ignoresSafeArea(edges: .top)
     }
 
-    // MARK: - Hero Content (Floating Poster, Logo & Title)
+    // MARK: - Hero Content (Floating Poster & Big Rating + Metas)
 
     @ViewBuilder
     private var heroContent: some View {
         HStack(alignment: .bottom, spacing: 14) {
-            // Yüzen Poster Kartı
+            // Sol: Yüzen Dikey Afiş / Kapak Görseli
             MediaPosterView(
                 posterUrl: currentItem.streamIcon ?? currentItem.backdropUrl,
                 title: currentItem.name,
-                width: 95,
-                height: 142,
+                width: 102,
+                height: 152,
                 cornerRadius: 12,
                 isSeries: currentItem.type == .series
             )
             .shadow(color: .black.opacity(0.85), radius: 12, x: 0, y: 6)
 
-            // Logo, Başlık & Meta Bilgiler
-            VStack(alignment: .leading, spacing: 6) {
-                // İçerik Logosu
+            // Sağ: Büyük Puan, Yıl, Ülke, Yaş Sınırı, Altyazı/Dil Paketleri, Türler
+            VStack(alignment: .leading, spacing: 7) {
+                // 1. İçerik Logosu (Varsa)
                 if let iconUrl = URL.fromUserString(currentItem.streamIcon) {
                     CachedAsyncImage(url: iconUrl) { logo in
                         logo
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(maxHeight: 34, alignment: .leading)
+                            .frame(maxHeight: 30, alignment: .leading)
                             .shadow(color: .black.opacity(0.7), radius: 4)
                     } placeholder: {
                         EmptyView()
                     }
                 }
 
-                Text(currentItem.name)
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                    .shadow(radius: 4)
-                    .fixedSize(horizontal: false, vertical: true)
+                // 2. Büyük IMDb / TMDB Puanı
+                if let rating = currentItem.rating, let score = Double(rating), score > 0 {
+                    HStack(alignment: .lastTextBaseline, spacing: 4) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 15))
+                            .foregroundStyle(.yellow)
+                        Text(String(format: "%.1f", score))
+                            .font(.system(size: 22, weight: .black, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text("/10")
+                            .font(.system(size: 10.5, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                }
 
-                // Meta Bilgi Rozetleri (Puan, Yapım Yılı, Süre, Dil Paketleri)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 5) {
-                        if let rating = currentItem.rating, let score = Double(rating), score > 0 {
-                            HStack(spacing: 3) {
-                                Image(systemName: "star.fill")
-                                    .font(.system(size: 8.5))
-                                    .foregroundStyle(.yellow)
-                                Text(String(format: "%.1f", score))
-                                    .font(.system(size: 10.5, weight: .bold))
-                                    .foregroundStyle(.white)
-                            }
-                            .padding(.horizontal, 7)
+                // 3. Yıl, Ülke, Yaş Sınırı, Süre
+                HStack(spacing: 5) {
+                    if let release = currentItem.releaseDate, !release.isEmpty {
+                        Text(release.prefix(4))
+                            .font(.system(size: 11, weight: .semibold))
+                            .padding(.horizontal, 6)
                             .padding(.vertical, 3)
-                            .background(Color.white.opacity(0.18), in: Capsule())
-                        }
+                            .background(Color.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
+                            .foregroundStyle(.white)
+                    }
 
-                        if let release = currentItem.releaseDate, !release.isEmpty {
-                            Text(release.prefix(4))
-                                .font(.system(size: 10.5, weight: .semibold))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(Color.white.opacity(0.14), in: Capsule())
-                                .foregroundStyle(.white)
-                        }
+                    if let country = currentItem.country, !country.isEmpty {
+                        Text(country)
+                            .font(.system(size: 11, weight: .medium))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .lineLimit(1)
+                    }
 
-                        if let dur = currentItem.duration, !dur.isEmpty && dur != "0" {
-                            let durDisplay = dur.contains(":") ? dur : "\(dur) dk"
-                            Text(durDisplay)
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.85))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(Color.white.opacity(0.12), in: Capsule())
-                        }
+                    if let age = currentItem.age ?? currentItem.mpaaRating, !age.isEmpty {
+                        Text(age)
+                            .font(.system(size: 10.5, weight: .bold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2.5)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .strokeBorder(Color.white.opacity(0.4), lineWidth: 0.8)
+                            )
+                            .foregroundStyle(.white)
+                    }
 
-                        // Dil Paketleri Rozetleri
-                        ForEach(detectedLanguages, id: \.self) { lang in
+                    if let dur = currentItem.duration, !dur.isEmpty && dur != "0" {
+                        let durDisplay = dur.contains(":") ? dur : "\(dur) dk"
+                        Text(durDisplay)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+
+                // 4. Altyazı & Dil Paketleri (EN, TR Dublaj vb.) + Varsa Fragman
+                HStack(spacing: 5) {
+                    ForEach(detectedLanguages, id: \.self) { lang in
+                        HStack(spacing: 3) {
+                            Image(systemName: lang.contains("Altyazı") ? "captions.bubble.fill" : "speaker.wave.2.fill")
+                                .font(.system(size: 8))
+                            Text(lang)
+                                .font(.system(size: 10, weight: .bold))
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color.blue.opacity(0.28), in: Capsule())
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(Color.blue.opacity(0.45), lineWidth: 0.6)
+                        )
+                        .foregroundStyle(.white)
+                    }
+
+                    if let trailer = currentItem.youtubeTrailer, !trailer.isEmpty, let trailerUrl = URL(string: "https://www.youtube.com/watch?v=\(trailer)") {
+                        Link(destination: trailerUrl) {
                             HStack(spacing: 3) {
-                                Image(systemName: lang.contains("Altyazı") ? "captions.bubble.fill" : "speaker.wave.2.fill")
-                                    .font(.system(size: 8))
-                                Text(lang)
-                                    .font(.system(size: 10.5, weight: .semibold))
+                                Image(systemName: "play.rectangle.fill")
+                                    .font(.system(size: 9))
+                                Text("Fragman")
+                                    .font(.system(size: 10, weight: .bold))
                             }
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
-                            .background(Color.blue.opacity(0.25), in: Capsule())
+                            .background(Color.red.opacity(0.28), in: Capsule())
                             .overlay(
                                 Capsule()
-                                    .strokeBorder(Color.blue.opacity(0.4), lineWidth: 0.5)
+                                    .strokeBorder(Color.red.opacity(0.45), lineWidth: 0.6)
                             )
                             .foregroundStyle(.white)
                         }
                     }
                 }
 
-                // Türler Rozetleri
+                // 5. Türler
                 if !genreList.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 4) {
@@ -324,7 +341,7 @@ public struct MediaDetailView: View {
         .padding(.horizontal, 16)
     }
 
-    // MARK: - Action Buttons (Glass Style)
+    // MARK: - Action Buttons (Hemen İzle / 1. Bölümü Oynat)
 
     @ViewBuilder
     private var actionButtons: some View {
@@ -358,42 +375,59 @@ public struct MediaDetailView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Cast & Crew Section (İkonlu & Kapsayıcısız)
+    // MARK: - Storyline, Director & Cast Section
 
     @ViewBuilder
-    private var castAndCrewSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let director, !director.isEmpty {
-                HStack(alignment: .center, spacing: 8) {
-                    Image(systemName: "megaphone.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 16)
+    private var storylineAndCastSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            // İçerik İsmi & Konu Özeti
+            VStack(alignment: .leading, spacing: 6) {
+                Text(currentItem.name)
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
 
-                    Text(director)
-                        .font(.system(size: 13))
+                if let plot = currentItem.overview, !plot.isEmpty {
+                    Text(plot)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .lineSpacing(5)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
-            if let cast, !cast.isEmpty {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "person.2.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 16)
-                        .padding(.top, 2)
+            // Yönetmen & Oyuncular
+            VStack(alignment: .leading, spacing: 8) {
+                if let director, !director.isEmpty {
+                    HStack(alignment: .center, spacing: 8) {
+                        Image(systemName: "megaphone.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16)
 
-                    Text(cast)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .lineSpacing(3)
-                        .fixedSize(horizontal: false, vertical: true)
+                        Text(director)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                if let cast, !cast.isEmpty {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "person.2.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16)
+                            .padding(.top, 2)
+
+                        Text(cast)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Series Episodes Section
@@ -566,7 +600,10 @@ public struct MediaDetailView: View {
                     genre: details.genre ?? currentItem.genre,
                     cast: details.cast,
                     director: details.director,
-                    youtubeTrailer: details.youtubeTrailer
+                    youtubeTrailer: details.youtubeTrailer,
+                    country: details.country ?? currentItem.country,
+                    age: details.age ?? currentItem.age,
+                    mpaaRating: details.mpaaRating ?? currentItem.mpaaRating
                 )
 
                 if let firstSeason = seasons.first {
@@ -595,7 +632,10 @@ public struct MediaDetailView: View {
                     genre: details.genre ?? currentItem.genre,
                     cast: details.cast,
                     director: details.director,
-                    youtubeTrailer: details.youtubeTrailer
+                    youtubeTrailer: details.youtubeTrailer,
+                    country: details.country ?? currentItem.country,
+                    age: details.age ?? currentItem.age,
+                    mpaaRating: details.mpaaRating ?? currentItem.mpaaRating
                 )
             }
         }

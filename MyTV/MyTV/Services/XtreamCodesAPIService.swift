@@ -285,6 +285,9 @@ public final class XtreamCodesAPIService: Sendable {
         public let duration: String?
         public let rating: String?
         public let youtubeTrailer: String?
+        public let country: String?
+        public let age: String?
+        public let mpaaRating: String?
     }
 
     public struct SeriesDetailResponse: Sendable {
@@ -298,6 +301,9 @@ public final class XtreamCodesAPIService: Sendable {
         public let rating: String?
         public let youtubeTrailer: String?
         public let episodes: [Episode]
+        public let country: String?
+        public let age: String?
+        public let mpaaRating: String?
     }
 
     public func getVODInfo(account: Account, vodId: String) async throws -> VODDetailResponse? {
@@ -321,6 +327,9 @@ public final class XtreamCodesAPIService: Sendable {
             let episode_run_time: DynamicString?
             let rating: DynamicRating?
             let youtube_trailer: String?
+            let country: String?
+            let age: String?
+            let mpaa_rating: String?
         }
 
         let resp: Resp? = try? await fetch(url)
@@ -336,7 +345,10 @@ public final class XtreamCodesAPIService: Sendable {
             releaseDate: info.release_date?.stringValue ?? info.releasedate?.stringValue,
             duration: info.duration?.stringValue ?? info.episode_run_time?.stringValue,
             rating: info.rating?.stringValue,
-            youtubeTrailer: info.youtube_trailer
+            youtubeTrailer: info.youtube_trailer,
+            country: info.country,
+            age: info.age,
+            mpaaRating: info.mpaa_rating
         )
     }
 
@@ -420,7 +432,10 @@ public final class XtreamCodesAPIService: Sendable {
             releaseDate: resp.info?.release_date?.stringValue ?? resp.info?.releaseDate?.stringValue,
             rating: resp.info?.rating?.stringValue,
             youtubeTrailer: resp.info?.youtube_trailer,
-            episodes: sortedEpisodes
+            episodes: sortedEpisodes,
+            country: nil,
+            age: nil,
+            mpaaRating: nil
         )
     }
 
