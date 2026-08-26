@@ -172,7 +172,7 @@ public struct HomeView: View {
             }
             .padding(.bottom, 36)
         }
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .scrollEdgeEffectStyle(.none, for: .all)
         .refreshable {
             await appState.syncActiveAccount()
         }

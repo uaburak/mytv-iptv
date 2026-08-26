@@ -136,7 +136,7 @@ public struct MediaDetailView: View {
                         .ignoresSafeArea(edges: .bottom)
                     )
                 }
-                .scrollEdgeEffectStyle(.soft, for: .all)
+                .scrollEdgeEffectStyle(.none, for: .all)
             }
         }
         .ignoresSafeArea(edges: .top)

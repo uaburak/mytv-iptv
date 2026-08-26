@@ -51,7 +51,7 @@ public struct CategoryMediaListView: View {
             .padding(.top, 12)
             .padding(.bottom, 36)
         }
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .scrollEdgeEffectStyle(.none, for: .all)
         .navigationTitle(category.name)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)

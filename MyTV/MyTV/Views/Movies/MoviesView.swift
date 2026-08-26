@@ -29,7 +29,7 @@ public struct MoviesView: View {
                         .padding(.top, 8)
                         .padding(.bottom, 36)
                 }
-                .scrollEdgeEffectStyle(.soft, for: .all)
+                .scrollEdgeEffectStyle(.none, for: .all)
             }
         }
         .navigationTitle("Filmler")
