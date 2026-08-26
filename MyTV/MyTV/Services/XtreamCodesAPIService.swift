@@ -304,6 +304,7 @@ public final class XtreamCodesAPIService: Sendable {
         public let country: String?
         public let age: String?
         public let mpaaRating: String?
+        public let seasons: [SeasonInfo]
     }
 
     public func getVODInfo(account: Account, vodId: String) async throws -> VODDetailResponse? {
@@ -358,8 +359,19 @@ public final class XtreamCodesAPIService: Sendable {
         }
 
         struct SeriesInfoResponse: Decodable {
+            let seasons: [SeasonDTO]?
             let info: SeriesInfoDTO?
             let episodes: [String: [EpisodeDTO]]?
+        }
+
+        struct SeasonDTO: Decodable {
+            let season_number: Int?
+            let name: String?
+            let episode_count: Int?
+            let air_date: String?
+            let cover: String?
+            let cover_big: String?
+            let overview: String?
         }
 
         struct SeriesInfoDTO: Decodable {
@@ -390,7 +402,7 @@ public final class XtreamCodesAPIService: Sendable {
             let duration: DynamicString?
         }
 
-        let resp: SeriesInfoResponse = (try? await fetch(url)) ?? SeriesInfoResponse(info: nil, episodes: nil)
+        let resp: SeriesInfoResponse = (try? await fetch(url)) ?? SeriesInfoResponse(seasons: nil, info: nil, episodes: nil)
 
         var base = account.serverUrl.trimmingCharacters(in: .whitespacesAndNewlines)
         if !base.lowercased().hasPrefix("http://") && !base.lowercased().hasPrefix("https://") {
@@ -422,6 +434,18 @@ public final class XtreamCodesAPIService: Sendable {
         }
         let sortedEpisodes = result.sorted { $0.seasonNum == $1.seasonNum ? $0.episodeNum < $1.episodeNum : $0.seasonNum < $1.seasonNum }
 
+        let seasonInfos: [SeasonInfo] = (resp.seasons ?? []).compactMap { s in
+            guard let num = s.season_number else { return nil }
+            return SeasonInfo(
+                seasonNumber: num,
+                name: s.name,
+                episodeCount: s.episode_count,
+                airDate: s.air_date,
+                cover: s.cover_big ?? s.cover,
+                overview: s.overview
+            )
+        }
+
         return SeriesDetailResponse(
             cover: resp.info?.cover,
             backdropUrl: resp.info?.backdrop_path?.firstUrl,
@@ -435,7 +459,8 @@ public final class XtreamCodesAPIService: Sendable {
             episodes: sortedEpisodes,
             country: nil,
             age: nil,
-            mpaaRating: nil
+            mpaaRating: nil,
+            seasons: seasonInfos
         )
     }
 

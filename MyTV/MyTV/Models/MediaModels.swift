@@ -142,3 +142,29 @@ public struct Episode: Identifiable, Codable, Hashable {
         self.duration = duration
     }
 }
+
+public struct SeasonInfo: Identifiable, Codable, Hashable, Sendable {
+    public var id: Int { seasonNumber }
+    public let seasonNumber: Int
+    public let name: String?
+    public let episodeCount: Int?
+    public let airDate: String?
+    public let cover: String?
+    public let overview: String?
+
+    public init(
+        seasonNumber: Int,
+        name: String? = nil,
+        episodeCount: Int? = nil,
+        airDate: String? = nil,
+        cover: String? = nil,
+        overview: String? = nil
+    ) {
+        self.seasonNumber = seasonNumber
+        self.name = name
+        self.episodeCount = episodeCount
+        self.airDate = airDate
+        self.cover = cover
+        self.overview = overview
+    }
+}

@@ -15,6 +15,7 @@ public struct MediaDetailView: View {
 
     // Series specific state
     @State private var episodes: [Episode] = []
+    @State private var seasonInfos: [SeasonInfo] = []
     @State private var isLoadingDetails = false
     @State private var selectedSeason: Int = 1
 
@@ -31,11 +32,23 @@ public struct MediaDetailView: View {
     }
 
     private var seasons: [Int] {
-        Array(Set(episodes.map { $0.seasonNum })).sorted()
+        if !seasonInfos.isEmpty {
+            return seasonInfos.map { $0.seasonNumber }.sorted()
+        }
+        return Array(Set(episodes.map { $0.seasonNum })).sorted()
     }
 
     private var seasonEpisodes: [Episode] {
         episodes.filter { $0.seasonNum == selectedSeason }
+    }
+
+    private var currentPosterUrl: String? {
+        if currentItem.type == .series,
+           let sCover = seasonInfos.first(where: { $0.seasonNumber == selectedSeason })?.cover,
+           !sCover.isEmpty {
+            return sCover
+        }
+        return currentItem.streamIcon ?? currentItem.backdropUrl
     }
 
     private var relatedItems: [VODItem] {
@@ -196,9 +209,9 @@ public struct MediaDetailView: View {
     @ViewBuilder
     private var heroContent: some View {
         HStack(alignment: .bottom, spacing: 14) {
-            // Sol: Yüzen Dikey Afiş / Kapak Görseli
+            // Sol: Yüzen Dikey Afiş / Sezon Kapak Görseli
             MediaPosterView(
-                posterUrl: currentItem.streamIcon ?? currentItem.backdropUrl,
+                posterUrl: currentPosterUrl,
                 title: currentItem.name,
                 width: 102,
                 height: 152,
@@ -426,28 +439,54 @@ public struct MediaDetailView: View {
                 .font(.system(size: 16, weight: .bold, design: .rounded))
                 .padding(.horizontal)
 
-            // Seasons Picker Glass Pills
+            // Seasons Picker Glass Cards With Cover Art
             if !seasons.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(seasons, id: \.self) { s in
                             let isSelected = (selectedSeason == s)
+                            let sInfo = seasonInfos.first(where: { $0.seasonNumber == s })
                             Button {
                                 selectedSeason = s
                             } label: {
-                                Text("Sezon \(s)")
-                                    .font(.system(size: 12, weight: isSelected ? .bold : .medium))
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 7)
-                                    .background(
-                                        isSelected ? Color.accentColor : Color.secondary.opacity(0.12),
-                                        in: Capsule()
-                                    )
-                                    .overlay(
-                                        Capsule()
-                                            .strokeBorder(isSelected ? Color.white.opacity(0.3) : Color.white.opacity(0.1), lineWidth: 0.6)
-                                    )
-                                    .foregroundStyle(isSelected ? .white : .primary)
+                                HStack(spacing: 8) {
+                                    if let cover = sInfo?.cover, let coverUrl = URL.fromUserString(cover) {
+                                        CachedAsyncImage(url: coverUrl) { img in
+                                            img
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fill)
+                                                .frame(width: 22, height: 30)
+                                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                                        } placeholder: {
+                                            Color.white.opacity(0.08)
+                                                .frame(width: 22, height: 30)
+                                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                                        }
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(sInfo?.name ?? "Sezon \(s)")
+                                            .font(.system(size: 11.5, weight: isSelected ? .bold : .semibold))
+
+                                        let epCount = sInfo?.episodeCount ?? episodes.filter { $0.seasonNum == s }.count
+                                        if epCount > 0 {
+                                            Text("\(epCount) Bölüm")
+                                                .font(.system(size: 9.5))
+                                                .foregroundStyle(isSelected ? .white.opacity(0.85) : .secondary)
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(
+                                    isSelected ? Color.accentColor : Color.secondary.opacity(0.12),
+                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .strokeBorder(isSelected ? Color.white.opacity(0.3) : Color.white.opacity(0.1), lineWidth: 0.6)
+                                )
+                                .foregroundStyle(isSelected ? .white : .primary)
                             }
                             .buttonStyle(.plain)
                         }
@@ -563,6 +602,7 @@ public struct MediaDetailView: View {
         if currentItem.type == .series {
             if let details = try? await XtreamCodesAPIService.shared.getSeriesDetails(account: account, seriesId: currentItem.id) {
                 self.episodes = details.episodes
+                self.seasonInfos = details.seasons
                 self.cast = details.cast ?? self.cast
                 self.director = details.director ?? self.director
                 self.youtubeTrailer = details.youtubeTrailer ?? self.youtubeTrailer
