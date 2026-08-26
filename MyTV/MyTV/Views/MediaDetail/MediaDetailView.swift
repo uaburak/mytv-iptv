@@ -45,15 +45,16 @@ public struct MediaDetailView: View {
 
     public var body: some View {
         ZStack(alignment: .top) {
-            // 1. Sticky / Sabit Büyük Arka Plan Resmi (500pt Yükseklik)
+            // 1. Sticky Sabit Kapak Görseli
             stickyBackdropView
 
-            // 2. Kaydırılabilir İçerik
+            // 2. Kaydırılabilir İçerik & Beraberinde Kayan Karartma Gradyanı
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    // Logo, Başlık ve Poster Alanı (Görselin üzerinde konumlanır)
+                    // Logo, Başlık ve Poster Alanı
                     heroContent
-                        .padding(.top, 200)
+                        .padding(.top, 220)
+                        .padding(.bottom, 6)
 
                     // Oynat Butonu
                     actionButtons
@@ -98,6 +99,25 @@ public struct MediaDetailView: View {
                     }
                 }
                 .padding(.bottom, 48)
+                .background(
+                    // Scroll ile beraber yukarı kayan dinamik karartma katmanı
+                    VStack(spacing: 0) {
+                        LinearGradient(
+                            stops: [
+                                .init(color: .black.opacity(0.0), location: 0.0),
+                                .init(color: .black.opacity(0.35), location: 0.35),
+                                .init(color: .black.opacity(0.85), location: 0.72),
+                                .init(color: .black, location: 1.0)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: 380)
+
+                        Color.black
+                    }
+                    .ignoresSafeArea(edges: .bottom)
+                )
             }
             .scrollEdgeEffectStyle(.soft, for: .all)
         }
@@ -121,11 +141,11 @@ public struct MediaDetailView: View {
         }
     }
 
-    // MARK: - Sticky Backdrop View (Sabit & Genişletilmiş Kapak)
+    // MARK: - Sticky Backdrop View (Sabit Kapak)
 
     @ViewBuilder
     private var stickyBackdropView: some View {
-        ZStack(alignment: .bottom) {
+        ZStack(alignment: .top) {
             Color.black
 
             if let bgUrl = URL.fromUserString(currentItem.backdropUrl ?? currentItem.streamIcon) {
@@ -133,27 +153,22 @@ public struct MediaDetailView: View {
                     image
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(maxWidth: .infinity, maxHeight: 500)
+                        .frame(maxWidth: .infinity, maxHeight: 520)
                         .clipped()
                 } placeholder: {
                     Color.white.opacity(0.04)
                 }
             }
 
-            // Gradyan Karartma Maskesi
+            // Üst kısımda geri tuşu ve durum çubuğu için çok hafif üst vinyet
             LinearGradient(
-                stops: [
-                    .init(color: .black.opacity(0.0), location: 0.0),
-                    .init(color: .black.opacity(0.15), location: 0.35),
-                    .init(color: .black.opacity(0.7), location: 0.7),
-                    .init(color: .black.opacity(0.95), location: 0.92),
-                    .init(color: .black, location: 1.0)
-                ],
+                colors: [Color.black.opacity(0.4), Color.clear],
                 startPoint: .top,
                 endPoint: .bottom
             )
+            .frame(height: 100)
         }
-        .frame(height: 500)
+        .frame(height: 520)
         .ignoresSafeArea(edges: .top)
     }
 
@@ -171,7 +186,7 @@ public struct MediaDetailView: View {
                 cornerRadius: 12,
                 isSeries: currentItem.type == .series
             )
-            .shadow(color: .black.opacity(0.8), radius: 12, x: 0, y: 6)
+            .shadow(color: .black.opacity(0.85), radius: 12, x: 0, y: 6)
 
             // Logo, Başlık & Meta Bilgiler
             VStack(alignment: .leading, spacing: 6) {
