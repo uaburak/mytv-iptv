@@ -99,6 +99,24 @@ public struct MediaDetailView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    storage.toggleFavorite(id: currentItem.id)
+                } label: {
+                    Image(systemName: isFav ? "heart.fill" : "heart")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(isFav ? .red : .white)
+                        .padding(8)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(
+                            Circle()
+                                .strokeBorder(Color.white.opacity(0.2), lineWidth: 0.8)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
         .task {
             await loadRichDetails()
         }
@@ -156,10 +174,23 @@ public struct MediaDetailView: View {
                 )
                 .shadow(color: .black.opacity(0.7), radius: 10, x: 0, y: 5)
 
-                // Title & Chips
+                // Logo, Title & Chips
                 VStack(alignment: .leading, spacing: 6) {
+                    // İçerik Logosu
+                    if let iconUrl = URL.fromUserString(currentItem.streamIcon) {
+                        CachedAsyncImage(url: iconUrl) { logo in
+                            logo
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxHeight: 36, alignment: .leading)
+                                .shadow(color: .black.opacity(0.6), radius: 4)
+                        } placeholder: {
+                            EmptyView()
+                        }
+                    }
+
                     Text(currentItem.name)
-                        .font(.system(size: 19, weight: .bold))
+                        .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
                         .shadow(radius: 4)
@@ -221,61 +252,34 @@ public struct MediaDetailView: View {
 
     @ViewBuilder
     private var actionButtons: some View {
-        HStack(spacing: 12) {
-            // Glass Play Button
-            Button {
-                if currentItem.type == .series {
-                    if let firstEp = seasonEpisodes.first ?? episodes.first {
-                        playEpisode(firstEp)
-                    }
-                } else {
-                    playItem(currentItem)
+        Button {
+            if currentItem.type == .series {
+                if let firstEp = seasonEpisodes.first ?? episodes.first {
+                    playEpisode(firstEp)
                 }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 14, weight: .bold))
-                    Text(currentItem.type == .series ? "1. Bölümü Oynat" : "Hemen İzle")
-                        .font(.system(size: 14, weight: .bold))
-                }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.85))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.25), lineWidth: 0.8)
-                )
+            } else {
+                playItem(currentItem)
             }
-            .buttonStyle(.plain)
-
-            // Glass Favorite Button
-            Button {
-                storage.toggleFavorite(id: currentItem.id)
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: isFav ? "heart.fill" : "heart")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(isFav ? .red : .primary)
-                    Text(isFav ? "Favoride" : "Favori")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.8)
-                )
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 14, weight: .bold))
+                Text(currentItem.type == .series ? "1. Bölümü Oynat" : "Hemen İzle")
+                    .font(.system(size: 14, weight: .bold))
             }
-            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 13)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.85))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.25), lineWidth: 0.8)
+            )
         }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Cast & Crew Section
