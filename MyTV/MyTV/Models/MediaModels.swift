@@ -62,6 +62,9 @@ public struct VODItem: Identifiable, Codable, Hashable {
     public let type: ContentType
     public let containerExtension: String?
     public let genre: String?
+    public let cast: String?
+    public let director: String?
+    public let youtubeTrailer: String?
 
     public init(
         id: String,
@@ -76,7 +79,10 @@ public struct VODItem: Identifiable, Codable, Hashable {
         categoryId: String,
         type: ContentType,
         containerExtension: String? = nil,
-        genre: String? = nil
+        genre: String? = nil,
+        cast: String? = nil,
+        director: String? = nil,
+        youtubeTrailer: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -91,6 +97,9 @@ public struct VODItem: Identifiable, Codable, Hashable {
         self.type = type
         self.containerExtension = containerExtension
         self.genre = genre
+        self.cast = cast
+        self.director = director
+        self.youtubeTrailer = youtubeTrailer
     }
 }
 

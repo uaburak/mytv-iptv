@@ -5,7 +5,17 @@ public struct HomeView: View {
     @ObservedObject private var storage = StorageManager.shared
     @ObservedObject private var playback = PlaybackManager.shared
 
+    public enum HomeNavigationTarget: String, Hashable, Identifiable {
+        case liveTV = "Canlı TV"
+        case movies = "Filmler"
+        case series = "Diziler"
+
+        public var id: String { rawValue }
+    }
+
+    @State private var navigationTarget: HomeNavigationTarget?
     @State private var selectedMediaForDetail: VODItem?
+    @State private var selectedCategoryForGrid: MediaCategory?
 
     public init() {}
 
@@ -38,24 +48,25 @@ public struct HomeView: View {
                     appleTVDashboardView
                 }
             }
-            .navigationTitle("Ana Sayfa")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        appState.isAddAccountPresented = true
-                    } label: {
-                        Label("Liste Ekle", systemImage: "plus.circle")
-                    }
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $appState.isAddAccountPresented) {
                 AddAccountView()
             }
             .navigationDestination(item: $selectedMediaForDetail) { item in
                 MediaDetailView(item: item)
+            }
+            .navigationDestination(item: $selectedCategoryForGrid) { cat in
+                CategoryMediaListView(category: cat)
+            }
+            .navigationDestination(item: $navigationTarget) { target in
+                switch target {
+                case .liveTV:
+                    LiveTVView()
+                case .movies:
+                    MoviesView()
+                case .series:
+                    SeriesView()
+                }
             }
         }
     }
@@ -80,49 +91,30 @@ public struct HomeView: View {
                     .padding(.top, 8)
                 }
 
-                // 2. Canlı TV Öne Çıkanlar (Horizontal Live Channels Shelf)
-                if !featuredChannels.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("Canlı TV")
-                                .font(.system(size: 19, weight: .bold, design: .rounded))
-                            Spacer()
-                            Button {
-                                appState.selectedTab = 1
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Text("Tümü")
-                                        .font(.system(size: 13, weight: .medium))
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 10, weight: .bold))
-                                }
-                                .foregroundStyle(.tint)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.horizontal)
+                // 2. Hub Quick Access Cards (Canlı TV, Filmler, Diziler)
+                quickNavigationHub
 
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            LazyHStack(spacing: 12) {
-                                ForEach(featuredChannels) { ch in
-                                    ChannelCardView(channel: ch) {
-                                        playChannel(ch)
-                                    }
-                                }
-                            }
-                            .padding(.horizontal)
+                // 3. Canlı TV Öne Çıkanlar (Horizontal Live Channels Shelf)
+                if !featuredChannels.isEmpty {
+                    MediaShelfRow(
+                        title: "Canlı TV",
+                        channels: featuredChannels,
+                        onSeeAll: {
+                            navigationTarget = .liveTV
+                        },
+                        onPlay: { ch in
+                            playChannel(ch)
                         }
-                    }
+                    )
                 }
 
-                // 3. Trend Filmler (Trending Movies Shelf)
+                // 4. Trend Filmler (Trending Movies Shelf)
                 if !trendingMovies.isEmpty {
                     MediaShelfRow(
                         title: "Trend Filmler",
-                        subtitle: "En çok izlenen ve popüler filmler",
                         items: trendingMovies,
                         onSeeAll: {
-                            appState.selectedTab = 2
+                            navigationTarget = .movies
                         },
                         onPlay: { movie in
                             selectedMediaForDetail = movie
@@ -130,14 +122,13 @@ public struct HomeView: View {
                     )
                 }
 
-                // 4. Popüler Diziler (Popular Series Shelf)
+                // 5. Popüler Diziler (Popular Series Shelf)
                 if !popularSeries.isEmpty {
                     MediaShelfRow(
                         title: "Popüler Diziler",
-                        subtitle: "Tüm sezon ve bölümler",
                         items: popularSeries,
                         onSeeAll: {
-                            appState.selectedTab = 3
+                            navigationTarget = .series
                         },
                         onPlay: { series in
                             selectedMediaForDetail = series
@@ -145,16 +136,15 @@ public struct HomeView: View {
                     )
                 }
 
-                // 5. Film Kategorileri Rafları
+                // 6. Film Kategorileri Rafları
                 ForEach(appState.vodCategories.filter { cat in appState.movies.contains { $0.categoryId == cat.id } }.prefix(8)) { cat in
                     let catItems = appState.movies.filter { $0.categoryId == cat.id }
                     if !catItems.isEmpty {
                         MediaShelfRow(
                             title: cat.name,
-                            subtitle: "\(catItems.count) Film",
                             items: Array(catItems.prefix(15)),
                             onSeeAll: {
-                                appState.selectedTab = 2
+                                selectedCategoryForGrid = cat
                             },
                             onPlay: { movie in
                                 selectedMediaForDetail = movie
@@ -163,16 +153,15 @@ public struct HomeView: View {
                     }
                 }
 
-                // 6. Dizi Kategorileri Rafları
+                // 7. Dizi Kategorileri Rafları
                 ForEach(appState.seriesCategories.filter { cat in appState.series.contains { $0.categoryId == cat.id } }.prefix(6)) { cat in
                     let catItems = appState.series.filter { $0.categoryId == cat.id }
                     if !catItems.isEmpty {
                         MediaShelfRow(
                             title: cat.name,
-                            subtitle: "\(catItems.count) Dizi",
                             items: Array(catItems.prefix(15)),
                             onSeeAll: {
-                                appState.selectedTab = 3
+                                selectedCategoryForGrid = cat
                             },
                             onPlay: { series in
                                 selectedMediaForDetail = series
@@ -183,9 +172,97 @@ public struct HomeView: View {
             }
             .padding(.bottom, 36)
         }
+        .scrollEdgeEffectStyle(.soft, for: .all)
         .refreshable {
             await appState.syncActiveAccount()
         }
+    }
+
+    // MARK: - Quick Navigation Hub
+
+    @ViewBuilder
+    private var quickNavigationHub: some View {
+        HStack(spacing: 12) {
+            // Canlı TV Hub Button
+            hubButton(
+                title: "Canlı TV",
+                icon: "tv",
+                count: "\(appState.channels.count)",
+                gradient: [Color.blue.opacity(0.35), Color.purple.opacity(0.2)]
+            ) {
+                navigationTarget = .liveTV
+            }
+
+            // Filmler Hub Button
+            hubButton(
+                title: "Filmler",
+                icon: "film",
+                count: "\(appState.movies.count)",
+                gradient: [Color.red.opacity(0.35), Color.orange.opacity(0.2)]
+            ) {
+                navigationTarget = .movies
+            }
+
+            // Diziler Hub Button
+            hubButton(
+                title: "Diziler",
+                icon: "play.tv",
+                count: "\(appState.series.count)",
+                gradient: [Color.indigo.opacity(0.35), Color.cyan.opacity(0.2)]
+            ) {
+                navigationTarget = .series
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    @ViewBuilder
+    private func hubButton(
+        title: String,
+        icon: String,
+        count: String,
+        gradient: [Color],
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: icon)
+                        .font(.system(size: 18, weight: .bold))
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.primary)
+
+                    Text(count.isEmpty || count == "0" ? "Keşfet" : "\(count) İçerik")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: gradient,
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Actions

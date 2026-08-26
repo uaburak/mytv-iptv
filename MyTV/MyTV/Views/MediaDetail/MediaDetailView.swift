@@ -1,23 +1,33 @@
 import SwiftUI
 
 public struct MediaDetailView: View {
-    let item: VODItem
+    let initialItem: VODItem
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var storage = StorageManager.shared
     @ObservedObject private var playback = PlaybackManager.shared
 
+    // Detailed metadata loaded on appear
+    @State private var currentItem: VODItem
+    @State private var cast: String?
+    @State private var director: String?
+    @State private var youtubeTrailer: String?
+
     // Series specific state
     @State private var episodes: [Episode] = []
-    @State private var isLoadingEpisodes = false
+    @State private var isLoadingDetails = false
     @State private var selectedSeason: Int = 1
 
     public init(item: VODItem) {
-        self.item = item
+        self.initialItem = item
+        self._currentItem = State(initialValue: item)
+        self._cast = State(initialValue: item.cast)
+        self._director = State(initialValue: item.director)
+        self._youtubeTrailer = State(initialValue: item.youtubeTrailer)
     }
 
     private var isFav: Bool {
-        storage.isFavorite(id: item.id)
+        storage.isFavorite(id: currentItem.id)
     }
 
     private var seasons: [Int] {
@@ -29,14 +39,14 @@ public struct MediaDetailView: View {
     }
 
     private var relatedItems: [VODItem] {
-        let pool = item.type == .movie ? appState.movies : appState.series
-        return pool.filter { $0.categoryId == item.categoryId && $0.id != item.id }.prefix(12).map { $0 }
+        let pool = currentItem.type == .movie ? appState.movies : appState.series
+        return pool.filter { $0.categoryId == currentItem.categoryId && $0.id != currentItem.id }.prefix(12).map { $0 }
     }
 
     public var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                // 1. Cinematic Hero Header
+            VStack(alignment: .leading, spacing: 22) {
+                // 1. Cinematic Hero Header with Backdrop & Artwork
                 heroHeader
 
                 // 2. Action Buttons (Play & Favorite)
@@ -44,30 +54,36 @@ public struct MediaDetailView: View {
                     .padding(.horizontal)
 
                 // 3. Storyline / Overview
-                if let plot = item.overview, !plot.isEmpty {
+                if let plot = currentItem.overview, !plot.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Konu Özeti")
-                            .font(.headline)
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
                             .foregroundStyle(.primary)
 
                         Text(plot)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .lineSpacing(4)
+                            .lineSpacing(5)
                     }
                     .padding(.horizontal)
                 }
 
-                // 4. Series Seasons & Episodes (Only for Series)
-                if item.type == .series {
+                // 4. Cast & Crew Details
+                if (director != nil && !director!.isEmpty) || (cast != nil && !cast!.isEmpty) {
+                    castAndCrewSection
+                        .padding(.horizontal)
+                }
+
+                // 5. Series Seasons & Episodes (Only for Series)
+                if currentItem.type == .series {
                     seriesEpisodesSection
                 }
 
-                // 5. Related Content Shelf
+                // 6. Related Content Shelf
                 if !relatedItems.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Benzer İçerikler")
-                            .font(.headline)
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
                             .padding(.horizontal)
 
                         ScrollView(.horizontal, showsIndicators: false) {
@@ -84,105 +100,86 @@ public struct MediaDetailView: View {
                     .padding(.top, 8)
                 }
             }
-            .padding(.bottom, 40)
+            .padding(.bottom, 48)
         }
-        .navigationTitle(item.name)
+        .navigationTitle(currentItem.name)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .task {
-            if item.type == .series {
-                await loadEpisodes()
-            }
+            await loadRichDetails()
         }
     }
 
-    // MARK: - Hero Header
+    // MARK: - Cinematic Hero Header
 
     @ViewBuilder
     private var heroHeader: some View {
         ZStack(alignment: .bottomLeading) {
-            // Backdrop Image
+            // High Resolution Backdrop Banner
             GeometryReader { geo in
                 ZStack {
                     Color.black
 
-                    if let bg = item.backdropUrl ?? item.streamIcon, let url = URL(string: bg) {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                                    .frame(width: geo.size.width, height: 260)
-                                    .clipped()
-                            default:
-                                Color.secondary.opacity(0.15)
-                            }
+                    if let bgUrl = URL.fromUserString(currentItem.backdropUrl ?? currentItem.streamIcon) {
+                        CachedAsyncImage(url: bgUrl) { image in
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: geo.size.width, height: 290)
+                                .clipped()
+                        } placeholder: {
+                            Color.white.opacity(0.04)
                         }
                     }
                 }
             }
-            .frame(height: 260)
+            .frame(height: 290)
 
-            // Cinematic Gradient
+            // Multi-stop Cinematic Gradient Mask
             LinearGradient(
                 stops: [
-                    .init(color: .clear, location: 0.0),
-                    .init(color: .black.opacity(0.4), location: 0.4),
-                    .init(color: .black.opacity(0.95), location: 1.0)
+                    .init(color: .black.opacity(0.1), location: 0.0),
+                    .init(color: .black.opacity(0.45), location: 0.5),
+                    .init(color: .black.opacity(0.95), location: 0.9),
+                    .init(color: .black, location: 1.0)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: 260)
+            .frame(height: 290)
 
-            // Poster & Title Info Overlay
-            HStack(alignment: .bottom, spacing: 16) {
-                // Floating Poster
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.secondary.opacity(0.2))
-
-                    if let icon = item.streamIcon ?? item.backdropUrl, let url = URL(string: icon) {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let img):
-                                img.resizable().aspectRatio(contentMode: .fill)
-                            default:
-                                Image(systemName: item.type == .series ? "play.tv" : "film")
-                                    .font(.title)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
-                }
-                .frame(width: 95, height: 142)
-                .shadow(color: .black.opacity(0.6), radius: 10, x: 0, y: 5)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(Color.white.opacity(0.2), lineWidth: 0.5)
+            // Floating Artwork & Metadata
+            HStack(alignment: .bottom, spacing: 18) {
+                // High Quality Floating Poster Card
+                MediaPosterView(
+                    posterUrl: currentItem.streamIcon ?? currentItem.backdropUrl,
+                    title: currentItem.name,
+                    width: 108,
+                    height: 162,
+                    cornerRadius: 14,
+                    isSeries: currentItem.type == .series
                 )
+                .shadow(color: .black.opacity(0.7), radius: 12, x: 0, y: 6)
 
-                // Title & Badges
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(item.name)
-                        .font(.title3.bold())
+                // Title & Chips
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(currentItem.name)
+                        .font(.system(size: 20, weight: .bold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
                         .shadow(radius: 4)
 
-                    // Meta Chips
-                    HStack(spacing: 8) {
-                        Text(item.type.rawValue)
+                    // Meta Chips Bar
+                    HStack(spacing: 6) {
+                        Text(currentItem.type.rawValue)
                             .font(.system(size: 11, weight: .bold))
                             .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(.ultraThinMaterial, in: Capsule())
+                            .padding(.vertical, 3.5)
+                            .background(Color.white.opacity(0.18), in: Capsule())
                             .foregroundStyle(.white)
 
-                        if let rating = item.rating, let score = Double(rating), score > 0 {
+                        if let rating = currentItem.rating, let score = Double(rating), score > 0 {
                             HStack(spacing: 3) {
                                 Image(systemName: "star.fill")
                                     .font(.system(size: 9))
@@ -191,34 +188,38 @@ public struct MediaDetailView: View {
                                     .font(.system(size: 11, weight: .bold))
                                     .foregroundStyle(.white)
                             }
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(.ultraThinMaterial, in: Capsule())
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3.5)
+                            .background(Color.white.opacity(0.18), in: Capsule())
                         }
 
-                        if let release = item.releaseDate, !release.isEmpty {
+                        if let release = currentItem.releaseDate, !release.isEmpty {
                             Text(release.prefix(4))
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.8))
+                                .font(.system(size: 11, weight: .semibold))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3.5)
+                                .background(Color.white.opacity(0.12), in: Capsule())
+                                .foregroundStyle(.white.opacity(0.85))
                         }
 
-                        if let dur = item.duration, !dur.isEmpty && dur != "0" {
-                            Text("\(dur) dk")
+                        if let dur = currentItem.duration, !dur.isEmpty && dur != "0" {
+                            let durDisplay = dur.contains(":") ? dur : "\(dur) dk"
+                            Text(durDisplay)
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(.white.opacity(0.8))
                         }
                     }
 
-                    if let genre = item.genre, !genre.isEmpty {
+                    if let genre = currentItem.genre, !genre.isEmpty {
                         Text(genre)
-                            .font(.caption)
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(.white.opacity(0.75))
                             .lineLimit(1)
                     }
                 }
             }
-            .padding(.horizontal)
-            .padding(.bottom, 12)
+            .padding(.horizontal, 18)
+            .padding(.bottom, 14)
         }
     }
 
@@ -229,43 +230,85 @@ public struct MediaDetailView: View {
         HStack(spacing: 12) {
             // Play Button
             Button {
-                if item.type == .series {
+                if currentItem.type == .series {
                     if let firstEp = seasonEpisodes.first ?? episodes.first {
                         playEpisode(firstEp)
                     }
                 } else {
-                    playItem(item)
+                    playItem(currentItem)
                 }
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "play.fill")
                         .font(.headline)
-                    Text(item.type == .series ? "1. Bölümü İzle" : "Hemen İzle")
-                        .font(.headline)
+                    Text(currentItem.type == .series ? "1. Bölümü Oynat" : "Hemen İzle")
+                        .font(.system(size: 15, weight: .bold))
                 }
                 .foregroundStyle(.black)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(.white, in: RoundedRectangle(cornerRadius: 12))
+                .padding(.vertical, 13)
+                .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
 
             // Favorite Button
             Button {
-                storage.toggleFavorite(id: item.id)
+                storage.toggleFavorite(id: currentItem.id)
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: isFav ? "heart.fill" : "heart")
-                        .font(.headline)
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(isFav ? .red : .primary)
                     Text(isFav ? "Favoride" : "Favori")
-                        .font(.subheadline.bold())
+                        .font(.system(size: 14, weight: .semibold))
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(Color.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 18)
+                .padding(.vertical, 13)
+                .background(Color.secondary.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - Cast & Crew Section
+
+    @ViewBuilder
+    private var castAndCrewSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Ekip & Oyuncular")
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                if let director, !director.isEmpty {
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("Yönetmen:")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 80, alignment: .leading)
+
+                        Text(director)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.primary)
+                    }
+                }
+
+                if let cast, !cast.isEmpty {
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("Oyuncular:")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 80, alignment: .leading)
+
+                        Text(cast)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.primary)
+                    }
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
 
@@ -278,7 +321,7 @@ public struct MediaDetailView: View {
                 .padding(.horizontal)
 
             Text("Sezonlar ve Bölümler")
-                .font(.headline)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
                 .padding(.horizontal)
 
             // Seasons Picker Pills
@@ -290,9 +333,9 @@ public struct MediaDetailView: View {
                                 selectedSeason = s
                             } label: {
                                 Text("Sezon \(s)")
-                                    .font(.subheadline.weight(selectedSeason == s ? .bold : .regular))
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 7)
+                                    .font(.system(size: 13, weight: selectedSeason == s ? .bold : .medium))
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 8)
                                     .background(selectedSeason == s ? Color.accentColor : Color.secondary.opacity(0.12), in: Capsule())
                                     .foregroundStyle(selectedSeason == s ? .white : .primary)
                             }
@@ -304,7 +347,7 @@ public struct MediaDetailView: View {
             }
 
             // Episode Cards List
-            if isLoadingEpisodes {
+            if isLoadingDetails {
                 HStack {
                     Spacer()
                     ProgressView("Bölümler yükleniyor...")
@@ -322,38 +365,58 @@ public struct MediaDetailView: View {
                         Button {
                             playEpisode(ep)
                         } label: {
-                            HStack(spacing: 12) {
-                                // Episode Thumbnail / Icon
+                            HStack(spacing: 14) {
+                                // Episode Thumbnail / Artwork Preview
                                 ZStack {
-                                    RoundedRectangle(cornerRadius: 8)
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                                         .fill(Color.secondary.opacity(0.15))
-                                        .frame(width: 70, height: 48)
 
-                                    if let cover = ep.coverUrl, let url = URL(string: cover) {
-                                        AsyncImage(url: url) { img in
-                                            img.resizable().aspectRatio(contentMode: .fill)
+                                    if let cover = ep.coverUrl, let url = URL.fromUserString(cover) {
+                                        CachedAsyncImage(url: url) { img in
+                                            img.resizable().aspectRatio(16/9, contentMode: .fill)
                                         } placeholder: {
                                             Image(systemName: "play.tv")
                                                 .foregroundStyle(.secondary)
                                         }
-                                        .frame(width: 70, height: 48)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
                                     } else {
                                         Image(systemName: "play.tv")
                                             .foregroundStyle(.secondary)
                                     }
+
+                                    // Mini play overlay
+                                    Circle()
+                                        .fill(.black.opacity(0.5))
+                                        .frame(width: 24, height: 24)
+                                        .overlay(
+                                            Image(systemName: "play.fill")
+                                                .font(.system(size: 10))
+                                                .foregroundStyle(.white)
+                                        )
                                 }
+                                .frame(width: 80, height: 48)
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+                                )
 
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text("\(ep.episodeNum). \(ep.title)")
-                                        .font(.subheadline.weight(.semibold))
+                                        .font(.system(size: 14, weight: .semibold))
                                         .lineLimit(1)
                                         .foregroundStyle(.primary)
 
                                     if let dur = ep.duration, !dur.isEmpty {
                                         Text("\(dur) dk")
-                                            .font(.caption2)
+                                            .font(.system(size: 11))
                                             .foregroundStyle(.secondary)
+                                    }
+
+                                    if let plot = ep.overview, !plot.isEmpty {
+                                        Text(plot)
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(.secondary.opacity(0.8))
+                                            .lineLimit(1)
                                     }
                                 }
 
@@ -364,7 +427,7 @@ public struct MediaDetailView: View {
                                     .foregroundStyle(.tint)
                             }
                             .padding(10)
-                            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                            .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
                         .buttonStyle(.plain)
                     }
@@ -374,17 +437,71 @@ public struct MediaDetailView: View {
         }
     }
 
-    // MARK: - Actions
+    // MARK: - Actions & Loading
 
-    private func loadEpisodes() async {
+    private func loadRichDetails() async {
         guard let account = storage.activeAccount, account.type == .xtream else { return }
-        isLoadingEpisodes = true
-        let list = (try? await XtreamCodesAPIService.shared.getSeriesInfo(account: account, seriesId: item.id)) ?? []
-        self.episodes = list
-        if let firstSeason = seasons.first {
-            self.selectedSeason = firstSeason
+        isLoadingDetails = true
+
+        if currentItem.type == .series {
+            if let details = try? await XtreamCodesAPIService.shared.getSeriesDetails(account: account, seriesId: currentItem.id) {
+                self.episodes = details.episodes
+                self.cast = details.cast ?? self.cast
+                self.director = details.director ?? self.director
+                self.youtubeTrailer = details.youtubeTrailer ?? self.youtubeTrailer
+
+                // Update backdrop / cover if richer image is available
+                self.currentItem = VODItem(
+                    id: currentItem.id,
+                    name: currentItem.name,
+                    streamIcon: details.cover ?? currentItem.streamIcon,
+                    backdropUrl: details.backdropUrl ?? currentItem.backdropUrl,
+                    rating: details.rating ?? currentItem.rating,
+                    releaseDate: details.releaseDate ?? currentItem.releaseDate,
+                    duration: currentItem.duration,
+                    overview: details.plot ?? currentItem.overview,
+                    streamUrl: currentItem.streamUrl,
+                    categoryId: currentItem.categoryId,
+                    type: currentItem.type,
+                    containerExtension: currentItem.containerExtension,
+                    genre: details.genre ?? currentItem.genre,
+                    cast: details.cast,
+                    director: details.director,
+                    youtubeTrailer: details.youtubeTrailer
+                )
+
+                if let firstSeason = seasons.first {
+                    self.selectedSeason = firstSeason
+                }
+            }
+        } else {
+            if let details = try? await XtreamCodesAPIService.shared.getVODInfo(account: account, vodId: currentItem.id) {
+                self.cast = details.cast ?? self.cast
+                self.director = details.director ?? self.director
+                self.youtubeTrailer = details.youtubeTrailer ?? self.youtubeTrailer
+
+                self.currentItem = VODItem(
+                    id: currentItem.id,
+                    name: currentItem.name,
+                    streamIcon: details.movieImage ?? currentItem.streamIcon,
+                    backdropUrl: details.backdropUrl ?? currentItem.backdropUrl,
+                    rating: details.rating ?? currentItem.rating,
+                    releaseDate: details.releaseDate ?? currentItem.releaseDate,
+                    duration: details.duration ?? currentItem.duration,
+                    overview: details.plot ?? currentItem.overview,
+                    streamUrl: currentItem.streamUrl,
+                    categoryId: currentItem.categoryId,
+                    type: currentItem.type,
+                    containerExtension: currentItem.containerExtension,
+                    genre: details.genre ?? currentItem.genre,
+                    cast: details.cast,
+                    director: details.director,
+                    youtubeTrailer: details.youtubeTrailer
+                )
+            }
         }
-        isLoadingEpisodes = false
+
+        isLoadingDetails = false
     }
 
     private func playItem(_ vod: VODItem) {
@@ -392,14 +509,15 @@ public struct MediaDetailView: View {
             mediaId: vod.id,
             title: vod.name,
             subtitle: vod.genre ?? (vod.type == .movie ? "Film" : "Dizi"),
-            posterUrl: vod.streamIcon,
+            posterUrl: vod.streamIcon ?? vod.backdropUrl,
             streamUrl: vod.streamUrl,
             contentType: vod.type,
             rating: vod.rating,
             releaseDate: vod.releaseDate,
             duration: vod.duration,
             overview: vod.overview,
-            genre: vod.genre
+            genre: vod.genre,
+            director: director
         )
         playback.play(media: media)
         dismiss()
@@ -408,17 +526,18 @@ public struct MediaDetailView: View {
     private func playEpisode(_ episode: Episode) {
         let media = PlayableMedia(
             mediaId: episode.id,
-            title: item.name,
+            title: currentItem.name,
             subtitle: "S\(episode.seasonNum):E\(episode.episodeNum) • \(episode.title)",
-            posterUrl: item.streamIcon,
+            posterUrl: episode.coverUrl ?? currentItem.streamIcon,
             streamUrl: episode.streamUrl,
             contentType: .series,
-            rating: item.rating,
-            releaseDate: item.releaseDate,
-            duration: item.duration,
-            overview: item.overview,
-            genre: item.genre,
-            seriesId: item.id,
+            rating: currentItem.rating,
+            releaseDate: currentItem.releaseDate,
+            duration: episode.duration ?? currentItem.duration,
+            overview: episode.overview ?? currentItem.overview,
+            genre: currentItem.genre,
+            director: director,
+            seriesId: currentItem.id,
             episodeNum: episode.episodeNum,
             seasonNum: episode.seasonNum
         )

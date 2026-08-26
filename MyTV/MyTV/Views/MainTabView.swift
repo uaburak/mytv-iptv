@@ -3,42 +3,34 @@ import SwiftUI
 public struct MainTabView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var playback = PlaybackManager.shared
+    @State private var searchText = ""
 
     public init() {}
 
     public var body: some View {
         ZStack {
-            TabView(selection: $appState.selectedTab) {
-                HomeView()
-                    .tabItem {
-                        Label("Ana Sayfa", systemImage: "house")
-                    }
-                    .tag(0)
+            TabView {
+                Tab("Ana Sayfa", systemImage: "house") {
+                    HomeView()
+                }
 
-                LiveTVView()
-                    .tabItem {
-                        Label("Canlı", systemImage: "tv")
-                    }
-                    .tag(1)
+                Tab("Favoriler", systemImage: "heart") {
+                    FavoritesView()
+                }
 
-                MoviesView()
-                    .tabItem {
-                        Label("Filmler", systemImage: "film")
-                    }
-                    .tag(2)
+                Tab("Ayarlar", systemImage: "gearshape") {
+                    SettingsView()
+                }
 
-                SeriesView()
-                    .tabItem {
-                        Label("Diziler", systemImage: "play.tv")
+                Tab(role: .search) {
+                    NavigationStack {
+                        SearchView(searchText: $searchText)
                     }
-                    .tag(3)
-
-                SettingsView()
-                    .tabItem {
-                        Label("Ayarlar", systemImage: "gearshape")
-                    }
-                    .tag(4)
+                }
             }
+            .searchable(text: $searchText, prompt: "Kanal, Film veya Dizi Ara...")
+            .tabViewSearchActivation(.searchTabSelection)
+            .tabBarMinimizeBehavior(.onScrollDown)
 
             if appState.isSyncing && !appState.isAddAccountPresented && appState.channels.isEmpty {
                 SyncProgressOverlayView()

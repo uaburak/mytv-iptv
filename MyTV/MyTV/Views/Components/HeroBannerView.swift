@@ -39,18 +39,15 @@ public struct HeroBannerView: View {
                 ZStack {
                     Color.black
 
-                    if let bg = item.backdropUrl ?? item.streamIcon, let url = URL(string: bg) {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                                    .frame(width: geo.size.width, height: geo.size.height)
-                                    .clipped()
-                            default:
-                                Color.gray.opacity(0.2)
-                            }
+                    if let url = URL.fromUserString(item.backdropUrl ?? item.streamIcon) {
+                        CachedAsyncImage(url: url) { image in
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .clipped()
+                        } placeholder: {
+                            Color.gray.opacity(0.2)
                         }
                     }
                 }

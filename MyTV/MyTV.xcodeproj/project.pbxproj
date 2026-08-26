@@ -124,21 +124,30 @@
 		000000000000000150000000 /* Fix Shallow Framework Bundles */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
 			name = "Fix Shallow Framework Bundles";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ \"$PLATFORM_NAME\" = \"macosx\" ]; then\n    FRAMEWORKS_DIR=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}\"\n    if [ -d \"$FRAMEWORKS_DIR\" ]; then\n        for framework in \"$FRAMEWORKS_DIR\"/*.framework; do\n            if [ -d \"$framework\" ] && [ -f \"$framework/Info.plist\" ] && [ ! -d \"$framework/Versions\" ]; then\n                name=$(basename \"$framework\" .framework)\n                mkdir -p \"$framework/Versions/A/Resources\"\n                mv \"$framework/Info.plist\" \"$framework/Versions/A/Resources/\"\n                if [ -f \"$framework/$name\" ]; then\n                    mv \"$framework/$name\" \"$framework/Versions/A/\"\n                fi\n                (cd \"$framework/Versions\" && ln -sfn A Current)\n                (cd \"$framework\" && ln -sfn Versions/Current/$name \"$name\")\n                (cd \"$framework\" && ln -sfn Versions/Current/Resources Resources)\n                codesign --force --sign - --preserve-metadata=identifier,entitlements,flags \"$framework\" || true\n            fi\n        done\n    fi\nfi\n";
+			shellScript = (
+				"if [ \"$PLATFORM_NAME\" = \"macosx\" ]; then",
+				"    FRAMEWORKS_DIR=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}\"",
+				"    if [ -d \"$FRAMEWORKS_DIR\" ]; then",
+				"        for framework in \"$FRAMEWORKS_DIR\"/*.framework; do",
+				"            if [ -d \"$framework\" ] && [ -f \"$framework/Info.plist\" ] && [ ! -d \"$framework/Versions\" ]; then",
+				"                name=$(basename \"$framework\" .framework)",
+				"                mkdir -p \"$framework/Versions/A/Resources\"",
+				"                mv \"$framework/Info.plist\" \"$framework/Versions/A/Resources/\"",
+				"                if [ -f \"$framework/$name\" ]; then",
+				"                    mv \"$framework/$name\" \"$framework/Versions/A/\"",
+				"                fi",
+				"                (cd \"$framework/Versions\" && ln -sfn A Current)",
+				"                (cd \"$framework\" && ln -sfn Versions/Current/$name \"$name\")",
+				"                (cd \"$framework\" && ln -sfn Versions/Current/Resources Resources)",
+				"                codesign --force --sign - --preserve-metadata=identifier,entitlements,flags \"$framework\" || true",
+				"            fi",
+				"        done",
+				"    fi",
+				"fi",
+				"",
+			);
 		};
 /* End PBXShellScriptBuildPhase section */
 

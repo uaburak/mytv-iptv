@@ -2,11 +2,10 @@ import SwiftUI
 
 public struct MediaShelfRow: View {
     let title: String
-    let subtitle: String?
-    let items: [VODItem]
     let onSeeAll: (() -> Void)?
-    let onPlay: (VODItem) -> Void
+    let content: AnyView
 
+    // MARK: - VODItems (Film / Dizi) için
     public init(
         title: String,
         subtitle: String? = nil,
@@ -15,61 +14,75 @@ public struct MediaShelfRow: View {
         onPlay: @escaping (VODItem) -> Void
     ) {
         self.title = title
-        self.subtitle = subtitle
-        self.items = items
         self.onSeeAll = onSeeAll
-        self.onPlay = onPlay
-    }
-
-    public var body: some View {
-        if !items.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                // Header
-                HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title)
-                            .font(.system(size: 19, weight: .bold, design: .rounded))
-                            .foregroundStyle(.primary)
-
-                        if let subtitle, !subtitle.isEmpty {
-                            Text(subtitle)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
+        self.content = AnyView(
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 11) {
+                    ForEach(items) { item in
+                        MediaCardView(item: item, width: 110) {
+                            onPlay(item)
                         }
-                    }
-
-                    Spacer()
-
-                    if let onSeeAll {
-                        Button {
-                            onSeeAll()
-                        } label: {
-                            HStack(spacing: 4) {
-                                Text("Tümü")
-                                    .font(.system(size: 13, weight: .medium))
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 10, weight: .bold))
-                            }
-                            .foregroundStyle(.tint)
-                        }
-                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal)
+            }
+        )
+    }
 
-                // Carousel
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: 14) {
-                        ForEach(items) { item in
-                            MediaCardView(item: item, width: 130) {
-                                onPlay(item)
-                            }
+    // MARK: - Channels (Canlı TV) için
+    public init(
+        title: String,
+        subtitle: String? = nil,
+        channels: [Channel],
+        onSeeAll: (() -> Void)? = nil,
+        onPlay: @escaping (Channel) -> Void
+    ) {
+        self.title = title
+        self.onSeeAll = onSeeAll
+        self.content = AnyView(
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 11) {
+                    ForEach(channels) { ch in
+                        MediaCardView(channel: ch, width: 110) {
+                            onPlay(ch)
                         }
                     }
-                    .padding(.horizontal)
+                }
+                .padding(.horizontal)
+            }
+        )
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Header (Kibar Başlık ve opsiyonel Tümü butonu)
+            HStack(alignment: .center) {
+                Text(title)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                if let onSeeAll {
+                    Button {
+                        onSeeAll()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text("Tümü")
+                                .font(.system(size: 12, weight: .medium))
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .foregroundStyle(.tint)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            .padding(.vertical, 4)
+            .padding(.horizontal)
+
+            // Carousel Content
+            content
         }
+        .padding(.vertical, 2)
     }
 }

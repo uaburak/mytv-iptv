@@ -274,13 +274,93 @@ public final class XtreamCodesAPIService: Sendable {
         }
     }
 
-    public func getSeriesInfo(account: Account, seriesId: String) async throws -> [Episode] {
+    public struct VODDetailResponse: Sendable {
+        public let movieImage: String?
+        public let backdropUrl: String?
+        public let plot: String?
+        public let cast: String?
+        public let director: String?
+        public let genre: String?
+        public let releaseDate: String?
+        public let duration: String?
+        public let rating: String?
+        public let youtubeTrailer: String?
+    }
+
+    public struct SeriesDetailResponse: Sendable {
+        public let cover: String?
+        public let backdropUrl: String?
+        public let plot: String?
+        public let cast: String?
+        public let director: String?
+        public let genre: String?
+        public let releaseDate: String?
+        public let rating: String?
+        public let youtubeTrailer: String?
+        public let episodes: [Episode]
+    }
+
+    public func getVODInfo(account: Account, vodId: String) async throws -> VODDetailResponse? {
+        guard let url = makeURL(serverUrl: account.serverUrl, username: account.username, password: account.password, action: "get_vod_info", extraParams: "&vod_id=\(vodId)") else {
+            return nil
+        }
+
+        struct Resp: Decodable {
+            let info: InfoDTO?
+        }
+        struct InfoDTO: Decodable {
+            let movie_image: String?
+            let backdrop_path: DynamicBackdrop?
+            let plot: String?
+            let cast: String?
+            let director: String?
+            let genre: String?
+            let release_date: DynamicString?
+            let releasedate: DynamicString?
+            let duration: DynamicString?
+            let episode_run_time: DynamicString?
+            let rating: DynamicRating?
+            let youtube_trailer: String?
+        }
+
+        let resp: Resp? = try? await fetch(url)
+        guard let info = resp?.info else { return nil }
+
+        return VODDetailResponse(
+            movieImage: info.movie_image,
+            backdropUrl: info.backdrop_path?.firstUrl,
+            plot: info.plot,
+            cast: info.cast,
+            director: info.director,
+            genre: info.genre,
+            releaseDate: info.release_date?.stringValue ?? info.releasedate?.stringValue,
+            duration: info.duration?.stringValue ?? info.episode_run_time?.stringValue,
+            rating: info.rating?.stringValue,
+            youtubeTrailer: info.youtube_trailer
+        )
+    }
+
+    public func getSeriesDetails(account: Account, seriesId: String) async throws -> SeriesDetailResponse? {
         guard let url = makeURL(serverUrl: account.serverUrl, username: account.username, password: account.password, action: "get_series_info", extraParams: "&series_id=\(seriesId)") else {
-            return []
+            return nil
         }
 
         struct SeriesInfoResponse: Decodable {
+            let info: SeriesInfoDTO?
             let episodes: [String: [EpisodeDTO]]?
+        }
+
+        struct SeriesInfoDTO: Decodable {
+            let cover: String?
+            let backdrop_path: DynamicBackdrop?
+            let plot: String?
+            let cast: String?
+            let director: String?
+            let genre: String?
+            let release_date: DynamicString?
+            let releaseDate: DynamicString?
+            let rating: DynamicRating?
+            let youtube_trailer: String?
         }
 
         struct EpisodeDTO: Decodable {
@@ -298,8 +378,7 @@ public final class XtreamCodesAPIService: Sendable {
             let duration: DynamicString?
         }
 
-        let resp: SeriesInfoResponse = (try? await fetch(url)) ?? SeriesInfoResponse(episodes: nil)
-        guard let episodeDict = resp.episodes else { return [] }
+        let resp: SeriesInfoResponse = (try? await fetch(url)) ?? SeriesInfoResponse(info: nil, episodes: nil)
 
         var base = account.serverUrl.trimmingCharacters(in: .whitespacesAndNewlines)
         if !base.lowercased().hasPrefix("http://") && !base.lowercased().hasPrefix("https://") {
@@ -308,26 +387,46 @@ public final class XtreamCodesAPIService: Sendable {
         if base.hasSuffix("/") { base.removeLast() }
 
         var result: [Episode] = []
-        for (seasonKey, eps) in episodeDict {
-            let sNum = Int(seasonKey) ?? 1
-            for ep in eps {
-                guard let epId = ep.id?.stringValue else { continue }
-                let ext = ep.container_extension ?? "mkv"
-                let streamUrl = "\(base)/series/\(account.username)/\(account.password)/\(epId).\(ext)"
-                let num = Int(ep.episode_num?.stringValue ?? "1") ?? 1
-                result.append(Episode(
-                    id: epId,
-                    episodeNum: num,
-                    seasonNum: ep.season ?? sNum,
-                    title: ep.title ?? "\(num). Bölüm",
-                    streamUrl: streamUrl,
-                    coverUrl: ep.info?.movie_image,
-                    overview: ep.info?.plot,
-                    duration: ep.info?.duration?.stringValue
-                ))
+        if let episodeDict = resp.episodes {
+            for (seasonKey, eps) in episodeDict {
+                let sNum = Int(seasonKey) ?? 1
+                for ep in eps {
+                    guard let epId = ep.id?.stringValue else { continue }
+                    let ext = ep.container_extension ?? "mkv"
+                    let streamUrl = "\(base)/series/\(account.username)/\(account.password)/\(epId).\(ext)"
+                    let num = Int(ep.episode_num?.stringValue ?? "1") ?? 1
+                    result.append(Episode(
+                        id: epId,
+                        episodeNum: num,
+                        seasonNum: ep.season ?? sNum,
+                        title: ep.title ?? "\(num). Bölüm",
+                        streamUrl: streamUrl,
+                        coverUrl: ep.info?.movie_image,
+                        overview: ep.info?.plot,
+                        duration: ep.info?.duration?.stringValue
+                    ))
+                }
             }
         }
-        return result.sorted { $0.seasonNum == $1.seasonNum ? $0.episodeNum < $1.episodeNum : $0.seasonNum < $1.seasonNum }
+        let sortedEpisodes = result.sorted { $0.seasonNum == $1.seasonNum ? $0.episodeNum < $1.episodeNum : $0.seasonNum < $1.seasonNum }
+
+        return SeriesDetailResponse(
+            cover: resp.info?.cover,
+            backdropUrl: resp.info?.backdrop_path?.firstUrl,
+            plot: resp.info?.plot,
+            cast: resp.info?.cast,
+            director: resp.info?.director,
+            genre: resp.info?.genre,
+            releaseDate: resp.info?.release_date?.stringValue ?? resp.info?.releaseDate?.stringValue,
+            rating: resp.info?.rating?.stringValue,
+            youtubeTrailer: resp.info?.youtube_trailer,
+            episodes: sortedEpisodes
+        )
+    }
+
+    public func getSeriesInfo(account: Account, seriesId: String) async throws -> [Episode] {
+        let details = try? await getSeriesDetails(account: account, seriesId: seriesId)
+        return details?.episodes ?? []
     }
 }
 

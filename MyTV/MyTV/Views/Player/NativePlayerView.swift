@@ -104,24 +104,30 @@ public struct NativePlayerView: View {
                         options: playback.makeOptions()
                     )
                     .onStateChanged { _, state in
-                        DispatchQueue.main.async {
-                            self.playerState = state
+                        Task { @MainActor in
+                            if self.playerState != state {
+                                self.playerState = state
+                            }
                             if state == .readyToPlay || state == .bufferFinished {
-                                self.isPlaying = true
+                                if !self.isPlaying { self.isPlaying = true }
                                 if !self.isSummaryExpanded && !self.showEpisodesDrawer {
                                     self.scheduleControlsHide()
                                 }
                             } else if state == .paused {
-                                self.isPlaying = false
+                                if self.isPlaying { self.isPlaying = false }
                                 self.hideControlsTask?.cancel()
                             }
                         }
                     }
                     .onPlay { currentTime, totalTime in
-                        DispatchQueue.main.async {
+                        Task { @MainActor in
                             if !self.isScrubbing {
-                                self.currentPlaybackTime = currentTime
-                                self.totalDuration = totalTime
+                                if abs(self.currentPlaybackTime - currentTime) >= 0.5 {
+                                    self.currentPlaybackTime = currentTime
+                                }
+                                if abs(self.totalDuration - totalTime) >= 1.0 {
+                                    self.totalDuration = totalTime
+                                }
                             }
                         }
                     }
@@ -627,22 +633,19 @@ public struct NativePlayerView: View {
     private func landscapeInfoSection(media: PlayableMedia) -> some View {
         HStack(alignment: .top, spacing: 14) {
             // 1. Yatay Görsel (16:9 - Kompakt)
-            if let posterUrl = media.posterUrl, let url = URL(string: posterUrl) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(16/9, contentMode: .fill)
-                    default:
-                        Rectangle()
-                            .fill(Color.white.opacity(0.12))
-                            .overlay(
-                                Image(systemName: "film")
-                                    .font(.system(size: 20))
-                                    .foregroundStyle(.white.opacity(0.4))
-                            )
-                    }
+            if let url = URL.fromUserString(media.posterUrl) {
+                CachedAsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(16/9, contentMode: .fill)
+                } placeholder: {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.12))
+                        .overlay(
+                            Image(systemName: "film")
+                                .font(.system(size: 20))
+                                .foregroundStyle(.white.opacity(0.4))
+                        )
                 }
                 .frame(width: 120, height: 68)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -732,22 +735,19 @@ public struct NativePlayerView: View {
         VStack(alignment: .leading, spacing: 10) {
             // 1. Üst Satır: Yatay Görsel + Genel Başlık (media.title) & Rozetler
             HStack(alignment: .top, spacing: 12) {
-                if let posterUrl = media.posterUrl, let url = URL(string: posterUrl) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(16/9, contentMode: .fill)
-                        default:
-                            Rectangle()
-                                .fill(Color.white.opacity(0.12))
-                                .overlay(
-                                    Image(systemName: "film")
-                                        .font(.system(size: 20))
-                                        .foregroundStyle(.white.opacity(0.4))
-                                )
-                        }
+                if let url = URL.fromUserString(media.posterUrl) {
+                    CachedAsyncImage(url: url) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(16/9, contentMode: .fill)
+                    } placeholder: {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.12))
+                            .overlay(
+                                Image(systemName: "film")
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(.white.opacity(0.4))
+                            )
                     }
                     .frame(width: 110, height: 62)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -988,29 +988,13 @@ public struct NativePlayerView: View {
                             } label: {
                                 HStack(spacing: 12) {
                                     // Kanal Logosu
-                                    ZStack {
-                                        Color.white.opacity(0.08)
-
-                                        if let icon = ch.streamIcon, let url = URL(string: icon) {
-                                            AsyncImage(url: url) { phase in
-                                                if let img = phase.image {
-                                                    img.resizable().aspectRatio(contentMode: .fit)
-                                                        .padding(4)
-                                                } else {
-                                                    Image(systemName: "tv")
-                                                        .font(.system(size: 14))
-                                                        .foregroundStyle(.white.opacity(0.5))
-                                                }
-                                            }
-                                        } else {
-                                            Image(systemName: "tv")
-                                                .font(.system(size: 14))
-                                                .foregroundStyle(.white.opacity(0.5))
-                                        }
-                                    }
-                                    .frame(width: 46, height: 36)
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5))
+                                    ChannelLogoView(
+                                        logoUrl: ch.streamIcon,
+                                        channelName: ch.name,
+                                        width: 48,
+                                        height: 36,
+                                        cornerRadius: 8
+                                    )
 
                                     // Kanal Adı
                                     VStack(alignment: .leading, spacing: 2) {
@@ -1160,13 +1144,11 @@ public struct NativePlayerView: View {
                                 HStack(spacing: 12) {
                                     // Önizleme veya Oynat İkonu
                                     ZStack {
-                                        if let cover = ep.coverUrl, let url = URL(string: cover) {
-                                            AsyncImage(url: url) { phase in
-                                                if let img = phase.image {
-                                                    img.resizable().aspectRatio(16/9, contentMode: .fill)
-                                                } else {
-                                                    Color.white.opacity(0.08)
-                                                }
+                                        if let url = URL.fromUserString(ep.coverUrl) {
+                                            CachedAsyncImage(url: url) { img in
+                                                img.resizable().aspectRatio(16/9, contentMode: .fill)
+                                            } placeholder: {
+                                                Color.white.opacity(0.08)
                                             }
                                         } else {
                                             Color.white.opacity(0.08)

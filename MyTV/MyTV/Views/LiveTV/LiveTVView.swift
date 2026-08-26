@@ -2,27 +2,23 @@ import SwiftUI
 
 public struct LiveTVView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var searchText = ""
+    @ObservedObject private var playback = PlaybackManager.shared
+    @ObservedObject private var storage = StorageManager.shared
+
     @State private var selectedCategory: MediaCategory?
+    @State private var destinationCategory: MediaCategory?
 
     public init() {}
 
-    private var filteredCategories: [MediaCategory] {
-        if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
-            return appState.liveCategories
+    private var activeCategories: [MediaCategory] {
+        appState.liveCategories.filter { cat in
+            appState.channels.contains { $0.categoryId == cat.id }
         }
-        return appState.liveCategories.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
 
-    private var channelsToDisplay: [Channel] {
-        var list = appState.channels
-        if let selected = selectedCategory {
-            list = list.filter { $0.categoryId == selected.id }
-        }
-        if !searchText.trimmingCharacters(in: .whitespaces).isEmpty {
-            list = list.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
-        }
-        return list
+    private var channelsForSelectedCategory: [Channel] {
+        guard let selected = selectedCategory else { return [] }
+        return appState.channels.filter { $0.categoryId == selected.id }
     }
 
     public var body: some View {
@@ -35,104 +31,121 @@ public struct LiveTVView: View {
                         description: Text("Hesabınızda canlı kanal bulunmuyor veya henüz yüklenmedi.")
                     )
                 } else {
-                    VStack(spacing: 0) {
-                        // Category Horizontal Filter Pills
-                        if !appState.liveCategories.isEmpty {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 8) {
-                                    Button {
-                                        selectedCategory = nil
-                                    } label: {
-                                        Text("Tümü (\(appState.channels.count))")
-                                            .font(.caption.weight(selectedCategory == nil ? .bold : .regular))
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 6)
-                                            .background(selectedCategory == nil ? Color.accentColor : Color.secondary.opacity(0.12), in: Capsule())
-                                            .foregroundStyle(selectedCategory == nil ? .white : .primary)
-                                    }
-                                    .buttonStyle(.plain)
-
-                                    ForEach(appState.liveCategories) { cat in
-                                        let isSelected = selectedCategory?.id == cat.id
-                                        Button {
-                                            selectedCategory = cat
-                                        } label: {
-                                            Text(cat.name)
-                                                .font(.caption.weight(isSelected ? .bold : .regular))
-                                                .padding(.horizontal, 12)
-                                                .padding(.vertical, 6)
-                                                .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.12), in: Capsule())
-                                                .foregroundStyle(isSelected ? .white : .primary)
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                                .padding(.horizontal)
-                                .padding(.vertical, 8)
-                            }
-                            .background(Color.secondary.opacity(0.04))
-                        }
-
-                        // Channels List
-                        List(channelsToDisplay) { channel in
-                            HStack(spacing: 12) {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(Color.secondary.opacity(0.12))
-                                        .frame(width: 44, height: 44)
-
-                                    if let icon = channel.streamIcon, let url = URL(string: icon) {
-                                        AsyncImage(url: url) { phase in
-                                            switch phase {
-                                            case .success(let img):
-                                                img.resizable().aspectRatio(contentMode: .fit)
-                                            default:
-                                                Image(systemName: "tv")
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                        }
-                                        .frame(width: 36, height: 36)
-                                    } else {
-                                        Image(systemName: "tv")
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(channel.name)
-                                        .font(.body.weight(.medium))
-                                        .lineLimit(1)
-
-                                    if let num = channel.num {
-                                        Text("Kanal \(num)")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-
-                                Spacer()
-
-                                Image(systemName: "play.circle.fill")
-                                    .font(.title3)
-                                    .foregroundStyle(.tint)
-                            }
-                            .padding(.vertical, 2)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                playChannel(channel)
+                    ScrollView {
+                        LazyVStack(spacing: 20) {
+                            if let selected = selectedCategory {
+                                singleCategoryGrid(category: selected)
+                            } else {
+                                categoryShelvesFeed
                             }
                         }
-                        .listStyle(.plain)
+                        .padding(.top, 8)
+                        .padding(.bottom, 36)
+                    }
+                    .scrollEdgeEffectStyle(.soft, for: .all)
+                }
+            }
+            .navigationTitle(selectedCategory?.name ?? "Canlı TV")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                if !activeCategories.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Button {
+                                selectedCategory = nil
+                            } label: {
+                                HStack {
+                                    Text("Tüm Kanallar")
+                                    if selectedCategory == nil {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+
+                            Divider()
+
+                            ForEach(activeCategories) { cat in
+                                Button {
+                                    selectedCategory = cat
+                                } label: {
+                                    HStack {
+                                        Text(cat.name)
+                                        if selectedCategory?.id == cat.id {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: selectedCategory == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                                .font(.system(size: 16))
+                        }
                     }
                 }
             }
-            .navigationTitle("Canlı TV")
-            .searchable(text: $searchText, prompt: "Kanal Ara...")
             .refreshable {
                 await appState.syncActiveAccount()
             }
+            .navigationDestination(item: $destinationCategory) { cat in
+                CategoryMediaListView(category: cat)
+            }
         }
     }
+
+    // MARK: - Category Shelves Feed (Canlı TV Rafları)
+
+    @ViewBuilder
+    private var categoryShelvesFeed: some View {
+        LazyVStack(spacing: 20) {
+            // Favori Kanallar Vitrini
+            let favoriteChannels = appState.channels.filter { storage.isFavorite(id: $0.id) }
+            if !favoriteChannels.isEmpty {
+                MediaShelfRow(
+                    title: "Favori Kanallarım",
+                    channels: favoriteChannels,
+                    onSeeAll: nil,
+                    onPlay: { ch in
+                        playChannel(ch)
+                    }
+                )
+            }
+
+            // Kategori Rafları
+            ForEach(activeCategories) { cat in
+                let items = appState.channels.filter { $0.categoryId == cat.id }
+                if !items.isEmpty {
+                    MediaShelfRow(
+                        title: cat.name,
+                        channels: Array(items.prefix(15)),
+                        onSeeAll: {
+                            destinationCategory = cat
+                        },
+                        onPlay: { ch in
+                            playChannel(ch)
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    // MARK: - Single Category Grid
+
+    @ViewBuilder
+    private func singleCategoryGrid(category: MediaCategory) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 95, maximum: 140), spacing: 12)], spacing: 14) {
+            ForEach(channelsForSelectedCategory) { channel in
+                MediaCardView(channel: channel, width: 100) {
+                    playChannel(channel)
+                }
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    // MARK: - Playback Helper
 
     private func playChannel(_ channel: Channel) {
         let media = PlayableMedia(
@@ -143,6 +156,6 @@ public struct LiveTVView: View {
             streamUrl: channel.streamUrl,
             contentType: .live
         )
-        PlaybackManager.shared.play(media: media)
+        playback.play(media: media)
     }
 }
