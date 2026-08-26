@@ -159,14 +159,14 @@ public struct MediaDetailView: View {
         }
     }
 
-    // MARK: - Sticky Backdrop View (Sabit Kapak)
+    // MARK: - Sticky Backdrop View (Sabit Yatay Kapak)
 
     @ViewBuilder
     private func stickyBackdropView(width: CGFloat) -> some View {
         ZStack(alignment: .top) {
             Color.black
 
-            if let bgUrl = URL.fromUserString(currentItem.backdropUrl ?? currentItem.streamIcon) {
+            if let bg = currentItem.backdropUrl ?? currentItem.streamIcon, let bgUrl = URL.fromUserString(bg) {
                 CachedAsyncImage(url: bgUrl) { image in
                     image
                         .resizable()
@@ -207,22 +207,9 @@ public struct MediaDetailView: View {
             )
             .shadow(color: .black.opacity(0.85), radius: 12, x: 0, y: 6)
 
-            // Sağ: Logo, Büyük Puan ve Dinamik Meta Bilgileri
+            // Sağ: Büyük Puan ve Dinamik Meta Bilgileri
             VStack(alignment: .leading, spacing: 6) {
-                // 1. İçerik Logosu (Puanın Üstünde)
-                if let iconUrl = URL.fromUserString(currentItem.streamIcon) {
-                    CachedAsyncImage(url: iconUrl) { logo in
-                        logo
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxHeight: 36, alignment: .leading)
-                            .shadow(color: .black.opacity(0.7), radius: 4)
-                    } placeholder: {
-                        EmptyView()
-                    }
-                }
-
-                // 2. Büyük IMDb / TMDB Puanı (Üstte)
+                // 1. Büyük IMDb / TMDB Puanı (Üstte)
                 if let rating = currentItem.rating, let score = Double(rating), score > 0 {
                     HStack(alignment: .lastTextBaseline, spacing: 4) {
                         Image(systemName: "star.fill")
