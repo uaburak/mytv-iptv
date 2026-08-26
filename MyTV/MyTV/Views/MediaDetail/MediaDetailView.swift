@@ -43,6 +43,38 @@ public struct MediaDetailView: View {
         return pool.filter { $0.categoryId == currentItem.categoryId && $0.id != currentItem.id }.prefix(12).map { $0 }
     }
 
+    private var genreList: [String] {
+        guard let genre = currentItem.genre, !genre.isEmpty else { return [] }
+        return genre
+            .components(separatedBy: CharacterSet(charactersIn: ",/|•-"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0.count < 25 }
+    }
+
+    private var detectedLanguages: [String] {
+        var tags: [String] = []
+        let lowerName = currentItem.name.lowercased()
+
+        if lowerName.contains("dual") || lowerName.contains("multi") {
+            tags.append("Dual Ses")
+        }
+        if lowerName.contains("dublaj") || lowerName.contains("tr dub") || lowerName.contains("[tr]") || lowerName.contains("turkce") || lowerName.contains("türkçe") {
+            tags.append("TR Dublaj")
+        }
+        if lowerName.contains("altyaz") || lowerName.contains("sub") || lowerName.contains("softsub") {
+            tags.append("TR Altyazı")
+        }
+        if lowerName.contains("en") || lowerName.contains("eng") || lowerName.contains("english") {
+            if !tags.contains("Dual Ses") && !tags.contains("TR Dublaj") {
+                tags.append("Orijinal Dil")
+            }
+        }
+        if tags.isEmpty {
+            tags.append("Türkçe")
+        }
+        return tags
+    }
+
     public var body: some View {
         GeometryReader { screenGeo in
             ZStack(alignment: .top) {
@@ -215,16 +247,9 @@ public struct MediaDetailView: View {
                     .shadow(radius: 4)
                     .fixedSize(horizontal: false, vertical: true)
 
-                // Meta Bilgi Rozetleri (Taşmayı önleyen esnek kaydırmalı / sarmalı bar)
+                // Meta Bilgi Rozetleri (Puan, Yapım Yılı, Süre, Dil Paketleri)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 5) {
-                        Text(currentItem.type.rawValue)
-                            .font(.system(size: 10.5, weight: .bold))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Color.white.opacity(0.18), in: Capsule())
-                            .foregroundStyle(.white)
-
                         if let rating = currentItem.rating, let score = Double(rating), score > 0 {
                             HStack(spacing: 3) {
                                 Image(systemName: "star.fill")
@@ -244,24 +269,54 @@ public struct MediaDetailView: View {
                                 .font(.system(size: 10.5, weight: .semibold))
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 3)
-                                .background(Color.white.opacity(0.12), in: Capsule())
-                                .foregroundStyle(.white.opacity(0.85))
+                                .background(Color.white.opacity(0.14), in: Capsule())
+                                .foregroundStyle(.white)
                         }
 
                         if let dur = currentItem.duration, !dur.isEmpty && dur != "0" {
                             let durDisplay = dur.contains(":") ? dur : "\(dur) dk"
                             Text(durDisplay)
                                 .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.8))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Color.white.opacity(0.12), in: Capsule())
+                        }
+
+                        // Dil Paketleri Rozetleri
+                        ForEach(detectedLanguages, id: \.self) { lang in
+                            HStack(spacing: 3) {
+                                Image(systemName: lang.contains("Altyazı") ? "captions.bubble.fill" : "speaker.wave.2.fill")
+                                    .font(.system(size: 8))
+                                Text(lang)
+                                    .font(.system(size: 10.5, weight: .semibold))
+                            }
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.blue.opacity(0.25), in: Capsule())
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(Color.blue.opacity(0.4), lineWidth: 0.5)
+                            )
+                            .foregroundStyle(.white)
                         }
                     }
                 }
 
-                if let genre = currentItem.genre, !genre.isEmpty {
-                    Text(genre)
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.75))
-                        .lineLimit(1)
+                // Türler Rozetleri
+                if !genreList.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 4) {
+                            ForEach(genreList, id: \.self) { g in
+                                Text(g)
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2.5)
+                                    .background(Color.white.opacity(0.10), in: Capsule())
+                                    .foregroundStyle(.white.opacity(0.85))
+                            }
+                        }
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
