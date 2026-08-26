@@ -1,0 +1,647 @@
+ÜRÜN GEREKSİNİM DOKÜMANI (PRD)
+
+IPTV Player — Apple Ekosistemi Uygulaması
+
+tvOS · iOS · iPadOS · macOS — Netflix / Disney+ Tarzı Arayüz
+
+Doküman Versiyonu: 1.0
+
+Tarih: 26 Ağustos 2026
+
+Durum: Geliştirme Ekibine Teslim İçin Hazır — İnceleme Bekliyor
+
+İçindekiler
+
+Not: İçindekiler tablosu Microsoft Word'de dosya açıldığında otomatik güncellenir (gerekirse tabloya sağ tıklayıp "Alanları Güncelle / Update Field" seçilebilir).
+
+1. Yönetici Özeti
+
+Bu doküman, kullanıcının kendi IPTV aboneliğinden (M3U/M3U8 playlist veya Xtream Codes API üzerinden) gelen canlı yayın, film ve dizi içeriğini; Netflix ve Disney+ benzeri modern, görsel ağırlıklı bir arayüzle sunan; Apple TV, iPhone, iPad ve Mac üzerinde çalışan bir uygulamanın ("Uygulama") ürün gereksinimlerini tanımlar.
+
+Uygulama içerik barındırmaz, yayın satmaz veya lisanslamaz; yalnızca kullanıcının kendi sağladığı kaynaklara (playlist URL, Xtream Codes hesabı) bağlanan bir oynatıcı/istemci (player/client) olarak çalışır. Bu ayrım hem ürün mimarisi hem de App Store onay süreci açısından kritik öneme sahiptir ve doküman boyunca vurgulanacaktır.
+
+Hedef, tek bir paylaşılan Swift/SwiftUI kod tabanından tvOS, iOS, iPadOS ve macOS'u kapsayan, Apple'ın Fiziksel uzaklıktan kullanım (10-foot UI) ve odak (Focus Engine) prensiplerine tam uyumlu, kumanda ile sorunsuz gezinilebilen bir "evrensel uygulama" (universal app) ortaya koymaktır.
+
+2. Ürün Vizyonu ve Hedefler
+
+2.1 Vizyon
+
+Kullanıcıların dağınık IPTV playlist'lerini ve kanal/VOD listelerini, ana akım yayın platformlarında (Netflix, Disney+, Apple TV app) alıştıkları kalitede; hero banner, kategori satırları (rows), poster kartları, akıllı arama ve kişiselleştirilmiş "Devam Et" listesi gibi unsurlarla bir araya getiren, dört Apple cihazında tutarlı biçimde çalışan premium bir istemci sunmak.
+
+2.2 İş Hedefleri
+
+Netflix/Disney+ kalitesinde, kumandaya optimize bir 10-foot arayüz ile Apple TV'de öne çıkan bir IPTV istemcisi olmak.
+
+Tek kod tabanı ile 4 platformda (tvOS, iOS, iPadOS, macOS) tutarlı deneyim ve iCloud üzerinden cihazlar arası senkronize "izleme geçmişi / favoriler".
+
+Kullanıcının kendi IPTV aboneliğini (M3U/M3U8 veya Xtream Codes) saniyeler içinde ekleyip yayın izleyebilmesi.
+
+App Store / TestFlight üzerinden yasal ve sürdürülebilir bir dağıtım modeli (bkz. Bölüm 13 — Yasal ve App Store Uyumu).
+
+2.3 Kapsam Dışı Hedefler
+
+Uygulama hiçbir şekilde içerik/kanal/kaynak sağlamaz, satmaz, önermez veya barındırmaz.
+
+Uygulama içi abonelik satışı veya IPTV servis sağlayıcılığı bu doküman kapsamında değildir.
+
+3. Kapsam (Scope)
+
+3.1 Kapsam İçi
+
+tvOS (Apple TV) — birincil / öncelikli platform
+
+iOS (iPhone)
+
+iPadOS (iPad)
+
+macOS (Apple Silicon ve Intel Mac, native SwiftUI veya Catalyst)
+
+M3U / M3U8 playlist desteği (URL veya dosya ile içe aktarma)
+
+Xtream Codes API desteği (host, kullanıcı adı, şifre ile bağlantı)
+
+Canlı TV oynatma, VOD (Film/Dizi) gezinme, temel EPG (program rehberi) görüntüleme
+
+Netflix/Disney+ tarzı ana ekran, kategori satırları, arama, favoriler, "İzlemeye Devam Et"
+
+3.2 Kapsam Dışı (v1.0)
+
+Kayıt/DVR (canlı yayını kaydetme) özelliği
+
+Çoklu IPTV sağlayıcıdan otomatik içerik toplama/karşılaştırma
+
+DRM korumalı ticari içerik lisanslama altyapısı (kullanıcı playlist'i zaten DRM içeriyorsa temel FairPlay/HLS AES-128 oynatma desteklenir, fakat lisans satın alma akışı yoktur)
+
+Android / Android TV / web istemcisi (ileride ayrı bir PRD ile değerlendirilebilir)
+
+4. Hedef Kitle ve Kullanıcı Personaları
+
+Persona
+
+Profil
+
+İhtiyaç
+
+Salon Kullanıcısı (Apple TV)
+
+Evde ailesiyle TV izleyen, kumandayla gezinen kullanıcı
+
+Büyük posterler, hızlı kanal geçişi, basit kumanda navigasyonu, Top Shelf'te öne çıkan içerik
+
+Mobil Kullanıcı (iPhone/iPad)
+
+Yolda / yatakta izleyen kullanıcı
+
+Dokunmatik jestler, PiP (Picture-in-Picture), hızlı arama, düşük veri modu
+
+Masaüstü Kullanıcısı (Mac)
+
+Çalışırken ikinci ekranda / pencere modunda izleyen kullanıcı
+
+Pencere içinde oynatma, klavye kısayolları, çoklu pencere
+
+Çoklu Cihaz Kullanıcısı
+
+Aynı hesapla birden fazla Apple cihazı kullanan kullanıcı
+
+iCloud senkronizasyonu ile favoriler ve kaldığı yerden devam
+
+5. Platform ve Cihaz Gereksinimleri
+
+5.1 Desteklenen İşletim Sistemleri (Minimum Sürüm Önerisi)
+
+Platform
+
+Minimum Sürüm
+
+Not
+
+tvOS
+
+tvOS 17+
+
+Focus Engine, Top Shelf (TVTopShelfContentProvider), AVKit tam entegrasyon için güncel sürüm önerilir
+
+iOS
+
+iOS 17+
+
+SwiftUI NavigationStack, PiP, Live Activities (opsiyonel) desteği
+
+iPadOS
+
+iPadOS 17+
+
+Split View / Stage Manager uyumluluğu
+
+macOS
+
+macOS 14 (Sonoma)+
+
+Native SwiftUI multiplatform hedef veya Mac Catalyst (öneri: native SwiftUI target)
+
+5.2 Mimari Yaklaşım: Tek Kod Tabanı, Dört Hedef
+
+Xcode'da tek bir SwiftUI "multiplatform" proje yapısı kullanılması önerilir: Ortak iş mantığı (networking, playlist/Xtream parsing, model katmanı, önbellekleme) bir Swift Package (örn. "IPTVCore") içinde paylaşılır; her platform için ayrı bir UI hedefi (target) tanımlanır çünkü tvOS'un odak tabanlı (focus-driven), iOS/iPadOS'un dokunmatik, macOS'un imleç/klavye tabanlı etkileşim modelleri temelden farklıdır.
+
+IPTVCore (Swift Package): Modeller, Xtream/M3U parser, ağ katmanı, önbellekleme, Keychain, senkronizasyon mantığı.
+
+IPTVUIKit (paylaşılan SwiftUI bileşenleri): Poster kartı, satır (row) görünümü, ilerleme çubuğu gibi platformdan bağımsız görsel bileşenler — platforma özgü `#if os()` varyasyonlarıyla.
+
+4 ayrı uygulama hedefi: IPTVApp-tvOS, IPTVApp-iOS (iPhone/iPad ortak), IPTVApp-macOS — her biri kendi giriş noktası ve platforma özgü navigasyon/etkileşim katmanına sahip.
+
+Neden Mac Catalyst yerine native SwiftUI önerilir: Catalyst, dokunmatik odaklı bir arayüzü Mac'e taşırken; native SwiftUI hedefi pencere yönetimi, klavye kısayolları ve menü çubuğu gibi masaüstüne özgü davranışları daha doğal şekilde destekler. Ekip native SwiftUI deneyimine sahip değilse, ilk sürümde Catalyst ile başlayıp sonradan native'e geçiş de teknik olarak mümkündür; bu karar geliştirme ekibiyle netleştirilmelidir.
+
+⚠ Kritik Uyarı — Okumadan Geliştirmeye Başlamayın: Bu uygulama üçüncü taraf yayın/VOD kaynaklarına bağlanan bir IPTV oynatıcısıdır. Apple, App Store İnceleme Kuralları'nın 5.2.3 (Fikri Mülkiyet) ve 4.7 maddeleri kapsamında bu tür uygulamaları yoğun biçimde incelemekte ve sıkça reddetmektedir. Geliştirmeye başlamadan önce mutlaka Bölüm 13'ü okuyun.
+
+6. Fonksiyonel Gereksinimler
+
+6.1 Kaynak / Hesap Ekleme (Onboarding)
+
+Kullanıcı, uygulamayı ilk açtığında kendi IPTV kaynağını iki yöntemden biriyle ekleyebilmelidir:
+
+M3U / M3U8 Playlist: Playlist URL'si yapıştırma, dosya içe aktarma (iOS/iPad/Mac üzerinden Dosyalar uygulaması ile), veya QR kod ile telefon-TV arası hızlı aktarım.
+
+Xtream Codes API: Sunucu adresi (host:port), kullanıcı adı ve şifre alanları; bağlantı testi ve `player_api.php` ile doğrulama.
+
+Birden fazla kaynak/profil ekleyip aralarında geçiş yapabilme ("Hesap Değiştir").
+
+Kimlik bilgileri cihazda Keychain'de şifreli saklanır; iCloud Keychain senkronizasyonu ile diğer Apple cihazlarına otomatik aktarılır (kullanıcı onayına bağlı).
+
+Hatalı/süresi dolmuş kaynak girişinde anlaşılır hata mesajları (bağlantı hatası, kimlik doğrulama hatası, maksimum eşzamanlı bağlantı aşıldı vb.).
+
+6.2 Ana Ekran (Home) — Netflix / Disney+ Tarzı Keşif Deneyimi
+
+Üstte otomatik geçişli "Hero" banner: öne çıkan / son eklenen / kaldığı yerden devam edilen içerik için büyük görsel + kısa açıklama + "Oynat" ve "Bilgi" aksiyonları.
+
+Yatay kaydırmalı içerik satırları (rows): "İzlemeye Devam Et", "Favoriler", "Canlı TV — Popüler Kanallar", kategoriye göre gruplanmış VOD satırları (Filmler, Diziler, Spor, Haber, Çocuk vb.).
+
+Odaklanılan (focus) kart, tvOS'ta hafif büyüme + gölge/parallax efektiyle öne çıkar (Apple HIG "Focus Engine" prensiplerine uygun).
+
+Kart üzerinde uzun basma / bilgi düğmesi ile hızlı önizleme (poster, süre, tür, açıklama).
+
+6.3 Canlı TV (Live TV)
+
+Kategoriye göre gruplanmış kanal listesi (Xtream `get_live_categories` / `get_live_streams` veya M3U `group-title` etiketine göre).
+
+Kanal ızgara/liste görünümü + kanal logosu (varsa).
+
+EPG (Program Rehberi): Mevcutsa XMLTV verisiyle "Şimdi / Sonra" bilgisi ve genişletilebilir zaman çizelgesi görünümü.
+
+Kanal değiştirirken minimum arabellek gecikmesi; kumandada yukarı/aşağı ile hızlı kanal geçişi (tvOS).
+
+"Son İzlenen Kanallar" hızlı erişim satırı.
+
+6.4 Film ve Dizi (VOD) Kütüphanesi
+
+Kategori/tür bazlı gezinme, afiş (poster) ızgarası.
+
+Dizi detay sayfası: sezon/bölüm seçimi, bölüm listesi, açıklama, süre.
+
+Film/dizi detay sayfası: kapak görseli, özet, tür, yıl, süre, oynatma ve favorilere ekleme aksiyonları.
+
+"Kaldığı yerden devam et" — bölüm/film bazında izleme ilerlemesi kaydı.
+
+6.5 Arama
+
+Canlı kanal, film ve dizi içinde birleşik anlık arama (yazarken sonuç filtreleme).
+
+tvOS'ta Siri Remote sesli arama ile entegrasyon (SFSpeechRecognizer / Siri intents, opsiyonel v1.1).
+
+Son aramalar ve popüler aramalar önerisi.
+
+6.6 Favoriler ve İzleme Listesi
+
+Kanal/film/dizi favorilere ekleme, "Listem" satırında görüntüleme.
+
+İzleme geçmişi ve devam noktası bilgisinin iCloud (CloudKit) ile cihazlar arası senkronizasyonu.
+
+6.7 Oynatıcı (Player)
+
+AVPlayer / AVKit tabanlı oynatma; HLS (.m3u8) ve MPEG-TS akışlarını destekleme.
+
+Standart kontrol çubuğu: oynat/duraklat, 10 sn ileri/geri, zaman çizelgesi (VOD için), canlı yayın göstergesi.
+
+Altyazı ve çoklu ses/dil parçası desteği (akışta mevcutsa).
+
+Picture-in-Picture (iOS/iPadOS/macOS).
+
+AirPlay ile Apple TV'ye yayın gönderme (iPhone/iPad/Mac'ten).
+
+Otomatik yeniden bağlanma / arabelleğe alma göstergesi (zayıf ağ koşullarında akıllı yeniden deneme).
+
+Video kalitesi/bit hızı bilgisi ve manuel kaynak/format seçimi (birden fazla akış URL'si varsa).
+
+6.8 Profiller ve Ebeveyn Kontrolü
+
+Tek Apple hesabı altında birden fazla profil (Netflix tarzı) — opsiyonel v1.1 özelliği.
+
+PIN korumalı "Kısıtlı İçerik" / yetişkin kategori gizleme.
+
+6.9 Ayarlar
+
+Kaynak/hesap yönetimi, EPG güncelleme sıklığı, önbellek temizleme.
+
+Görünüm: karanlık/açık tema (varsayılan koyu tema — TV izleme deneyimine uygun).
+
+Oynatma tercihleri: otomatik oynatma, varsayılan altyazı dili, veri tasarrufu modu (mobil).
+
+Hakkında / Yardım / Gizlilik Politikası / Kullanım Şartları ekranı (bkz. Bölüm 13).
+
+7. Platforma Özgü Gereksinimler
+
+7.1 tvOS — Öncelikli Platform
+
+Focus Engine: Tüm etkileşimli öğeler `.focusable()`, `@FocusState` ve `.focusSection()` ile doğru odak sırasına sahip olmalı; odaklanan öğe her zaman görsel olarak net şekilde öne çıkmalı (büyüme, gölge, parlama).
+
+Top Shelf Uzantısı (TVTopShelfContentProvider): Apple TV ana ekranında uygulama simgesi odaklandığında "Devam Et" ve "Öne Çıkanlar" içeriğini gösterecek dinamik Top Shelf; her öğe doğrudan ilgili içeriğe derin bağlantı (deep link) vermeli.
+
+Siri Remote gezinme: Yatay/dikey kaydırma satırları arasında akıcı geçiş; Play/Pause tuşu odaklanılan içeriği doğrudan oynatabilmeli; Menü tuşu ile tutarlı geri gitme davranışı.
+
+10-foot UI: Büyük tipografi, yüksek kontrast, ekranın kenarlarından güvenli mesafe (safe area) bırakma; uzaktan okunabilirlik önceliklidir.
+
+Uygulama simgesi: Apple'ın katmanlı (layered) ikon ve parallax efekti gereksinimlerine uygun, ayrı küçük/büyük ikon varlıkları sağlanmalı.
+
+7.2 iOS (iPhone)
+
+Dikey mod öncelikli listeleme, video oynatırken tam ekran yatay mod.
+
+Dokunmatik jestler: yatay kaydırma ile satırlar arası gezinme, dikey kaydırma ile kaydırma.
+
+PiP ve arka planda ses (yalnızca lisans/izin dahilinde canlı radyo/ses içerikleri için).
+
+7.3 iPadOS
+
+Split View / çoklu pencere desteği; büyük ekrana uygun grid düzeni (iPhone'a göre daha fazla sütun).
+
+Klavye ve trackpad ile gezinme desteği (harici klavye/trackpad bağlı iPad kullanıcıları için).
+
+7.4 macOS
+
+Yeniden boyutlandırılabilir pencere içinde responsive grid düzeni.
+
+Menü çubuğu entegrasyonu (Dosya, Düzen, Görünüm menüleri) ve standart klavye kısayolları (Boşluk: oynat/duraklat, Cmd+F: ara).
+
+Çoklu pencere: aynı anda birden fazla içerik detay sayfası açılabilmesi (opsiyonel).
+
+7.5 Cihazlar Arası Süreklilik (Continuity)
+
+Handoff: iPhone'da izlenmeye başlanan bir içeriğin Apple TV'de "devam et" olarak görünmesi.
+
+iCloud (CloudKit) ile favoriler, izleme geçmişi ve kaynak/hesap bilgisinin (Keychain senkronizasyonu ile) cihazlar arasında otomatik güncellenmesi.
+
+8. Teknik Mimari Önerisi
+
+8.1 Genel Yığın (Stack)
+
+Katman
+
+Teknoloji
+
+Açıklama
+
+Arayüz
+
+SwiftUI (multiplatform hedef)
+
+tvOS/iOS/iPadOS/macOS için paylaşılan bileşenler + platforma özgü giriş noktaları
+
+Video Oynatma
+
+AVFoundation / AVKit (AVPlayer, AVPlayerViewController)
+
+HLS (.m3u8) ve MPEG-TS akış oynatma, PiP, AirPlay desteği yerleşik gelir
+
+Ağ Katmanı
+
+URLSession + async/await
+
+Xtream Codes REST çağrıları (JSON) ve M3U/M3U8 metin dosyası indirme/parse
+
+Yerel Depolama
+
+SwiftData veya Core Data
+
+Kaynak/hesap listesi, önbelleklenmiş kategori/kanal/VOD meta verisi
+
+Kimlik Bilgisi Güvenliği
+
+Keychain Services + iCloud Keychain
+
+Xtream kullanıcı adı/şifre ve playlist URL'lerinin şifreli saklanması
+
+Bulut Senkronizasyonu
+
+CloudKit (private database)
+
+Favoriler, izleme ilerlemesi, kaynak listesi senkronizasyonu
+
+EPG Ayrıştırma
+
+XMLParser / XMLTV parser (özel)
+
+Xtream `xmltv.php` veya harici XMLTV kaynağının ayrıştırılması
+
+tvOS Ana Ekran
+
+TVServices framework (Top Shelf uzantısı)
+
+Ana ekranda dinamik içerik önizlemesi
+
+8.2 Xtream Codes API — Kullanılacak Uç Noktalar (Referans)
+
+Aşağıdaki uç noktalar, sağlayıcı sunucusunun `http(s)://host:port/player_api.php` temel adresine `username`, `password` ve `action` parametreleri eklenerek çağrılır; yanıtlar JSON formatındadır.
+
+action Parametresi
+
+Amaç
+
+(boş — sadece kimlik bilgisi)
+
+Kimlik doğrulama + hesap/sunucu bilgisi (user_info, server_info)
+
+get_live_categories
+
+Canlı TV kategori listesi
+
+get_live_streams
+
+Kategoriye göre canlı kanal listesi
+
+get_vod_categories / get_vod_streams
+
+Film kategorileri ve film listesi
+
+get_series_categories / get_series
+
+Dizi kategorileri ve dizi listesi
+
+get_series_info
+
+Belirli bir dizinin sezon/bölüm detayları
+
+get_short_epg / xmltv.php
+
+Program rehberi (EPG) verisi
+
+Canlı yayın oynatma adresi genellikle `http(s)://host:port/live/username/password/stream_id.m3u8` (veya `.ts`) formatındadır; VOD adresleri `/movie/...` veya `/series/...` yoluyla döner. Ayrıştırma katmanı bu URL şablonlarını sunucudan gelen `server_info` ve akış kimliklerine göre dinamik olarak oluşturmalıdır.
+
+8.3 M3U / M3U8 Playlist Desteği
+
+Standart Extended M3U formatı ayrıştırılmalı: `#EXTINF` satırındaki `tvg-id`, `tvg-logo`, `group-title`, kanal adı ve ardından gelen akış URL'si.
+
+`group-title` alanı, kategorilere ayırma (Canlı TV kategorileri, Film, Dizi gruplarını ayırt etme) için kullanılabilir; büyük playlist'lerde (10.000+ satır) performans için akış (streaming) tabanlı ayrıştırma (satır satır okuma) önerilir.
+
+Playlist periyodik olarak (kullanıcı ayarına göre) yeniden indirilip önbellek güncellenmelidir.
+
+8.4 Performans ve Önbellekleme
+
+Büyük kanal/VOD listelerinde (bazı sağlayıcılarda 50.000+ kayıt) tüm veriyi tek seferde belleğe almak yerine kategori bazlı, isteğe bağlı (lazy) yükleme yapılmalı.
+
+Poster/logo görselleri disk önbelleğine alınmalı (örn. `AsyncImage` + özel önbellek katmanı veya Nuke/Kingfisher benzeri bir kütüphane değerlendirilebilir).
+
+Kategori ve kanal meta verisi yerel veritabanında saklanarak uygulama her açılışta tam playlist indirmek zorunda kalmamalı.
+
+9. UI/UX Tasarım Prensipleri
+
+Koyu tema varsayılan: TV izleme ortamına uygun, düşük ışık koşullarında göz yormayan arka plan (Netflix/Disney+ ile tutarlı yaklaşım).
+
+Görsel hiyerarşi: Büyük hero banner → yatay kaydırmalı kategori satırları → detay sayfaları — ana akış platformlarındaki tanıdık gezinme mantığı.
+
+Kart tasarımı: 2:3 (poster) veya 16:9 (yayın/hero) oranlarında tutarlı afiş kartları; kanal logoları için kare/şeffaf arka plan varyasyonu.
+
+Odak geri bildirimi (tvOS): Odaklanan öğede büyüme animasyonu, hafif gölge/parıltı — Apple HIG'e uygun, aşırıya kaçmayan hareket.
+
+Tutarlılık: Aynı bileşen kütüphanesi (kart, satır, buton, oynatıcı kontrolleri) dört platformda da aynı görsel dilde, yalnızca etkileşim modeline göre uyarlanmış olarak kullanılmalı.
+
+Erişilebilirlik: VoiceOver etiketleri, Dynamic Type desteği (iOS/iPad/Mac), yeterli renk kontrastı (WCAG AA hedefi).
+
+Lokalizasyon: Başlangıçta Türkçe ve İngilizce; metinlerin `Localizable.strings` ile dışsallaştırılması.
+
+10. Fonksiyonel Olmayan Gereksinimler
+
+10.1 Performans
+
+Ana ekran ilk açılış (soğuk başlatma) hedefi: 2 saniyenin altında ilk anlamlı içerik gösterimi.
+
+Kanal değiştirme gecikmesi: ortalama 2 saniyenin altında (ağ/sağlayıcı performansına bağlı).
+
+10.2 Güvenlik ve Gizlilik
+
+Kullanıcı kimlik bilgileri (Xtream şifresi, playlist URL'si) yalnızca Keychain'de şifreli saklanır, düz metin olarak diskte tutulmaz.
+
+Uygulama içi log/analitik sistemine kullanıcı adı/şifre asla yazılmaz.
+
+Apple'ın gerektirdiği App Privacy (Gizlilik Bilgi Formu) ve `PrivacyInfo.xcprivacy` dosyası eksiksiz doldurulmalı.
+
+10.3 Güvenilirlik
+
+Ağ kesintisi/sağlayıcı çökmesi durumunda uygulamanın çökmemesi, anlamlı hata mesajı göstermesi.
+
+10.4 Ölçeklenebilirlik (İstemci Tarafı)
+
+Uygulama sunucu tarafı içerik barındırmadığından ölçeklenebilirlik yükü büyük ölçüde kullanıcı sağlayıcısının sunucusundadır; istemci yalnızca verimli önbellekleme ve isteğe bağlı yükleme ile kendi performansını garanti eder.
+
+11. Analitik ve İzleme (Opsiyonel)
+
+Uygulama içi anonim kullanım analitiği: en çok kullanılan ekranlar, çökme raporları (App Store Connect Analytics veya benzeri gizlilik-öncelikli bir çözüm).
+
+Kullanıcının izlediği kanal/içerik adları veya kaynağı analitik sağlayıcıya asla iletilmemelidir (gizlilik ve içerik sorumluluğu riski).
+
+12. Proje Fazları / Yol Haritası
+
+Faz 1 — MVP (Minimum Uygulanabilir Ürün)
+
+tvOS + iOS temel hedefler; M3U ve Xtream Codes ile kaynak ekleme.
+
+Ana ekran (hero + satırlar), Canlı TV, VOD kütüphanesi, temel arama, favoriler, AVPlayer tabanlı oynatıcı.
+
+Koyu tema, temel Focus Engine gezinmesi, Top Shelf (statik).
+
+Faz 2 — Genişleme
+
+iPadOS ve macOS hedeflerinin eklenmesi, iCloud/CloudKit senkronizasyonu.
+
+EPG (program rehberi) tam entegrasyonu, dinamik Top Shelf, AirPlay, PiP.
+
+Faz 3 — Olgunlaşma
+
+Çoklu profil, ebeveyn kontrolü, sesli arama (Siri), gelişmiş kişiselleştirme (izleme alışkanlığına göre satır sıralaması).
+
+Performans optimizasyonu, App Store yerelleştirmesi genişletme, A/B test altyapısı.
+
+13. Yasal Değerlendirmeler ve App Store Uyumu
+
+⚠ Bu bölüm projenin en kritik kısmıdır: Genel IPTV/M3U oynatıcı uygulamaları App Store'da onay sürecinde en sık reddedilen kategorilerden biridir. Geliştirme ekibiyle bu bölüm proje başlamadan önce mutlaka gözden geçirilmelidir.
+
+13.1 Apple App Review Guideline 5.2.3 — Fikri Mülkiyet Riski
+
+Apple'ın İnceleme Kuralları'nın 5.2.3 maddesi, uygulamaların üçüncü taraf ses/görüntü akışına, kataloglara ve keşif hizmetlerine yetkisiz erişim sağlamasını yasaklar. Genel amaçlı IPTV/M3U oynatıcı uygulamaları (kullanıcının herhangi bir playlist veya Xtream hesabı ekleyebildiği uygulamalar), sağlayıcı içeriğinin lisanslı olup olmadığını doğrulayamadığı için Apple tarafından sıklıkla bu madde kapsamında reddedilmekte veya inceleme sırasında içerik hakları kanıtı talep edilmektedir.
+
+13.2 Önerilen Konumlandırma: "Kişisel Medya Oynatıcı" Modeli
+
+Riski azaltmak için uygulama, App Store başvurusunda ve uygulama içi metinlerde net biçimde şu şekilde konumlandırılmalıdır: "Bu uygulama, kullanıcının kendi sahip olduğu veya yasal olarak erişim hakkına sahip olduğu medya kaynaklarını (playlist/API bağlantısı) oynatan genel amaçlı bir medya oynatıcıdır; herhangi bir içerik sağlamaz, önermez, barındırmaz veya satmaz."
+
+Uygulama açıklamasında ve ilk açılış ekranında bu sorumluluk reddi (disclaimer) net biçimde yer almalı.
+
+Uygulama, varsayılan/örnek kanal listesi, otomatik playlist önerisi veya herhangi bir yerleşik içerik kataloğu SUNMAMALIDIR — yalnızca kullanıcının kendi girdiği kaynağı oynatmalıdır.
+
+Uygulama içinde marka isimleri (Netflix, Disney+ vb.) kullanılmamalı; bu isimler yalnızca bu PRD dokümanında tasarım referansı olarak geçmektedir, nihai üründe veya App Store metinlerinde kullanılmamalıdır (marka/telif hakkı riski).
+
+13.3 App Review Sürecine Hazırlık
+
+App Store Connect "İnceleme Notları" alanına, uygulamanın bir oynatıcı istemcisi olduğunu ve içerik barındırmadığını açıklayan net bir not eklenmeli.
+
+İncelemeci için test amaçlı, yasal/açık kaynaklı (ör. kamuya açık, telifsiz) bir örnek M3U playlist veya demo Xtream hesabı sağlanması, incelemenin hızlanmasına yardımcı olabilir.
+
+Ret alınması ihtimaline karşı, geliştirme ekibi ve ürün sahibi 5.2.3 itiraz sürecine (App Review'e kanıt/dokümantasyon sunma) hazırlıklı olmalı; bu PRD'nin 13.2 maddesindeki konumlandırma itiraz metninin temelini oluşturabilir.
+
+13.4 Guideline 4.2.6 — Şablon Uygulama Riski
+
+Eğer uygulama herhangi bir "IPTV panel/şablon oluşturucu" servisinden türetilmişse veya birden fazla müşteriye aynı temel yapı üzerinden marka değiştirilerek dağıtılması planlanıyorsa, Apple bunu 4.2.6 kapsamında reddedebilir. Bu proje kapsamında uygulamanın özgün, tek bir geliştirici hesabı adına, özel geliştirilmiş bir ürün olması önerilir.
+
+13.5 Gizlilik Politikası ve Kullanım Şartları
+
+App Store Connect gönderimi için barındırılan (hosted) bir Gizlilik Politikası URL'si zorunludur; toplanan veri türleri (varsa) App Privacy formunda eksiksiz beyan edilmelidir.
+
+Kullanım Şartları'nda, kullanıcının eklediği içerik kaynaklarının yasallığından bizzat kullanıcının sorumlu olduğu açıkça belirtilmelidir.
+
+13.6 Bölgesel Yasal Farklılıklar
+
+IPTV içeriğine erişim ve yayın hakları ülkeye göre büyük farklılık gösterir. Uygulama herhangi bir içerik sağlamadığından bu risk büyük ölçüde kullanıcıya ve kullanıcının seçtiği sağlayıcıya aittir; ancak ürün sahibi, hedef pazarlara göre yerel hukuk danışmanlığı almayı değerlendirmelidir. Bu doküman hukuki tavsiye niteliği taşımaz.
+
+14. Başarı Metrikleri (KPI)
+
+Metrik
+
+Hedef (v1.0 sonrası ilk 3 ay)
+
+App Store onay süresi
+
+İlk gönderimde onay veya 2 revizyon içinde onay
+
+Çökme oranı (crash-free sessions)
+
+%99.5 ve üzeri
+
+Ortalama kanal değiştirme süresi
+
+< 2 saniye
+
+Günlük aktif kullanıcı / kurulum oranı
+
+Ürün sahibi tarafından pazarlama hedefine göre belirlenir
+
+Ortalama oturum süresi
+
+İzleme deneyiminin akıcılığının dolaylı göstergesi
+
+15. Riskler ve Varsayımlar
+
+Risk
+
+Etki
+
+Azaltma
+
+App Store reddi (5.2.3)
+
+Yüksek
+
+Bölüm 13'teki konumlandırma ve dokümantasyon stratejisinin uygulanması
+
+Sağlayıcı sunucu performansı düşükse kullanıcı deneyimi kötü algılanabilir
+
+Orta
+
+Uygulama içinde net bağlantı/hata durumu bildirimi, sağlayıcı kaynaklı sorunların ayırt edilmesi
+
+Xtream/M3U formatlarında sağlayıcıdan sağlayıcıya tutarsızlık
+
+Orta
+
+Esnek/toleranslı ayrıştırıcı (parser) tasarımı, kapsamlı hata yönetimi
+
+4 platformlu geliştirme kaynak/zaman maliyeti
+
+Orta-Yüksek
+
+MVP'nin tvOS + iOS ile başlaması, iPadOS/macOS'un Faz 2'ye bırakılması
+
+Varsayımlar
+
+Kullanıcılar kendi yasal IPTV aboneliklerine (M3U veya Xtream Codes erişim bilgisi) sahiptir; uygulama bu bilgiyi sağlamaz.
+
+Geliştirme ekibinin Apple Developer Program üyeliği ve gerekli sertifikalar mevcuttur.
+
+Sağlayıcı sunucuları HLS (.m3u8) uyumlu akış sunmaktadır; eski/özel protokoller (ör. RTMP) ek geliştirme gerektirebilir.
+
+16. Ekler
+
+16.1 Terimler Sözlüğü
+
+Terim
+
+Açıklama
+
+IPTV
+
+İnternet Protokolü üzerinden televizyon yayını
+
+M3U / M3U8
+
+Metin tabanlı oynatma listesi (playlist) formatı; M3U8 UTF-8 kodlamalı sürümdür
+
+Xtream Codes
+
+IPTV sağlayıcılarının yaygın kullandığı, JSON tabanlı REST API protokolü
+
+EPG
+
+Elektronik Program Rehberi (Electronic Program Guide) — "şimdi/sonra" yayın bilgisi
+
+HLS
+
+HTTP Live Streaming — Apple'ın geliştirdiği adaptif video akış protokolü (.m3u8 tabanlı)
+
+Focus Engine
+
+tvOS'ta kumanda ile hangi arayüz öğesinin "odakta" olduğunu yöneten sistem
+
+Top Shelf
+
+Apple TV ana ekranında uygulama simgesi odaklandığında görünen içerik alanı
+
+VOD
+
+Video on Demand — talep üzerine izlenen film/dizi içeriği
+
+16.2 Referanslar
+
+Apple Human Interface Guidelines — tvOS: developer.apple.com/design/human-interface-guidelines/tvos
+
+Apple App Store Review Guidelines: developer.apple.com/app-store/review/guidelines
+
+Apple TVServices Framework (Top Shelf): developer.apple.com/documentation/tvservices
+
+AVFoundation / AVKit: developer.apple.com/av-foundation
+
+16.3 Doküman Onayı
+
+Rol
+
+İsim
+
+Onay Durumu
+
+Ürün Sahibi
+
+—
+
+İncelemede
+
+Geliştirici / Teknik Lider
+
+—
+
+İncelemede
