@@ -207,22 +207,22 @@ public struct MediaDetailView: View {
             )
             .shadow(color: .black.opacity(0.85), radius: 12, x: 0, y: 6)
 
-            // Sağ: Büyük Puan, Yıl, Ülke, Yaş Sınırı, Altyazı/Dil Paketleri, Türler
-            VStack(alignment: .leading, spacing: 7) {
-                // 1. İçerik Logosu (Varsa)
+            // Sağ: Logo, Büyük Puan ve Dinamik Meta Bilgileri
+            VStack(alignment: .leading, spacing: 6) {
+                // 1. İçerik Logosu (Puanın Üstünde)
                 if let iconUrl = URL.fromUserString(currentItem.streamIcon) {
                     CachedAsyncImage(url: iconUrl) { logo in
                         logo
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(maxHeight: 30, alignment: .leading)
+                            .frame(maxHeight: 36, alignment: .leading)
                             .shadow(color: .black.opacity(0.7), radius: 4)
                     } placeholder: {
                         EmptyView()
                     }
                 }
 
-                // 2. Büyük IMDb / TMDB Puanı
+                // 2. Büyük IMDb / TMDB Puanı (Üstte)
                 if let rating = currentItem.rating, let score = Double(rating), score > 0 {
                     HStack(alignment: .lastTextBaseline, spacing: 4) {
                         Image(systemName: "star.fill")
@@ -237,101 +237,98 @@ public struct MediaDetailView: View {
                     }
                 }
 
-                // 3. Yıl, Ülke, Yaş Sınırı, Süre
-                HStack(spacing: 5) {
-                    if let release = currentItem.releaseDate, !release.isEmpty {
-                        Text(release.prefix(4))
-                            .font(.system(size: 11, weight: .semibold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(Color.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
-                            .foregroundStyle(.white)
-                    }
+                // 3. Birinci Dinamik Satır (Yıl, Ülke, Yaş Sınırı, Süre, Fragman)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 5) {
+                        if let release = currentItem.releaseDate, !release.isEmpty {
+                            Text(release.prefix(4))
+                                .font(.system(size: 11, weight: .semibold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Color.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
+                                .foregroundStyle(.white)
+                        }
 
-                    if let country = currentItem.country, !country.isEmpty {
-                        Text(country)
-                            .font(.system(size: 11, weight: .medium))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .lineLimit(1)
-                    }
+                        if let country = currentItem.country, !country.isEmpty {
+                            Text(country)
+                                .font(.system(size: 11, weight: .medium))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .lineLimit(1)
+                        }
 
-                    if let age = currentItem.age ?? currentItem.mpaaRating, !age.isEmpty {
-                        Text(age)
-                            .font(.system(size: 10.5, weight: .bold))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2.5)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 4)
-                                    .strokeBorder(Color.white.opacity(0.4), lineWidth: 0.8)
-                            )
-                            .foregroundStyle(.white)
-                    }
+                        if let age = currentItem.age ?? currentItem.mpaaRating, !age.isEmpty {
+                            Text(age)
+                                .font(.system(size: 10.5, weight: .bold))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2.5)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .strokeBorder(Color.white.opacity(0.4), lineWidth: 0.8)
+                                )
+                                .foregroundStyle(.white)
+                        }
 
-                    if let dur = currentItem.duration, !dur.isEmpty && dur != "0" {
-                        let durDisplay = dur.contains(":") ? dur : "\(dur) dk"
-                        Text(durDisplay)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.85))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                        if let dur = currentItem.duration, !dur.isEmpty && dur != "0" {
+                            let durDisplay = dur.contains(":") ? dur : "\(dur) dk"
+                            Text(durDisplay)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                        }
+
+                        if let trailer = currentItem.youtubeTrailer, !trailer.isEmpty, let trailerUrl = URL(string: "https://www.youtube.com/watch?v=\(trailer)") {
+                            Link(destination: trailerUrl) {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "play.rectangle.fill")
+                                        .font(.system(size: 9))
+                                    Text("Fragman")
+                                        .font(.system(size: 10, weight: .bold))
+                                }
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Color.red.opacity(0.3), in: Capsule())
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(Color.red.opacity(0.5), lineWidth: 0.6)
+                                )
+                                .foregroundStyle(.white)
+                            }
+                        }
                     }
                 }
 
-                // 4. Altyazı & Dil Paketleri (EN, TR Dublaj vb.) + Varsa Fragman
-                HStack(spacing: 5) {
-                    ForEach(detectedLanguages, id: \.self) { lang in
-                        HStack(spacing: 3) {
-                            Image(systemName: lang.contains("Altyazı") ? "captions.bubble.fill" : "speaker.wave.2.fill")
-                                .font(.system(size: 8))
-                            Text(lang)
-                                .font(.system(size: 10, weight: .bold))
-                        }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Color.blue.opacity(0.28), in: Capsule())
-                        .overlay(
-                            Capsule()
-                                .strokeBorder(Color.blue.opacity(0.45), lineWidth: 0.6)
-                        )
-                        .foregroundStyle(.white)
-                    }
-
-                    if let trailer = currentItem.youtubeTrailer, !trailer.isEmpty, let trailerUrl = URL(string: "https://www.youtube.com/watch?v=\(trailer)") {
-                        Link(destination: trailerUrl) {
+                // 4. İkinci Dinamik Satır (Dil Paketleri ve Türler Birlikte Akar)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(detectedLanguages, id: \.self) { lang in
                             HStack(spacing: 3) {
-                                Image(systemName: "play.rectangle.fill")
-                                    .font(.system(size: 9))
-                                Text("Fragman")
+                                Image(systemName: lang.contains("Altyazı") ? "captions.bubble.fill" : "speaker.wave.2.fill")
+                                    .font(.system(size: 8))
+                                Text(lang)
                                     .font(.system(size: 10, weight: .bold))
                             }
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
-                            .background(Color.red.opacity(0.28), in: Capsule())
+                            .background(Color.blue.opacity(0.28), in: Capsule())
                             .overlay(
                                 Capsule()
-                                    .strokeBorder(Color.red.opacity(0.45), lineWidth: 0.6)
+                                    .strokeBorder(Color.blue.opacity(0.45), lineWidth: 0.6)
                             )
                             .foregroundStyle(.white)
                         }
-                    }
-                }
 
-                // 5. Türler
-                if !genreList.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 4) {
-                            ForEach(genreList, id: \.self) { g in
-                                Text(g)
-                                    .font(.system(size: 10.5, weight: .medium))
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2.5)
-                                    .background(Color.white.opacity(0.10), in: Capsule())
-                                    .foregroundStyle(.white.opacity(0.85))
-                            }
+                        ForEach(genreList, id: \.self) { g in
+                            Text(g)
+                                .font(.system(size: 10.5, weight: .medium))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Color.white.opacity(0.10), in: Capsule())
+                                .foregroundStyle(.white.opacity(0.85))
                         }
                     }
                 }
