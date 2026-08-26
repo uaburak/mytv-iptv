@@ -93,8 +93,9 @@ public struct MediaDetailView: View {
             }
             .padding(.bottom, 48)
         }
+        .ignoresSafeArea(edges: .top)
         .scrollEdgeEffectStyle(.soft, for: .all)
-        .navigationTitle(currentItem.name)
+        .navigationTitle("")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -108,7 +109,7 @@ public struct MediaDetailView: View {
     @ViewBuilder
     private var heroHeader: some View {
         ZStack(alignment: .bottomLeading) {
-            // High Resolution Backdrop Banner
+            // High Resolution Backdrop Banner (Bleeds to top edge of screen)
             GeometryReader { geo in
                 ZStack {
                     Color.black
@@ -118,7 +119,7 @@ public struct MediaDetailView: View {
                             image
                                 .resizable()
                                 .aspectRatio(contentMode: .fill)
-                                .frame(width: geo.size.width, height: 290)
+                                .frame(width: geo.size.width, height: 350)
                                 .clipped()
                         } placeholder: {
                             Color.white.opacity(0.04)
@@ -126,20 +127,21 @@ public struct MediaDetailView: View {
                     }
                 }
             }
-            .frame(height: 290)
+            .frame(height: 350)
+            .ignoresSafeArea(edges: .top)
 
             // Multi-stop Cinematic Gradient Mask
             LinearGradient(
                 stops: [
-                    .init(color: .black.opacity(0.1), location: 0.0),
-                    .init(color: .black.opacity(0.45), location: 0.5),
-                    .init(color: .black.opacity(0.95), location: 0.9),
+                    .init(color: .black.opacity(0.0), location: 0.0),
+                    .init(color: .black.opacity(0.35), location: 0.4),
+                    .init(color: .black.opacity(0.85), location: 0.8),
                     .init(color: .black, location: 1.0)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: 290)
+            .frame(height: 350)
 
             // Floating Artwork & Metadata
             HStack(alignment: .bottom, spacing: 16) {
