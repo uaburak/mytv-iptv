@@ -44,57 +44,64 @@ public struct MediaDetailView: View {
     }
 
     public var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                // 1. Cinematic Hero Header with Backdrop & Artwork
-                heroHeader
+        ZStack(alignment: .top) {
+            // 1. Sticky / Sabit Büyük Arka Plan Resmi (500pt Yükseklik)
+            stickyBackdropView
 
-                // 2. Action Buttons (Glass Style)
-                actionButtons
-                    .padding(.horizontal)
+            // 2. Kaydırılabilir İçerik
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    // Logo, Başlık ve Poster Alanı (Görselin üzerinde konumlanır)
+                    heroContent
+                        .padding(.top, 200)
 
-                // 3. Storyline / Overview
-                if let plot = currentItem.overview, !plot.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Konu Özeti")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                            .foregroundStyle(.primary)
-
-                        Text(plot)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineSpacing(5)
-                    }
-                    .padding(.horizontal)
-                }
-
-                // 4. Cast & Crew Details
-                if (director != nil && !director!.isEmpty) || (cast != nil && !cast!.isEmpty) {
-                    castAndCrewSection
+                    // Oynat Butonu
+                    actionButtons
                         .padding(.horizontal)
-                }
 
-                // 5. Series Seasons & Episodes (Only for Series)
-                if currentItem.type == .series {
-                    seriesEpisodesSection
-                }
+                    // Konu Özeti
+                    if let plot = currentItem.overview, !plot.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Konu Özeti")
+                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                .foregroundStyle(.primary)
 
-                // 6. Related Content Shelf
-                if !relatedItems.isEmpty {
-                    MediaShelfRow(
-                        title: "Benzer İçerikler",
-                        items: relatedItems,
-                        onPlay: { rel in
-                            playItem(rel)
+                            Text(plot)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineSpacing(5)
                         }
-                    )
-                    .padding(.top, 4)
+                        .padding(.horizontal)
+                    }
+
+                    // Oyuncular ve Ekip
+                    if (director != nil && !director!.isEmpty) || (cast != nil && !cast!.isEmpty) {
+                        castAndCrewSection
+                            .padding(.horizontal)
+                    }
+
+                    // Dizi Sezon ve Bölümleri
+                    if currentItem.type == .series {
+                        seriesEpisodesSection
+                    }
+
+                    // Benzer İçerikler
+                    if !relatedItems.isEmpty {
+                        MediaShelfRow(
+                            title: "Benzer İçerikler",
+                            items: relatedItems,
+                            onPlay: { rel in
+                                playItem(rel)
+                            }
+                        )
+                        .padding(.top, 4)
+                    }
                 }
+                .padding(.bottom, 48)
             }
-            .padding(.bottom, 48)
+            .scrollEdgeEffectStyle(.soft, for: .all)
         }
         .ignoresSafeArea(edges: .top)
-        .scrollEdgeEffectStyle(.soft, for: .all)
         .navigationTitle("")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -105,16 +112,8 @@ public struct MediaDetailView: View {
                     storage.toggleFavorite(id: currentItem.id)
                 } label: {
                     Image(systemName: isFav ? "heart.fill" : "heart")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(isFav ? .red : .white)
-                        .padding(8)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .overlay(
-                            Circle()
-                                .strokeBorder(Color.white.opacity(0.2), lineWidth: 0.8)
-                        )
+                        .foregroundStyle(isFav ? .red : .primary)
                 }
-                .buttonStyle(.plain)
             }
         }
         .task {
@@ -122,130 +121,128 @@ public struct MediaDetailView: View {
         }
     }
 
-    // MARK: - Cinematic Hero Header
+    // MARK: - Sticky Backdrop View (Sabit & Genişletilmiş Kapak)
 
     @ViewBuilder
-    private var heroHeader: some View {
-        ZStack(alignment: .bottomLeading) {
-            // High Resolution Backdrop Banner (Bleeds to top edge of screen)
-            GeometryReader { geo in
-                ZStack {
-                    Color.black
+    private var stickyBackdropView: some View {
+        ZStack(alignment: .bottom) {
+            Color.black
 
-                    if let bgUrl = URL.fromUserString(currentItem.backdropUrl ?? currentItem.streamIcon) {
-                        CachedAsyncImage(url: bgUrl) { image in
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: geo.size.width, height: 350)
-                                .clipped()
-                        } placeholder: {
-                            Color.white.opacity(0.04)
-                        }
-                    }
+            if let bgUrl = URL.fromUserString(currentItem.backdropUrl ?? currentItem.streamIcon) {
+                CachedAsyncImage(url: bgUrl) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(maxWidth: .infinity, maxHeight: 500)
+                        .clipped()
+                } placeholder: {
+                    Color.white.opacity(0.04)
                 }
             }
-            .frame(height: 350)
-            .ignoresSafeArea(edges: .top)
 
-            // Multi-stop Cinematic Gradient Mask
+            // Gradyan Karartma Maskesi
             LinearGradient(
                 stops: [
                     .init(color: .black.opacity(0.0), location: 0.0),
-                    .init(color: .black.opacity(0.35), location: 0.4),
-                    .init(color: .black.opacity(0.85), location: 0.8),
+                    .init(color: .black.opacity(0.15), location: 0.35),
+                    .init(color: .black.opacity(0.7), location: 0.7),
+                    .init(color: .black.opacity(0.95), location: 0.92),
                     .init(color: .black, location: 1.0)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: 350)
+        }
+        .frame(height: 500)
+        .ignoresSafeArea(edges: .top)
+    }
 
-            // Floating Artwork & Metadata
-            HStack(alignment: .bottom, spacing: 16) {
-                // High Quality Floating Poster Card
-                MediaPosterView(
-                    posterUrl: currentItem.streamIcon ?? currentItem.backdropUrl,
-                    title: currentItem.name,
-                    width: 100,
-                    height: 150,
-                    cornerRadius: 12,
-                    isSeries: currentItem.type == .series
-                )
-                .shadow(color: .black.opacity(0.7), radius: 10, x: 0, y: 5)
+    // MARK: - Hero Content (Floating Poster, Logo & Title)
 
-                // Logo, Title & Chips
-                VStack(alignment: .leading, spacing: 6) {
-                    // İçerik Logosu
-                    if let iconUrl = URL.fromUserString(currentItem.streamIcon) {
-                        CachedAsyncImage(url: iconUrl) { logo in
-                            logo
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(maxHeight: 36, alignment: .leading)
-                                .shadow(color: .black.opacity(0.6), radius: 4)
-                        } placeholder: {
-                            EmptyView()
-                        }
-                    }
+    @ViewBuilder
+    private var heroContent: some View {
+        HStack(alignment: .bottom, spacing: 16) {
+            // Yüzen Poster Kartı
+            MediaPosterView(
+                posterUrl: currentItem.streamIcon ?? currentItem.backdropUrl,
+                title: currentItem.name,
+                width: 100,
+                height: 150,
+                cornerRadius: 12,
+                isSeries: currentItem.type == .series
+            )
+            .shadow(color: .black.opacity(0.8), radius: 12, x: 0, y: 6)
 
-                    Text(currentItem.name)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-                        .shadow(radius: 4)
-
-                    // Meta Chips Bar
-                    HStack(spacing: 6) {
-                        Text(currentItem.type.rawValue)
-                            .font(.system(size: 11, weight: .bold))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3.5)
-                            .background(Color.white.opacity(0.18), in: Capsule())
-                            .foregroundStyle(.white)
-
-                        if let rating = currentItem.rating, let score = Double(rating), score > 0 {
-                            HStack(spacing: 3) {
-                                Image(systemName: "star.fill")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.yellow)
-                                Text(String(format: "%.1f", score))
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundStyle(.white)
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3.5)
-                            .background(Color.white.opacity(0.18), in: Capsule())
-                        }
-
-                        if let release = currentItem.releaseDate, !release.isEmpty {
-                            Text(release.prefix(4))
-                                .font(.system(size: 11, weight: .semibold))
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3.5)
-                                .background(Color.white.opacity(0.12), in: Capsule())
-                                .foregroundStyle(.white.opacity(0.85))
-                        }
-
-                        if let dur = currentItem.duration, !dur.isEmpty && dur != "0" {
-                            let durDisplay = dur.contains(":") ? dur : "\(dur) dk"
-                            Text(durDisplay)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.8))
-                        }
-                    }
-
-                    if let genre = currentItem.genre, !genre.isEmpty {
-                        Text(genre)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.75))
-                            .lineLimit(1)
+            // Logo, Başlık & Meta Bilgiler
+            VStack(alignment: .leading, spacing: 6) {
+                // İçerik Logosu
+                if let iconUrl = URL.fromUserString(currentItem.streamIcon) {
+                    CachedAsyncImage(url: iconUrl) { logo in
+                        logo
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxHeight: 38, alignment: .leading)
+                            .shadow(color: .black.opacity(0.7), radius: 4)
+                    } placeholder: {
+                        EmptyView()
                     }
                 }
+
+                Text(currentItem.name)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .shadow(radius: 4)
+
+                // Meta Bilgi Rozetleri
+                HStack(spacing: 6) {
+                    Text(currentItem.type.rawValue)
+                        .font(.system(size: 11, weight: .bold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3.5)
+                        .background(Color.white.opacity(0.18), in: Capsule())
+                        .foregroundStyle(.white)
+
+                    if let rating = currentItem.rating, let score = Double(rating), score > 0 {
+                        HStack(spacing: 3) {
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.yellow)
+                            Text(String(format: "%.1f", score))
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3.5)
+                        .background(Color.white.opacity(0.18), in: Capsule())
+                    }
+
+                    if let release = currentItem.releaseDate, !release.isEmpty {
+                        Text(release.prefix(4))
+                            .font(.system(size: 11, weight: .semibold))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3.5)
+                            .background(Color.white.opacity(0.12), in: Capsule())
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+
+                    if let dur = currentItem.duration, !dur.isEmpty && dur != "0" {
+                        let durDisplay = dur.contains(":") ? dur : "\(dur) dk"
+                        Text(durDisplay)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                }
+
+                if let genre = currentItem.genre, !genre.isEmpty {
+                    Text(genre)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(1)
+                }
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
         }
+        .padding(.horizontal, 16)
     }
 
     // MARK: - Action Buttons (Glass Style)
@@ -425,7 +422,7 @@ public struct MediaDetailView: View {
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                                         .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
-                                    )
+                                )
 
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text("\(ep.episodeNum). \(ep.title)")
