@@ -4,6 +4,7 @@ import AVKit
 
 public struct NativePlayerView: View {
     @ObservedObject private var playback = PlaybackManager.shared
+    @ObservedObject private var appState = AppState.shared
     @Environment(\.dismiss) private var dismiss
 
     @StateObject private var coordinator = KSVideoPlayer.Coordinator()
@@ -20,12 +21,13 @@ public struct NativePlayerView: View {
     @State private var selectedAudioTrackID: Int32? = nil
     @State private var selectedSubtitleID: String? = nil
 
-    // Summary & Left Episodes Drawer State
+    // Summary & Left Drawer State
     @State private var isSummaryExpanded: Bool = false
     @State private var showEpisodesDrawer: Bool = false
     @State private var seriesEpisodes: [Episode] = []
     @State private var isLoadingEpisodes: Bool = false
     @State private var selectedSeason: Int = 1
+    @State private var selectedLiveCategoryId: String? = nil
 
     private let controlHeight: CGFloat = 44
 
@@ -39,7 +41,7 @@ public struct NativePlayerView: View {
         seriesEpisodes.filter { $0.seasonNum == selectedSeason }
     }
 
-    /// Slider üstündeki başlık: Dizilerde sadece S1:B1 - "Bölüm Adı" (tekrar eden sezon/bölüm numaraları temizlenir, dizi adı yazmaz). Film ve canlı yayında direkt içerik adı yazar.
+    /// Slider üstündeki başlık: Dizilerde S1:B1 - "Bölüm Adı", Film ve canlı yayında doğrudan Film / Kanal adı.
     private var sliderEpisodeTitle: String {
         guard let media = playback.currentMedia else { return "" }
         if media.contentType == .series {
@@ -162,7 +164,7 @@ public struct NativePlayerView: View {
                             .zIndex(10)
                     }
 
-                    // 4. Soldan Sağa Açılan, Tam Ekran Kaplamayan Saydam Glass Bölümler Paneli
+                    // 4. Soldan Sağa Açılan, Tam Ekran Kaplamayan Saydam Glass Panel (Diziler için Bölümler, Canlı TV için Kanallar)
                     if showEpisodesDrawer {
                         Color.black.opacity(0.35)
                             .ignoresSafeArea()
@@ -241,7 +243,7 @@ public struct NativePlayerView: View {
 
                 Spacer()
 
-                // CENTER CONTROLS: Floating Glass Circles (Bilgi veya Bölümler açıkken gizlenir)
+                // CENTER CONTROLS: Floating Glass Circles (Bilgi veya Panel açıkken gizlenir)
                 if !isSummaryExpanded && !showEpisodesDrawer {
                     centerControls
                         .padding(.horizontal, horizontalPadding)
@@ -374,8 +376,10 @@ public struct NativePlayerView: View {
     // MARK: - Bottom Section (Başlık, Slider ve Altında Kayan Bilgi Alanı)
 
     private func bottomSection(geometry: GeometryProxy, isLandscape: Bool) -> some View {
-        VStack(alignment: .leading, spacing: isLandscape ? (isSummaryExpanded ? 6 : 10) : 12) {
-            // 1. ÜST SATIR: Sadece Sezon/Bölüm Adı + Sağ Alt Kontrol Kapsülü
+        let isLive = (playback.currentMedia?.contentType == .live)
+
+        return VStack(alignment: .leading, spacing: isLandscape ? (isSummaryExpanded ? 6 : 10) : 12) {
+            // 1. ÜST SATIR: Başlık + Sağ Alt Kontrol Kapsülü
             HStack(alignment: .center) {
                 Text(sliderEpisodeTitle)
                     .font(.system(size: isLandscape ? 16 : 17, weight: .bold))
@@ -384,151 +388,172 @@ public struct NativePlayerView: View {
 
                 Spacer()
 
-                // Sağ Alt Kontrol Kapsülü
-                HStack(spacing: 8) {
-                    // 1. Oynatma Hızı
-                    Menu {
-                        ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0] as [Float], id: \.self) { speed in
-                            Button {
-                                #if os(iOS)
-                                triggerHaptic(.light)
-                                #endif
-                                coordinator.playbackRate = speed
-                                coordinator.playerLayer?.player.playbackRate = speed
-                                scheduleControlsHide()
-                            } label: {
-                                HStack {
-                                    Text("\(String(format: "%.2gx", speed))")
-                                    if coordinator.playbackRate == speed {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "gauge.with.dots.needle.67percent")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 30, height: 30)
-                            .contentShape(Rectangle())
-                    }
-
-                    // 2. Ses Dili / Parçası
-                    Menu {
-                        let tracks = coordinator.playerLayer?.player.tracks(mediaType: .audio) ?? []
-                        if tracks.isEmpty {
-                            Button {} label: {
-                                HStack {
-                                    Text("Varsayılan Ses")
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        } else {
-                            ForEach(tracks, id: \.trackID) { track in
-                                Button {
-                                    #if os(iOS)
-                                    triggerHaptic(.medium)
-                                    #endif
-                                    coordinator.playerLayer?.player.select(track: track)
-                                    selectedAudioTrackID = track.trackID
-                                    scheduleControlsHide()
-                                } label: {
-                                    HStack {
-                                        Text(track.name.isEmpty ? "Ses \(track.trackID)" : track.name)
-                                        if selectedAudioTrackID == track.trackID || (selectedAudioTrackID == nil && track.isEnabled) {
-                                            Image(systemName: "checkmark")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "waveform")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 30, height: 30)
-                            .contentShape(Rectangle())
-                    }
-
-                    // 3. Bilgi Butonu (Aç/Kapat)
+                // Sağ Alt Kontrol Kapsülü (Canlı TV ise sadece "Kanallar", Film/Dizi ise Hız/Ses/Bilgi/Altyazı)
+                if isLive {
                     Button {
                         #if os(iOS)
                         triggerHaptic(.light)
                         #endif
-                        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
-                            isSummaryExpanded.toggle()
-                        }
-                        if isSummaryExpanded {
-                            hideControlsTask?.cancel()
-                        } else {
-                            scheduleControlsHide()
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            showEpisodesDrawer = true
+                            isSummaryExpanded = false
                         }
                     } label: {
-                        Image(systemName: isSummaryExpanded ? "info.circle.fill" : "info.circle")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 30, height: 30)
-                            .contentShape(Rectangle())
-                    }
-
-                    // 4. Altyazı Menüsü
-                    Menu {
-                        Button {
-                            #if os(iOS)
-                            triggerHaptic(.medium)
-                            #endif
-                            coordinator.subtitleModel.selectedSubtitleInfo = nil
-                            selectedSubtitleID = nil
-                            scheduleControlsHide()
-                        } label: {
-                            HStack {
-                                Text("Kapalı")
-                                if selectedSubtitleID == nil {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
+                        HStack(spacing: 6) {
+                            Image(systemName: "tv")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text("Kanallar")
+                                .font(.system(size: 13, weight: .bold))
                         }
-
-                        let subtitles = coordinator.subtitleModel.subtitleInfos
-                        if !subtitles.isEmpty {
-                            ForEach(subtitles, id: \.subtitleID) { track in
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .frame(height: isLandscape ? 34 : controlHeight)
+                    }
+                    .glassEffect(in: Capsule())
+                } else {
+                    HStack(spacing: 8) {
+                        // 1. Oynatma Hızı
+                        Menu {
+                            ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0] as [Float], id: \.self) { speed in
                                 Button {
                                     #if os(iOS)
-                                    triggerHaptic(.medium)
+                                    triggerHaptic(.light)
                                     #endif
-                                    coordinator.subtitleModel.selectedSubtitleInfo = track
-                                    selectedSubtitleID = track.subtitleID
-                                    if let info = track as? MediaPlayerTrack {
-                                        coordinator.playerLayer?.player.select(track: info)
-                                    }
+                                    coordinator.playbackRate = speed
+                                    coordinator.playerLayer?.player.playbackRate = speed
                                     scheduleControlsHide()
                                 } label: {
                                     HStack {
-                                        Text(track.name)
-                                        if selectedSubtitleID == track.subtitleID {
+                                        Text("\(String(format: "%.2gx", speed))")
+                                        if coordinator.playbackRate == speed {
                                             Image(systemName: "checkmark")
                                         }
                                     }
                                 }
                             }
+                        } label: {
+                            Image(systemName: "gauge.with.dots.needle.67percent")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 30, height: 30)
+                                .contentShape(Rectangle())
                         }
-                    } label: {
-                        Image(systemName: "captions.bubble")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 30, height: 30)
-                            .contentShape(Rectangle())
+
+                        // 2. Ses Dili / Parçası
+                        Menu {
+                            let tracks = coordinator.playerLayer?.player.tracks(mediaType: .audio) ?? []
+                            if tracks.isEmpty {
+                                Button {} label: {
+                                    HStack {
+                                        Text("Varsayılan Ses")
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            } else {
+                                ForEach(tracks, id: \.trackID) { track in
+                                    Button {
+                                        #if os(iOS)
+                                        triggerHaptic(.medium)
+                                        #endif
+                                        coordinator.playerLayer?.player.select(track: track)
+                                        selectedAudioTrackID = track.trackID
+                                        scheduleControlsHide()
+                                    } label: {
+                                        HStack {
+                                            Text(track.name.isEmpty ? "Ses \(track.trackID)" : track.name)
+                                            if selectedAudioTrackID == track.trackID || (selectedAudioTrackID == nil && track.isEnabled) {
+                                                Image(systemName: "checkmark")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "waveform")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 30, height: 30)
+                                .contentShape(Rectangle())
+                        }
+
+                        // 3. Bilgi Butonu (Aç/Kapat)
+                        Button {
+                            #if os(iOS)
+                            triggerHaptic(.light)
+                            #endif
+                            withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+                                isSummaryExpanded.toggle()
+                            }
+                            if isSummaryExpanded {
+                                hideControlsTask?.cancel()
+                            } else {
+                                scheduleControlsHide()
+                            }
+                        } label: {
+                            Image(systemName: isSummaryExpanded ? "info.circle.fill" : "info.circle")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 30, height: 30)
+                                .contentShape(Rectangle())
+                        }
+
+                        // 4. Altyazı Menüsü
+                        Menu {
+                            Button {
+                                #if os(iOS)
+                                triggerHaptic(.medium)
+                                #endif
+                                coordinator.subtitleModel.selectedSubtitleInfo = nil
+                                selectedSubtitleID = nil
+                                scheduleControlsHide()
+                            } label: {
+                                HStack {
+                                    Text("Kapalı")
+                                    if selectedSubtitleID == nil {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+
+                            let subtitles = coordinator.subtitleModel.subtitleInfos
+                            if !subtitles.isEmpty {
+                                ForEach(subtitles, id: \.subtitleID) { track in
+                                    Button {
+                                        #if os(iOS)
+                                        triggerHaptic(.medium)
+                                        #endif
+                                        coordinator.subtitleModel.selectedSubtitleInfo = track
+                                        selectedSubtitleID = track.subtitleID
+                                        if let info = track as? MediaPlayerTrack {
+                                            coordinator.playerLayer?.player.select(track: info)
+                                        }
+                                        scheduleControlsHide()
+                                    } label: {
+                                        HStack {
+                                            Text(track.name)
+                                            if selectedSubtitleID == track.subtitleID {
+                                                Image(systemName: "checkmark")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "captions.bubble")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 30, height: 30)
+                                .contentShape(Rectangle())
+                        }
                     }
+                    .padding(.horizontal, 8)
+                    .frame(height: isLandscape ? 38 : controlHeight)
+                    .glassEffect(in: Capsule())
                 }
-                .padding(.horizontal, 8)
-                .frame(height: isLandscape ? 38 : controlHeight)
-                .glassEffect(in: Capsule())
             }
 
             // 2. TIMELINE SLIDER: [Geçen Süre] [Slider] [-Kalan Süre]
-            let isLive = (playback.currentMedia?.contentType == .live) || (totalDuration <= 0)
-
-            if isLive {
+            if isLive || totalDuration <= 0 {
                 HStack(spacing: 6) {
                     Circle()
                         .fill(Color.red)
@@ -575,7 +600,7 @@ public struct NativePlayerView: View {
             }
 
             // 3. DOĞRUDAN SLIDER'IN ALTINDA AÇILAN BİLGİ ALANI (Genel İçerik Bilgileri)
-            if isSummaryExpanded {
+            if isSummaryExpanded && !isLive {
                 expandedAppleTVInfoSection(isLandscape: isLandscape)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
@@ -850,9 +875,185 @@ public struct NativePlayerView: View {
         }
     }
 
-    // MARK: - Left Episodes Drawer (Soldan Sağa Açılan, Tam Ekran Kaplamayan Glass Drawer)
+    // MARK: - Left Drawer (Canlı TV için Kanallar, Diziler için Bölümler)
 
+    @ViewBuilder
     private func leftEpisodesDrawer(geometry: GeometryProxy) -> some View {
+        if playback.currentMedia?.contentType == .live {
+            liveChannelsDrawer(geometry: geometry)
+        } else {
+            seriesEpisodesDrawer(geometry: geometry)
+        }
+    }
+
+    // MARK: - Canlı TV Kanal Listesi Drawer'ı
+
+    private func liveChannelsDrawer(geometry: GeometryProxy) -> some View {
+        let isLandscape = geometry.size.width > geometry.size.height
+        let drawerWidth = min(360, geometry.size.width * (isLandscape ? 0.44 : 0.85))
+        let topPad: CGFloat = isLandscape ? 16 : 64
+        let bottomPad: CGFloat = isLandscape ? 16 : 36
+
+        let currentChannel = appState.channels.first(where: { $0.id == playback.currentMedia?.mediaId })
+        let defaultCategoryId = currentChannel?.categoryId ?? appState.liveCategories.first?.id ?? ""
+        let activeCategoryId = selectedLiveCategoryId ?? defaultCategoryId
+        let activeCategoryName = appState.liveCategories.first(where: { $0.id == activeCategoryId })?.name ?? "Kanallar"
+        let categoryChannels = appState.channels.filter { $0.categoryId == activeCategoryId }
+        let channelsToDisplay = categoryChannels.isEmpty ? appState.channels : categoryChannels
+
+        return VStack(alignment: .leading, spacing: 14) {
+            // Header: Kategori Adı, Kanal Sayısı ve Kapat Butonu
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(activeCategoryName)
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+
+                    Text("\(channelsToDisplay.count) Kanal")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.65))
+                }
+
+                Spacer()
+
+                Button {
+                    #if os(iOS)
+                    triggerHaptic(.light)
+                    #endif
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        showEpisodesDrawer = false
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 32, height: 32)
+                }
+                .glassEffect(in: Circle())
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 18)
+
+            // Canlı TV Kategorileri (Yatay Haplar)
+            if appState.liveCategories.count > 1 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(appState.liveCategories) { cat in
+                            let isSelected = (cat.id == activeCategoryId)
+                            Button {
+                                #if os(iOS)
+                                triggerHaptic(.light)
+                                #endif
+                                selectedLiveCategoryId = cat.id
+                            } label: {
+                                Text(cat.name)
+                                    .font(.system(size: 12, weight: isSelected ? .bold : .medium))
+                                    .foregroundStyle(isSelected ? .black : .white)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 7)
+                                    .background(
+                                        isSelected ? Color.white : Color.white.opacity(0.12),
+                                        in: Capsule()
+                                    )
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                }
+            }
+
+            // Kanal Listesi
+            if channelsToDisplay.isEmpty {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Text("Kanal bulunamadı.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(0.6))
+                    Spacer()
+                }
+                Spacer()
+            } else {
+                ScrollView(showsIndicators: false) {
+                    LazyVStack(spacing: 8) {
+                        ForEach(channelsToDisplay) { ch in
+                            let isCurrent = (ch.id == playback.currentMedia?.mediaId)
+
+                            Button {
+                                #if os(iOS)
+                                triggerHaptic(.medium)
+                                #endif
+                                playSelectedChannel(ch)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    // Kanal Logosu
+                                    ZStack {
+                                        Color.white.opacity(0.08)
+
+                                        if let icon = ch.streamIcon, let url = URL(string: icon) {
+                                            AsyncImage(url: url) { phase in
+                                                if let img = phase.image {
+                                                    img.resizable().aspectRatio(contentMode: .fit)
+                                                        .padding(4)
+                                                } else {
+                                                    Image(systemName: "tv")
+                                                        .font(.system(size: 14))
+                                                        .foregroundStyle(.white.opacity(0.5))
+                                                }
+                                            }
+                                        } else {
+                                            Image(systemName: "tv")
+                                                .font(.system(size: 14))
+                                                .foregroundStyle(.white.opacity(0.5))
+                                        }
+                                    }
+                                    .frame(width: 46, height: 36)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5))
+
+                                    // Kanal Adı
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(ch.name)
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(isCurrent ? Color.yellow : .white)
+                                            .lineLimit(1)
+                                    }
+
+                                    Spacer()
+
+                                    if isCurrent {
+                                        Text("Oynatılıyor")
+                                            .font(.system(size: 10, weight: .bold))
+                                            .foregroundStyle(.yellow)
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 3)
+                                            .background(Color.yellow.opacity(0.20), in: Capsule())
+                                    }
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(Color.white.opacity(isCurrent ? 0.16 : 0.07), in: RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 20)
+                }
+            }
+        }
+        .frame(width: drawerWidth)
+        .frame(maxHeight: .infinity)
+        .glassEffect(in: RoundedRectangle(cornerRadius: 20))
+        .padding(.leading, isLandscape ? 24 : 14)
+        .padding(.top, topPad)
+        .padding(.bottom, bottomPad)
+        .shadow(color: Color.black.opacity(0.5), radius: 24, x: 8, y: 0)
+    }
+
+    // MARK: - Dizi Bölümler Drawer'ı
+
+    private func seriesEpisodesDrawer(geometry: GeometryProxy) -> some View {
         let isLandscape = geometry.size.width > geometry.size.height
         let drawerWidth = min(360, geometry.size.width * (isLandscape ? 0.44 : 0.85))
         let topPad: CGFloat = isLandscape ? 16 : 64
@@ -1027,6 +1228,7 @@ public struct NativePlayerView: View {
     // MARK: - Actions
 
     private func openSummary() {
+        guard playback.currentMedia?.contentType != .live else { return }
         withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
             isSummaryExpanded = true
             hideControlsTask?.cancel()
@@ -1074,6 +1276,18 @@ public struct NativePlayerView: View {
             seasonNum: ep.seasonNum
         )
         playback.play(media: newMedia)
+    }
+
+    private func playSelectedChannel(_ ch: Channel) {
+        let media = PlayableMedia(
+            mediaId: ch.id,
+            title: ch.name,
+            subtitle: "Canlı Yayın",
+            posterUrl: ch.streamIcon,
+            streamUrl: ch.streamUrl,
+            contentType: .live
+        )
+        playback.play(media: media)
     }
 
     // MARK: - Error Overlay
