@@ -15,8 +15,6 @@ public struct NativePlayerView: View {
     @State private var isScrubbing: Bool = false
     @State private var scrubTime: Double = 0
     @State private var hideControlsTask: Task<Void, Never>? = nil
-    @State private var volume: Float = 1.0
-    @State private var showShareSheet: Bool = false
 
     // Track Selection State
     @State private var selectedAudioTrackID: Int32? = nil
@@ -24,12 +22,11 @@ public struct NativePlayerView: View {
 
     // Summary & Left Episodes Drawer State
     @State private var isSummaryExpanded: Bool = false
-    @State private var showLeftEpisodesDrawer: Bool = false
+    @State private var showEpisodesDrawer: Bool = false
     @State private var seriesEpisodes: [Episode] = []
     @State private var isLoadingEpisodes: Bool = false
     @State private var selectedSeason: Int = 1
 
-    // Standart Kapsül & Buton Yüksekliği (44pt)
     private let controlHeight: CGFloat = 44
 
     public init() {}
@@ -42,9 +39,59 @@ public struct NativePlayerView: View {
         seriesEpisodes.filter { $0.seasonNum == selectedSeason }
     }
 
+    /// Slider üstündeki başlık: Dizilerde sadece S1:B1 - "Bölüm Adı" (tekrar eden sezon/bölüm numaraları temizlenir, dizi adı yazmaz). Film ve canlı yayında direkt içerik adı yazar.
+    private var sliderEpisodeTitle: String {
+        guard let media = playback.currentMedia else { return "" }
+        if media.contentType == .series {
+            let s = media.seasonNum ?? 1
+            let e = media.episodeNum ?? 1
+            let sePrefix = "S\(s):B\(e)"
+
+            var rawTitle = ""
+            if let currentEp = seriesEpisodes.first(where: { $0.episodeNum == media.episodeNum && $0.seasonNum == media.seasonNum }) {
+                rawTitle = currentEp.title
+            } else if let subtitle = media.subtitle, !subtitle.isEmpty {
+                let parts = subtitle.components(separatedBy: "•").map { $0.trimmingCharacters(in: .whitespaces) }
+                rawTitle = parts.count > 1 ? parts[1...].joined(separator: " • ") : parts[0]
+            }
+
+            let cleaned = cleanEpisodeName(title: rawTitle, episodeNum: e)
+            if !cleaned.isEmpty && cleaned != "Bölüm \(e)" {
+                return "\(sePrefix) - \(cleaned)"
+            } else {
+                return sePrefix
+            }
+        } else {
+            return media.title
+        }
+    }
+
+    private func cleanEpisodeName(title: String, episodeNum: Int) -> String {
+        var cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let patterns = [
+            #"^[Ss]\d+[\s:._-]*[EeBb]\d+[\s:._-]*"#,
+            #"^[Ss]eason\s*\d+[\s:._-]*[Ee]pisode\s*\d+[\s:._-]*"#,
+            #"^[Ss]ezon\s*\d+[\s:._-]*[Bb]ölüm\s*\d+[\s:._-]*"#,
+            #"^[Ee]pisode\s*\d+[\s:._-]*"#,
+            #"^[Bb]ölüm\s*\d+[\s:._-]*"#,
+            #"^\d+\.\s*[Bb]ölüm[\s:._-]*"#,
+            #"^-\s*"#
+        ]
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
+                let range = NSRange(location: 0, length: cleaned.utf16.count)
+                cleaned = regex.stringByReplacingMatches(in: cleaned, options: [], range: range, withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        while cleaned.hasPrefix("-") || cleaned.hasPrefix(":") || cleaned.hasPrefix("•") {
+            cleaned = String(cleaned.dropFirst()).trimmingCharacters(in: .whitespaces)
+        }
+        return cleaned.isEmpty ? "Bölüm \(episodeNum)" : cleaned
+    }
+
     public var body: some View {
         GeometryReader { geometry in
-            ZStack(alignment: .bottomLeading) {
+            ZStack(alignment: .leading) {
                 Color.black.ignoresSafeArea()
 
                 if let url = playback.activePlayableURL {
@@ -59,7 +106,7 @@ public struct NativePlayerView: View {
                             self.playerState = state
                             if state == .readyToPlay || state == .bufferFinished {
                                 self.isPlaying = true
-                                if !self.isSummaryExpanded && !self.showLeftEpisodesDrawer {
+                                if !self.isSummaryExpanded && !self.showEpisodesDrawer {
                                     self.scheduleControlsHide()
                                 }
                             } else if state == .paused {
@@ -78,13 +125,13 @@ public struct NativePlayerView: View {
                     }
                     .ignoresSafeArea()
 
-                    // 2. Video Alanı Arka Plan Dokunma & Kaydırma Katmanı
+                    // 2. Video Alanı Dokunma ve Kaydırma Katmanı
                     Color.black.opacity(0.001)
                         .ignoresSafeArea()
                         .onTapGesture {
-                            if showLeftEpisodesDrawer {
+                            if showEpisodesDrawer {
                                 withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                    showLeftEpisodesDrawer = false
+                                    showEpisodesDrawer = false
                                 }
                             } else if isSummaryExpanded {
                                 withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
@@ -98,27 +145,35 @@ public struct NativePlayerView: View {
                             DragGesture(minimumDistance: 25)
                                 .onEnded { value in
                                     if value.translation.height < -35 {
-                                        // Yukarı kaydırınca Başlık/Slider yukarı kayar ve Bilgi alanı açılır
                                         openSummary()
                                     } else if value.translation.height > 35 {
-                                        // Aşağı kaydırınca kapanır
                                         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                                             isSummaryExpanded = false
-                                            showLeftEpisodesDrawer = false
+                                            showEpisodesDrawer = false
                                         }
                                     }
                                 }
                         )
 
-                    // 3. Apple Native Glass Kontroller Katmanı (Başlık + Slider + Bilgi Alanı)
+                    // 3. Apple Native Glass Kontroller Katmanı
                     if isControlsVisible {
                         controlsOverlay(geometry: geometry)
                             .transition(.opacity)
                             .zIndex(10)
                     }
 
-                    // 4. EKRANIN SOLUNDAN GELEN BÖLÜMLER ALANI (Kapsayıcısız, Doğal Soldan Akış)
-                    if showLeftEpisodesDrawer {
+                    // 4. Soldan Sağa Açılan, Tam Ekran Kaplamayan Saydam Glass Bölümler Paneli
+                    if showEpisodesDrawer {
+                        Color.black.opacity(0.35)
+                            .ignoresSafeArea()
+                            .onTapGesture {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                    showEpisodesDrawer = false
+                                }
+                            }
+                            .transition(.opacity)
+                            .zIndex(25)
+
                         leftEpisodesDrawer(geometry: geometry)
                             .transition(.move(edge: .leading).combined(with: .opacity))
                             .zIndex(30)
@@ -136,15 +191,7 @@ public struct NativePlayerView: View {
         .ignoresSafeArea()
         .statusBarHidden(true)
         #endif
-        #if os(iOS)
-        .sheet(isPresented: $showShareSheet) {
-            if let url = playback.activePlayableURL {
-                ShareActivityView(activityItems: [playback.currentMedia?.title ?? "Video", url])
-            }
-        }
-        #endif
         .onAppear {
-            volume = coordinator.playbackVolume
             scheduleControlsHide()
         }
         .onDisappear {
@@ -158,7 +205,12 @@ public struct NativePlayerView: View {
     // MARK: - Main Controls Overlay
 
     private func controlsOverlay(geometry: GeometryProxy) -> some View {
-        ZStack {
+        let isLandscape = geometry.size.width > geometry.size.height
+        let horizontalPadding: CGFloat = isLandscape ? 68 : 20
+        let topPadding: CGFloat = isLandscape ? 14 : 68
+        let bottomPadding: CGFloat = isLandscape ? (isSummaryExpanded ? 8 : 16) : 24
+
+        return ZStack {
             // Subtle backdrop gradients
             VStack {
                 LinearGradient(
@@ -172,42 +224,70 @@ public struct NativePlayerView: View {
                 Spacer()
 
                 LinearGradient(
-                    colors: [Color.black.opacity(0.0), Color.black.opacity(0.88)],
+                    colors: [Color.black.opacity(0.0), Color.black.opacity(0.92)],
                     startPoint: .top,
                     endPoint: .bottom
                 )
-                .frame(height: isSummaryExpanded ? 300 : 150)
+                .frame(height: isSummaryExpanded ? (isLandscape ? 240 : 340) : 150)
                 .ignoresSafeArea()
             }
             .allowsHitTesting(false)
 
             VStack(spacing: 0) {
-                // TOP BAR: Close + [PiP, AirPlay, Share] (Left) & [Volume Slider] (Right)
+                // TOP BAR: Sol: PiP, Sağ: Çarpı Butonu
                 topBar
+                    .padding(.top, topPadding)
+                    .padding(.horizontal, horizontalPadding)
 
                 Spacer()
 
-                // CENTER CONTROLS: Floating Glass Circles (Gizlenir eğer bilgi veya bölümler açıksa)
-                if !isSummaryExpanded && !showLeftEpisodesDrawer {
+                // CENTER CONTROLS: Floating Glass Circles (Bilgi veya Bölümler açıkken gizlenir)
+                if !isSummaryExpanded && !showEpisodesDrawer {
                     centerControls
+                        .padding(.horizontal, horizontalPadding)
                         .transition(.opacity.combined(with: .scale(scale: 0.95)))
                 }
 
                 Spacer()
 
-                // BOTTOM SECTION: Başlık + Slider Asla Gizlenmez, Bilgi Doğrudan Altına Eklenir
-                bottomSection(geometry: geometry)
+                // BOTTOM SECTION: Başlık + Slider + Bilgi Alanı
+                bottomSection(geometry: geometry, isLandscape: isLandscape)
+                    .padding(.bottom, bottomPadding)
+                    .padding(.horizontal, horizontalPadding)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 10)
         }
     }
 
     // MARK: - Top Bar
 
     private var topBar: some View {
-        HStack(alignment: .center, spacing: 14) {
-            // Left: Close Button (Glass Circle Button - 44x44)
+        HStack(alignment: .center) {
+            // Sol: PiP Butonu (Cam Yuvarlak)
+            Button {
+                #if os(iOS)
+                triggerHaptic(.light)
+                #endif
+                if let pip = coordinator.playerLayer?.player.pipController {
+                    if pip.isPictureInPictureActive {
+                        pip.stopPictureInPicture()
+                    } else {
+                        pip.startPictureInPicture()
+                    }
+                } else {
+                    coordinator.isScaleAspectFill.toggle()
+                }
+                scheduleControlsHide()
+            } label: {
+                Image(systemName: "pip.enter")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: controlHeight, height: controlHeight)
+            }
+            .glassEffect(in: Circle())
+
+            Spacer()
+
+            // Sağ: Çarpı (Kapat) Butonu
             Button {
                 #if os(iOS)
                 triggerHaptic(.light)
@@ -221,90 +301,6 @@ public struct NativePlayerView: View {
                     .frame(width: controlHeight, height: controlHeight)
             }
             .glassEffect(in: Circle())
-
-            // Left: Top Actions Glass Capsule [PiP, AirPlay, Share] - Height: 44
-            HStack(spacing: 20) {
-                // PiP Button
-                Button {
-                    #if os(iOS)
-                    triggerHaptic(.light)
-                    #endif
-                    if let pip = coordinator.playerLayer?.player.pipController {
-                        if pip.isPictureInPictureActive {
-                            pip.stopPictureInPicture()
-                        } else {
-                            pip.startPictureInPicture()
-                        }
-                    } else {
-                        coordinator.isScaleAspectFill.toggle()
-                    }
-                    scheduleControlsHide()
-                } label: {
-                    Image(systemName: "pip.enter")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-
-                // AirPlay Button
-                AirPlayView()
-                    .frame(width: 20, height: 20)
-                    .tint(.white)
-
-                // Share Button
-                Button {
-                    #if os(iOS)
-                    triggerHaptic(.light)
-                    showShareSheet = true
-                    #endif
-                    scheduleControlsHide()
-                } label: {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-            }
-            .padding(.horizontal, 16)
-            .frame(height: controlHeight)
-            .glassEffect(in: Capsule())
-
-            Spacer()
-
-            // Right: Volume Glass Capsule [Slider + Speaker] - Height: 44
-            HStack(spacing: 12) {
-                Slider(
-                    value: Binding(
-                        get: { volume },
-                        set: { newVol in
-                            volume = newVol
-                            coordinator.playbackVolume = newVol
-                            coordinator.isMuted = (newVol == 0)
-                        }
-                    ),
-                    in: 0...1
-                )
-                .tint(.white)
-                .frame(width: 110)
-
-                Button {
-                    #if os(iOS)
-                    triggerHaptic(.light)
-                    #endif
-                    coordinator.isMuted.toggle()
-                    if coordinator.isMuted {
-                        volume = 0
-                    } else {
-                        volume = coordinator.playbackVolume > 0 ? coordinator.playbackVolume : 1.0
-                    }
-                    scheduleControlsHide()
-                } label: {
-                    Image(systemName: (coordinator.isMuted || volume == 0) ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-            }
-            .padding(.horizontal, 16)
-            .frame(height: controlHeight)
-            .glassEffect(in: Capsule())
         }
     }
 
@@ -312,7 +308,7 @@ public struct NativePlayerView: View {
 
     private var centerControls: some View {
         HStack(spacing: 42) {
-            // 15 Saniye Geri (Glass Circle - 56x56)
+            // 15 Saniye Geri
             Button {
                 #if os(iOS)
                 triggerHaptic(.medium)
@@ -327,7 +323,7 @@ public struct NativePlayerView: View {
             }
             .glassEffect(in: Circle())
 
-            // Center Play / Pause (Glass Circle - 72x72)
+            // Center Play / Pause
             Button {
                 #if os(iOS)
                 triggerHaptic(.medium)
@@ -358,7 +354,7 @@ public struct NativePlayerView: View {
             }
             .glassEffect(in: Circle())
 
-            // 15 Saniye İleri (Glass Circle - 56x56)
+            // 15 Saniye İleri
             Button {
                 #if os(iOS)
                 triggerHaptic(.medium)
@@ -377,12 +373,12 @@ public struct NativePlayerView: View {
 
     // MARK: - Bottom Section (Başlık, Slider ve Altında Kayan Bilgi Alanı)
 
-    private func bottomSection(geometry: GeometryProxy) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // 1. ÜST SATIR: Başlık + Sağ Alt Kontrol Kapsülü [Hız, Ses, Bilgi, Altyazı]
+    private func bottomSection(geometry: GeometryProxy, isLandscape: Bool) -> some View {
+        VStack(alignment: .leading, spacing: isLandscape ? (isSummaryExpanded ? 6 : 10) : 12) {
+            // 1. ÜST SATIR: Sadece Sezon/Bölüm Adı + Sağ Alt Kontrol Kapsülü
             HStack(alignment: .center) {
-                Text(playback.currentMedia?.title ?? "")
-                    .font(.system(size: 18, weight: .bold))
+                Text(sliderEpisodeTitle)
+                    .font(.system(size: isLandscape ? 16 : 17, weight: .bold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
 
@@ -411,9 +407,9 @@ public struct NativePlayerView: View {
                         }
                     } label: {
                         Image(systemName: "gauge.with.dots.needle.67percent")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.white)
-                            .frame(width: 32, height: 32)
+                            .frame(width: 30, height: 30)
                             .contentShape(Rectangle())
                     }
 
@@ -448,9 +444,9 @@ public struct NativePlayerView: View {
                         }
                     } label: {
                         Image(systemName: "waveform")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.white)
-                            .frame(width: 32, height: 32)
+                            .frame(width: 30, height: 30)
                             .contentShape(Rectangle())
                     }
 
@@ -469,9 +465,9 @@ public struct NativePlayerView: View {
                         }
                     } label: {
                         Image(systemName: isSummaryExpanded ? "info.circle.fill" : "info.circle")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.white)
-                            .frame(width: 32, height: 32)
+                            .frame(width: 30, height: 30)
                             .contentShape(Rectangle())
                     }
 
@@ -518,18 +514,18 @@ public struct NativePlayerView: View {
                         }
                     } label: {
                         Image(systemName: "captions.bubble")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.white)
-                            .frame(width: 32, height: 32)
+                            .frame(width: 30, height: 30)
                             .contentShape(Rectangle())
                     }
                 }
-                .padding(.horizontal, 10)
-                .frame(height: controlHeight)
+                .padding(.horizontal, 8)
+                .frame(height: isLandscape ? 38 : controlHeight)
                 .glassEffect(in: Capsule())
             }
 
-            // 2. TIMELINE SLIDER (AYNI HİZADA: [Geçen Süre] [Slider] [-Kalan Süre])
+            // 2. TIMELINE SLIDER: [Geçen Süre] [Slider] [-Kalan Süre]
             let isLive = (playback.currentMedia?.contentType == .live) || (totalDuration <= 0)
 
             if isLive {
@@ -545,11 +541,11 @@ public struct NativePlayerView: View {
                     Spacer()
                 }
             } else {
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     Text(formatTime(Int(isScrubbing ? scrubTime : currentPlaybackTime)))
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.85))
-                        .frame(minWidth: 44, alignment: .leading)
+                        .frame(minWidth: 42, alignment: .leading)
 
                     Slider(
                         value: Binding(
@@ -574,220 +570,309 @@ public struct NativePlayerView: View {
                     Text("-\(formatTime(Int(remaining)))")
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.85))
-                        .frame(minWidth: 48, alignment: .trailing)
+                        .frame(minWidth: 46, alignment: .trailing)
                 }
             }
 
-            // 3. DOĞRUDAN SLIDER'IN ALTINDA AÇILAN APPLE TV BİLGİ ALANI (Butonlar kaldırıldı, doğrudan içerik)
+            // 3. DOĞRUDAN SLIDER'IN ALTINDA AÇILAN BİLGİ ALANI (Genel İçerik Bilgileri)
             if isSummaryExpanded {
-                expandedAppleTVInfoSection
+                expandedAppleTVInfoSection(isLandscape: isLandscape)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
     }
 
-    // MARK: - Expanded Apple TV Info Section (Bilgi / İzlemeyi Sürdür Butonları Kaldırıldı)
+    // MARK: - Expanded Apple TV Info Section (Genel İçerik Bilgileri)
 
-    private var expandedAppleTVInfoSection: some View {
+    private func expandedAppleTVInfoSection(isLandscape: Bool) -> some View {
         Group {
             if let media = playback.currentMedia {
-                HStack(alignment: .top, spacing: 18) {
-                    // SOL: Kapak Resmi (Poster)
-                    if let posterUrl = media.posterUrl, let url = URL(string: posterUrl) {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .aspectRatio(2/3, contentMode: .fill)
-                            default:
-                                Rectangle()
-                                    .fill(Color.white.opacity(0.12))
-                                    .overlay(
-                                        Image(systemName: "film")
-                                            .font(.system(size: 24))
-                                            .foregroundStyle(.white.opacity(0.4))
-                                    )
-                            }
-                        }
-                        .frame(width: 86, height: 124)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
-                        )
-                        .shadow(color: Color.black.opacity(0.4), radius: 8, x: 0, y: 4)
-                    }
-
-                    // ORTA: Başlık, Açıklama ve Apple TV Rozetleri
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(media.title)
-                            .font(.system(size: 19, weight: .bold))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-
-                        if let plot = media.overview, !plot.isEmpty {
-                            Text(plot)
-                                .font(.system(size: 13, weight: .regular))
-                                .foregroundStyle(.white.opacity(0.85))
-                                .lineSpacing(2)
-                                .lineLimit(3)
-                        }
-
-                        // Rozetler Satırı
-                        HStack(spacing: 8) {
-                            let genreText = media.genre ?? "Film"
-                            let durationText = media.duration != nil ? " • \(media.duration!)" : ""
-                            Text("\(genreText)\(durationText)")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.70))
-
-                            if let rating = media.rating, !rating.isEmpty, rating != "0" {
-                                HStack(spacing: 3) {
-                                    Text("🍅")
-                                        .font(.system(size: 10))
-                                    Text("%\(Int((Double(rating) ?? 0) * 10))")
-                                        .font(.system(size: 11, weight: .bold))
-                                        .foregroundStyle(.white)
-                                }
-                            }
-
-                            Text("4K")
-                                .font(.system(size: 9, weight: .heavy))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 2)
-                                .background(Color.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 3))
-
-                            HStack(spacing: 2) {
-                                Image(systemName: "opticaldisc")
-                                    .font(.system(size: 8))
-                                Text("Dolby")
-                                    .font(.system(size: 9, weight: .bold))
-                            }
-                            .foregroundStyle(.white.opacity(0.85))
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 2)
-                            .background(Color.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 3))
-
-                            Text("13+")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.white.opacity(0.75))
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 2)
-                                .overlay(
-                                    Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1)
-                                )
-
-                            Text("CC")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.white.opacity(0.75))
-                                .padding(.horizontal, 3)
-                                .padding(.vertical, 1)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 2).strokeBorder(Color.white.opacity(0.35), lineWidth: 1)
-                                )
-
-                            Text("AD")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.white.opacity(0.75))
-                                .padding(.horizontal, 3)
-                                .padding(.vertical, 1)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 2).strokeBorder(Color.white.opacity(0.35), lineWidth: 1)
-                                )
-                        }
-                        .padding(.top, 2)
-                    }
-
-                    Spacer()
-
-                    // SAĞ: [Baştan] ve [Bölümler / Filme Git] Butonları
-                    VStack(spacing: 10) {
-                        // 1. Baştan Oynat Butonu
-                        Button {
-                            #if os(iOS)
-                            triggerHaptic(.medium)
-                            #endif
-                            coordinator.seek(time: 0)
-                            coordinator.playerLayer?.play()
-                            isPlaying = true
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                isSummaryExpanded = false
-                            }
-                            scheduleControlsHide()
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "play.fill")
-                                    .font(.system(size: 13, weight: .bold))
-                                Text("Baştan")
-                                    .font(.system(size: 14, weight: .bold))
-                            }
-                            .foregroundStyle(.white)
-                            .frame(width: 150, height: 44)
-                        }
-                        .glassEffect(in: Capsule())
-
-                        // 2. Dizi ise: "Bölümler" (Ekranın Solundan Açar), Film ise: "Filme Git"
-                        if media.contentType == .series {
-                            Button {
-                                #if os(iOS)
-                                triggerHaptic(.light)
-                                #endif
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                    showLeftEpisodesDrawer = true
-                                }
-                                loadSeriesEpisodesIfNeeded()
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "list.bullet")
-                                        .font(.system(size: 13, weight: .bold))
-                                    Text("Bölümler")
-                                        .font(.system(size: 14, weight: .bold))
-                                }
-                                .foregroundStyle(.white)
-                                .frame(width: 150, height: 44)
-                            }
-                            .glassEffect(in: Capsule())
-                        } else {
-                            Button {
-                                #if os(iOS)
-                                triggerHaptic(.light)
-                                #endif
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                    isSummaryExpanded = false
-                                }
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "info.circle")
-                                        .font(.system(size: 14, weight: .semibold))
-                                    Text("Filme Git")
-                                        .font(.system(size: 14, weight: .bold))
-                                }
-                                .foregroundStyle(.white)
-                                .frame(width: 150, height: 44)
-                            }
-                            .glassEffect(in: Capsule())
-                        }
-                    }
+                if isLandscape {
+                    landscapeInfoSection(media: media)
+                } else {
+                    portraitInfoSection(media: media)
                 }
-                .padding(.top, 4)
             }
         }
-        .padding(.bottom, 6)
+        .padding(.bottom, 2)
     }
 
-    // MARK: - Left Episodes Drawer (EKRANIN SOLUNDAN KAYARAK GELEN DOĞAL BÖLÜMLER ALANI - KAPSAYICISIZ)
+    // MARK: - Yatay (Landscape) Bilgi Düzeni (Kompakt, Genel İçerik Bilgisi)
+
+    private func landscapeInfoSection(media: PlayableMedia) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            // 1. Yatay Görsel (16:9 - Kompakt)
+            if let posterUrl = media.posterUrl, let url = URL(string: posterUrl) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(16/9, contentMode: .fill)
+                    default:
+                        Rectangle()
+                            .fill(Color.white.opacity(0.12))
+                            .overlay(
+                                Image(systemName: "film")
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(.white.opacity(0.4))
+                            )
+                    }
+                }
+                .frame(width: 120, height: 68)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
+                )
+                .shadow(color: Color.black.opacity(0.4), radius: 6, x: 0, y: 3)
+            }
+
+            // 2. Orta Kısım: Genel İçerik Başlığı (media.title), Genel Özet ve Rozetler
+            VStack(alignment: .leading, spacing: 3) {
+                Text(media.title)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+
+                if let plot = media.overview, !plot.isEmpty {
+                    Text(plot)
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineSpacing(1.5)
+                        .lineLimit(2)
+                }
+
+                badgesView(media: media)
+                    .padding(.top, 1)
+            }
+
+            Spacer(minLength: 8)
+
+            // 3. Sağ Kısım: Kompakt Butonlar
+            VStack(spacing: 6) {
+                Button {
+                    #if os(iOS)
+                    triggerHaptic(.medium)
+                    #endif
+                    coordinator.seek(time: 0)
+                    coordinator.playerLayer?.play()
+                    isPlaying = true
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        isSummaryExpanded = false
+                    }
+                    scheduleControlsHide()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("Baştan")
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(width: 116, height: 34)
+                }
+                .glassEffect(in: Capsule())
+
+                if media.contentType == .series {
+                    Button {
+                        #if os(iOS)
+                        triggerHaptic(.light)
+                        #endif
+                        loadSeriesEpisodesIfNeeded()
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            showEpisodesDrawer = true
+                            isSummaryExpanded = false
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "list.bullet")
+                                .font(.system(size: 11, weight: .bold))
+                            Text("Bölümler")
+                                .font(.system(size: 12, weight: .bold))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(width: 116, height: 34)
+                    }
+                    .glassEffect(in: Capsule())
+                }
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    // MARK: - Dikey (Portrait) Bilgi Düzeni (Genel İçerik Bilgisi)
+
+    private func portraitInfoSection(media: PlayableMedia) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // 1. Üst Satır: Yatay Görsel + Genel Başlık (media.title) & Rozetler
+            HStack(alignment: .top, spacing: 12) {
+                if let posterUrl = media.posterUrl, let url = URL(string: posterUrl) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(16/9, contentMode: .fill)
+                        default:
+                            Rectangle()
+                                .fill(Color.white.opacity(0.12))
+                                .overlay(
+                                    Image(systemName: "film")
+                                        .font(.system(size: 20))
+                                        .foregroundStyle(.white.opacity(0.4))
+                                )
+                        }
+                    }
+                    .frame(width: 110, height: 62)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(media.title)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+
+                    badgesView(media: media)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            // 2. Açıklama: Genel özet alt satırda tam genişlik ile rahat okunur
+            if let plot = media.overview, !plot.isEmpty {
+                Text(plot)
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .lineSpacing(2)
+                    .lineLimit(3)
+            }
+
+            // 3. Butonlar: Alt satırda yan yana butonlar
+            HStack(spacing: 12) {
+                Button {
+                    #if os(iOS)
+                    triggerHaptic(.medium)
+                    #endif
+                    coordinator.seek(time: 0)
+                    coordinator.playerLayer?.play()
+                    isPlaying = true
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        isSummaryExpanded = false
+                    }
+                    scheduleControlsHide()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 12, weight: .bold))
+                        Text("Baştan")
+                            .font(.system(size: 13, weight: .bold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 38)
+                }
+                .glassEffect(in: Capsule())
+
+                if media.contentType == .series {
+                    Button {
+                        #if os(iOS)
+                        triggerHaptic(.light)
+                        #endif
+                        loadSeriesEpisodesIfNeeded()
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            showEpisodesDrawer = true
+                            isSummaryExpanded = false
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "list.bullet")
+                                .font(.system(size: 12, weight: .bold))
+                            Text("Bölümler")
+                                .font(.system(size: 13, weight: .bold))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 38)
+                    }
+                    .glassEffect(in: Capsule())
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    // MARK: - Reusable Badges View
+
+    @ViewBuilder
+    private func badgesView(media: PlayableMedia) -> some View {
+        HStack(spacing: 6) {
+            if let genre = media.genre, !genre.isEmpty {
+                Text(genre)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+
+            if let releaseDate = media.releaseDate, !releaseDate.isEmpty {
+                Text(releaseDate)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.70))
+            }
+
+            if let duration = media.duration, !duration.isEmpty {
+                Text(duration)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.70))
+            }
+
+            if let rating = media.rating, !rating.isEmpty, rating != "0" {
+                HStack(spacing: 2) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.yellow)
+                    Text(rating)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+            }
+
+            if let director = media.director, !director.isEmpty {
+                Text("Yönetmen: \(director)")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.70))
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    // MARK: - Left Episodes Drawer (Soldan Sağa Açılan, Tam Ekran Kaplamayan Glass Drawer)
 
     private func leftEpisodesDrawer(geometry: GeometryProxy) -> some View {
-        let drawerWidth = min(380, geometry.size.width * 0.88)
+        let isLandscape = geometry.size.width > geometry.size.height
+        let drawerWidth = min(360, geometry.size.width * (isLandscape ? 0.44 : 0.85))
+        let topPad: CGFloat = isLandscape ? 16 : 64
+        let bottomPad: CGFloat = isLandscape ? 16 : 36
 
         return VStack(alignment: .leading, spacing: 14) {
-            // Header: Başlık ve Kapat Butonu
-            HStack {
-                Text("Bölümler")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.white)
+            // Header: Başlık, Dizi Adı ve Kapat Butonu
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Bölümler")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(.white)
+
+                    if let currentMedia = playback.currentMedia {
+                        Text(currentMedia.title)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.65))
+                            .lineLimit(1)
+                    }
+                }
 
                 Spacer()
 
@@ -796,18 +881,20 @@ public struct NativePlayerView: View {
                     triggerHaptic(.light)
                     #endif
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                        showLeftEpisodesDrawer = false
+                        showEpisodesDrawer = false
                     }
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(.white.opacity(0.70))
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 32, height: 32)
                 }
+                .glassEffect(in: Circle())
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
+            .padding(.horizontal, 18)
+            .padding(.top, 18)
 
-            // Sezonlar Sekmeleri (Yatay Kaydırılabilir)
+            // Sezonlar Sekmesi (Yatay Kaydırılabilir Haplar)
             if seasons.count > 1 {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -819,19 +906,22 @@ public struct NativePlayerView: View {
                                 selectedSeason = s
                             } label: {
                                 Text("Sezon \(s)")
-                                    .font(.system(size: 13, weight: selectedSeason == s ? .bold : .medium))
+                                    .font(.system(size: 12, weight: selectedSeason == s ? .bold : .medium))
                                     .foregroundStyle(selectedSeason == s ? .black : .white)
                                     .padding(.horizontal, 14)
                                     .padding(.vertical, 7)
-                                    .background(selectedSeason == s ? Color.white : Color.white.opacity(0.12), in: Capsule())
+                                    .background(
+                                        selectedSeason == s ? Color.white : Color.white.opacity(0.12),
+                                        in: Capsule()
+                                    )
                             }
                         }
                     }
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, 18)
                 }
             }
 
-            // Bölümler Listesi (Dikey Kaydırılabilir)
+            // Bölümler Listesi (Dikey Kaydırılabilir Glass Kartlar)
             if isLoadingEpisodes {
                 Spacer()
                 HStack {
@@ -840,11 +930,23 @@ public struct NativePlayerView: View {
                     Spacer()
                 }
                 Spacer()
+            } else if seasonEpisodes.isEmpty {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Text("Bölüm bulunamadı.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(0.6))
+                    Spacer()
+                }
+                Spacer()
             } else {
                 ScrollView(showsIndicators: false) {
                     LazyVStack(spacing: 8) {
                         ForEach(seasonEpisodes) { ep in
                             let isCurrent = (playback.currentMedia?.episodeNum == ep.episodeNum && playback.currentMedia?.seasonNum == ep.seasonNum)
+                            let epName = cleanEpisodeName(title: ep.title, episodeNum: ep.episodeNum)
+                            let displayEpisodeText = (epName == "Bölüm \(ep.episodeNum)" ? "Bölüm \(ep.episodeNum)" : "Bölüm \(ep.episodeNum): \(epName)")
 
                             Button {
                                 #if os(iOS)
@@ -855,14 +957,33 @@ public struct NativePlayerView: View {
                                 }
                             } label: {
                                 HStack(spacing: 12) {
-                                    Image(systemName: isCurrent ? "play.circle.fill" : "play.circle")
-                                        .font(.system(size: 24))
-                                        .foregroundStyle(isCurrent ? .yellow : .white.opacity(0.80))
+                                    // Önizleme veya Oynat İkonu
+                                    ZStack {
+                                        if let cover = ep.coverUrl, let url = URL(string: cover) {
+                                            AsyncImage(url: url) { phase in
+                                                if let img = phase.image {
+                                                    img.resizable().aspectRatio(16/9, contentMode: .fill)
+                                                } else {
+                                                    Color.white.opacity(0.08)
+                                                }
+                                            }
+                                        } else {
+                                            Color.white.opacity(0.08)
+                                        }
 
+                                        Image(systemName: isCurrent ? "play.circle.fill" : "play.fill")
+                                            .font(.system(size: isCurrent ? 20 : 14))
+                                            .foregroundStyle(isCurrent ? Color.yellow : Color.white.opacity(0.85))
+                                    }
+                                    .frame(width: 64, height: 38)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5))
+
+                                    // Bilgiler
                                     VStack(alignment: .leading, spacing: 3) {
-                                        Text("Bölüm \(ep.episodeNum): \(ep.title)")
-                                            .font(.system(size: 14, weight: .semibold))
-                                            .foregroundStyle(.white)
+                                        Text(displayEpisodeText)
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(isCurrent ? Color.yellow : .white)
                                             .lineLimit(1)
 
                                         if let duration = ep.duration, !duration.isEmpty {
@@ -878,32 +999,29 @@ public struct NativePlayerView: View {
                                         Text("Oynatılıyor")
                                             .font(.system(size: 10, weight: .bold))
                                             .foregroundStyle(.yellow)
-                                            .padding(.horizontal, 8)
+                                            .padding(.horizontal, 7)
                                             .padding(.vertical, 3)
                                             .background(Color.yellow.opacity(0.20), in: Capsule())
                                     }
                                 }
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 10)
-                                .background(Color.white.opacity(isCurrent ? 0.18 : 0.08), in: RoundedRectangle(cornerRadius: 12))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(Color.white.opacity(isCurrent ? 0.16 : 0.07), in: RoundedRectangle(cornerRadius: 10))
                             }
                         }
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 24)
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 20)
                 }
             }
         }
         .frame(width: drawerWidth)
         .frame(maxHeight: .infinity)
-        .background(
-            LinearGradient(
-                colors: [Color.black.opacity(0.85), Color.black.opacity(0.60)],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-            .ignoresSafeArea()
-        )
+        .glassEffect(in: RoundedRectangle(cornerRadius: 20))
+        .padding(.leading, isLandscape ? 24 : 14)
+        .padding(.top, topPad)
+        .padding(.bottom, bottomPad)
+        .shadow(color: Color.black.opacity(0.5), radius: 24, x: 8, y: 0)
     }
 
     // MARK: - Actions
@@ -1010,7 +1128,7 @@ public struct NativePlayerView: View {
 
     private func scheduleControlsHide() {
         hideControlsTask?.cancel()
-        guard isPlaying && !isSummaryExpanded && !showLeftEpisodesDrawer else { return }
+        guard isPlaying && !isSummaryExpanded && !showEpisodesDrawer else { return }
         hideControlsTask = Task {
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             guard !Task.isCancelled else { return }
@@ -1040,17 +1158,3 @@ public struct NativePlayerView: View {
     }
     #endif
 }
-
-#if os(iOS)
-// MARK: - Share Activity Sheet Wrapper
-private struct ShareActivityView: UIViewControllerRepresentable {
-    let activityItems: [Any]
-    let applicationActivities: [UIActivity]? = nil
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: activityItems, applicationActivities: applicationActivities)
-    }
-
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
-}
-#endif
