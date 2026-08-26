@@ -5,7 +5,6 @@ public struct LiveTVView: View {
     @ObservedObject private var playback = PlaybackManager.shared
     @ObservedObject private var storage = StorageManager.shared
 
-    @State private var selectedCategory: MediaCategory?
     @State private var destinationCategory: MediaCategory?
 
     public init() {}
@@ -16,81 +15,32 @@ public struct LiveTVView: View {
         }
     }
 
-    private var channelsForSelectedCategory: [Channel] {
-        guard let selected = selectedCategory else { return [] }
-        return appState.channels.filter { $0.categoryId == selected.id }
-    }
-
     public var body: some View {
-        NavigationStack {
-            Group {
-                if appState.channels.isEmpty {
-                    ContentUnavailableView(
-                        "Kanal Bulunamadı",
-                        systemImage: "tv.slash",
-                        description: Text("Hesabınızda canlı kanal bulunmuyor veya henüz yüklenmedi.")
-                    )
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 20) {
-                            if let selected = selectedCategory {
-                                singleCategoryGrid(category: selected)
-                            } else {
-                                categoryShelvesFeed
-                            }
-                        }
+        Group {
+            if appState.channels.isEmpty {
+                ContentUnavailableView(
+                    "Kanal Bulunamadı",
+                    systemImage: "tv.slash",
+                    description: Text("Hesabınızda canlı kanal bulunmuyor veya henüz yüklenmedi.")
+                )
+            } else {
+                ScrollView {
+                    categoryShelvesFeed
                         .padding(.top, 8)
                         .padding(.bottom, 36)
-                    }
-                    .scrollEdgeEffectStyle(.soft, for: .all)
                 }
+                .scrollEdgeEffectStyle(.soft, for: .all)
             }
-            .navigationTitle(selectedCategory?.name ?? "Canlı TV")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                if !activeCategories.isEmpty {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Button {
-                                selectedCategory = nil
-                            } label: {
-                                HStack {
-                                    Text("Tüm Kanallar")
-                                    if selectedCategory == nil {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-
-                            Divider()
-
-                            ForEach(activeCategories) { cat in
-                                Button {
-                                    selectedCategory = cat
-                                } label: {
-                                    HStack {
-                                        Text(cat.name)
-                                        if selectedCategory?.id == cat.id {
-                                            Image(systemName: "checkmark")
-                                        }
-                                    }
-                                }
-                            }
-                        } label: {
-                            Image(systemName: selectedCategory == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
-                                .font(.system(size: 16))
-                        }
-                    }
-                }
-            }
-            .refreshable {
-                await appState.syncActiveAccount()
-            }
-            .navigationDestination(item: $destinationCategory) { cat in
-                CategoryMediaListView(category: cat)
-            }
+        }
+        .navigationTitle("Canlı TV")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .refreshable {
+            await appState.syncActiveAccount()
+        }
+        .navigationDestination(item: $destinationCategory) { cat in
+            CategoryMediaListView(category: cat)
         }
     }
 
@@ -129,20 +79,6 @@ public struct LiveTVView: View {
                 }
             }
         }
-    }
-
-    // MARK: - Single Category Grid
-
-    @ViewBuilder
-    private func singleCategoryGrid(category: MediaCategory) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 95, maximum: 140), spacing: 12)], spacing: 14) {
-            ForEach(channelsForSelectedCategory) { channel in
-                MediaCardView(channel: channel, width: 100) {
-                    playChannel(channel)
-                }
-            }
-        }
-        .padding(.horizontal)
     }
 
     // MARK: - Playback Helper
