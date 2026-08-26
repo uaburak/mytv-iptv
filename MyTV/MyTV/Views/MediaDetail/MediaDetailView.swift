@@ -60,11 +60,11 @@ public struct MediaDetailView: View {
                     actionButtons
                         .padding(.horizontal)
 
-                    // Konu Özeti
+                    // Konu Özeti (Başlık ile)
                     if let plot = currentItem.overview, !plot.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Konu Özeti")
-                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                            Text(currentItem.name)
+                                .font(.system(size: 17, weight: .bold, design: .rounded))
                                 .foregroundStyle(.primary)
 
                             Text(plot)
@@ -294,52 +294,38 @@ public struct MediaDetailView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Cast & Crew Section
+    // MARK: - Cast & Crew Section (İkonlu & Kapsayıcısız)
 
     @ViewBuilder
     private var castAndCrewSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Ekip & Oyuncular")
-                .font(.system(size: 16, weight: .bold, design: .rounded))
-                .foregroundStyle(.primary)
+        VStack(alignment: .leading, spacing: 8) {
+            if let director, !director.isEmpty {
+                HStack(alignment: .center, spacing: 8) {
+                    Image(systemName: "megaphone.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16)
 
-            VStack(alignment: .leading, spacing: 6) {
-                if let director, !director.isEmpty {
-                    HStack(alignment: .top, spacing: 8) {
-                        Text("Yönetmen:")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 75, alignment: .leading)
-
-                        Text(director)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.primary)
-                    }
-                }
-
-                if let cast, !cast.isEmpty {
-                    HStack(alignment: .top, spacing: 8) {
-                        Text("Oyuncular:")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 75, alignment: .leading)
-
-                        Text(cast)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.primary)
-                    }
+                    Text(director)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
                 }
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
-            )
+
+            if let cast, !cast.isEmpty {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "person.2.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16)
+                        .padding(.top, 2)
+
+                    Text(cast)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(3)
+                }
+            }
         }
     }
 
