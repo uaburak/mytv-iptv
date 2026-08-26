@@ -49,7 +49,7 @@ public struct MediaDetailView: View {
                 // 1. Cinematic Hero Header with Backdrop & Artwork
                 heroHeader
 
-                // 2. Action Buttons (Play & Favorite)
+                // 2. Action Buttons (Glass Style)
                 actionButtons
                     .padding(.horizontal)
 
@@ -57,7 +57,7 @@ public struct MediaDetailView: View {
                 if let plot = currentItem.overview, !plot.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Konu Özeti")
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
                             .foregroundStyle(.primary)
 
                         Text(plot)
@@ -81,27 +81,19 @@ public struct MediaDetailView: View {
 
                 // 6. Related Content Shelf
                 if !relatedItems.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Benzer İçerikler")
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                            .padding(.horizontal)
-
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            LazyHStack(spacing: 14) {
-                                ForEach(relatedItems) { rel in
-                                    MediaCardView(item: rel, width: 120) {
-                                        playItem(rel)
-                                    }
-                                }
-                            }
-                            .padding(.horizontal)
+                    MediaShelfRow(
+                        title: "Benzer İçerikler",
+                        items: relatedItems,
+                        onPlay: { rel in
+                            playItem(rel)
                         }
-                    }
-                    .padding(.top, 8)
+                    )
+                    .padding(.top, 4)
                 }
             }
             .padding(.bottom, 48)
         }
+        .scrollEdgeEffectStyle(.soft, for: .all)
         .navigationTitle(currentItem.name)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -150,22 +142,22 @@ public struct MediaDetailView: View {
             .frame(height: 290)
 
             // Floating Artwork & Metadata
-            HStack(alignment: .bottom, spacing: 18) {
+            HStack(alignment: .bottom, spacing: 16) {
                 // High Quality Floating Poster Card
                 MediaPosterView(
                     posterUrl: currentItem.streamIcon ?? currentItem.backdropUrl,
                     title: currentItem.name,
-                    width: 108,
-                    height: 162,
-                    cornerRadius: 14,
+                    width: 100,
+                    height: 150,
+                    cornerRadius: 12,
                     isSeries: currentItem.type == .series
                 )
-                .shadow(color: .black.opacity(0.7), radius: 12, x: 0, y: 6)
+                .shadow(color: .black.opacity(0.7), radius: 10, x: 0, y: 5)
 
                 // Title & Chips
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(currentItem.name)
-                        .font(.system(size: 20, weight: .bold))
+                        .font(.system(size: 19, weight: .bold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
                         .shadow(radius: 4)
@@ -218,17 +210,17 @@ public struct MediaDetailView: View {
                     }
                 }
             }
-            .padding(.horizontal, 18)
-            .padding(.bottom, 14)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
         }
     }
 
-    // MARK: - Action Buttons
+    // MARK: - Action Buttons (Glass Style)
 
     @ViewBuilder
     private var actionButtons: some View {
         HStack(spacing: 12) {
-            // Play Button
+            // Glass Play Button
             Button {
                 if currentItem.type == .series {
                     if let firstEp = seasonEpisodes.first ?? episodes.first {
@@ -240,31 +232,45 @@ public struct MediaDetailView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "play.fill")
-                        .font(.headline)
+                        .font(.system(size: 14, weight: .bold))
                     Text(currentItem.type == .series ? "1. Bölümü Oynat" : "Hemen İzle")
-                        .font(.system(size: 15, weight: .bold))
+                        .font(.system(size: 14, weight: .bold))
                 }
-                .foregroundStyle(.black)
+                .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 13)
-                .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.85))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.25), lineWidth: 0.8)
+                )
             }
             .buttonStyle(.plain)
 
-            // Favorite Button
+            // Glass Favorite Button
             Button {
                 storage.toggleFavorite(id: currentItem.id)
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: isFav ? "heart.fill" : "heart")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(isFav ? .red : .primary)
                     Text(isFav ? "Favoride" : "Favori")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                 }
                 .padding(.horizontal, 18)
-                .padding(.vertical, 13)
-                .background(Color.secondary.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.8)
+                )
             }
             .buttonStyle(.plain)
         }
@@ -276,19 +282,19 @@ public struct MediaDetailView: View {
     private var castAndCrewSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Ekip & Oyuncular")
-                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .font(.system(size: 16, weight: .bold, design: .rounded))
                 .foregroundStyle(.primary)
 
             VStack(alignment: .leading, spacing: 6) {
                 if let director, !director.isEmpty {
                     HStack(alignment: .top, spacing: 8) {
                         Text("Yönetmen:")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(.secondary)
-                            .frame(width: 80, alignment: .leading)
+                            .frame(width: 75, alignment: .leading)
 
                         Text(director)
-                            .font(.system(size: 13))
+                            .font(.system(size: 12))
                             .foregroundStyle(.primary)
                     }
                 }
@@ -296,19 +302,26 @@ public struct MediaDetailView: View {
                 if let cast, !cast.isEmpty {
                     HStack(alignment: .top, spacing: 8) {
                         Text("Oyuncular:")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(.secondary)
-                            .frame(width: 80, alignment: .leading)
+                            .frame(width: 75, alignment: .leading)
 
                         Text(cast)
-                            .font(.system(size: 13))
+                            .font(.system(size: 12))
                             .foregroundStyle(.primary)
                     }
                 }
             }
-            .padding(14)
+            .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+            )
         }
     }
 
@@ -321,23 +334,31 @@ public struct MediaDetailView: View {
                 .padding(.horizontal)
 
             Text("Sezonlar ve Bölümler")
-                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .font(.system(size: 16, weight: .bold, design: .rounded))
                 .padding(.horizontal)
 
-            // Seasons Picker Pills
+            // Seasons Picker Glass Pills
             if !seasons.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(seasons, id: \.self) { s in
+                            let isSelected = (selectedSeason == s)
                             Button {
                                 selectedSeason = s
                             } label: {
                                 Text("Sezon \(s)")
-                                    .font(.system(size: 13, weight: selectedSeason == s ? .bold : .medium))
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
-                                    .background(selectedSeason == s ? Color.accentColor : Color.secondary.opacity(0.12), in: Capsule())
-                                    .foregroundStyle(selectedSeason == s ? .white : .primary)
+                                    .font(.system(size: 12, weight: isSelected ? .bold : .medium))
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 7)
+                                    .background(
+                                        isSelected ? Color.accentColor : Color.secondary.opacity(0.12),
+                                        in: Capsule()
+                                    )
+                                    .overlay(
+                                        Capsule()
+                                            .strokeBorder(isSelected ? Color.white.opacity(0.3) : Color.white.opacity(0.1), lineWidth: 0.6)
+                                    )
+                                    .foregroundStyle(isSelected ? .white : .primary)
                             }
                             .buttonStyle(.plain)
                         }
@@ -346,7 +367,7 @@ public struct MediaDetailView: View {
                 }
             }
 
-            // Episode Cards List
+            // Episode Cards List (Glass Card Style)
             if isLoadingDetails {
                 HStack {
                     Spacer()
@@ -365,7 +386,7 @@ public struct MediaDetailView: View {
                         Button {
                             playEpisode(ep)
                         } label: {
-                            HStack(spacing: 14) {
+                            HStack(spacing: 12) {
                                 // Episode Thumbnail / Artwork Preview
                                 ZStack {
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -386,23 +407,23 @@ public struct MediaDetailView: View {
                                     // Mini play overlay
                                     Circle()
                                         .fill(.black.opacity(0.5))
-                                        .frame(width: 24, height: 24)
+                                        .frame(width: 22, height: 22)
                                         .overlay(
                                             Image(systemName: "play.fill")
-                                                .font(.system(size: 10))
+                                                .font(.system(size: 9))
                                                 .foregroundStyle(.white)
                                         )
                                 }
-                                .frame(width: 80, height: 48)
+                                .frame(width: 76, height: 46)
                                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                                         .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
-                                )
+                                    )
 
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text("\(ep.episodeNum). \(ep.title)")
-                                        .font(.system(size: 14, weight: .semibold))
+                                        .font(.system(size: 13, weight: .semibold))
                                         .lineLimit(1)
                                         .foregroundStyle(.primary)
 
@@ -423,11 +444,18 @@ public struct MediaDetailView: View {
                                 Spacer()
 
                                 Image(systemName: "play.circle.fill")
-                                    .font(.title2)
+                                    .font(.title3)
                                     .foregroundStyle(.tint)
                             }
                             .padding(10)
-                            .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(.ultraThinMaterial)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5)
+                            )
                         }
                         .buttonStyle(.plain)
                     }
