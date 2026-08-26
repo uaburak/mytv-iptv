@@ -44,82 +44,86 @@ public struct MediaDetailView: View {
     }
 
     public var body: some View {
-        ZStack(alignment: .top) {
-            // 1. Sticky Sabit Kapak Görseli
-            stickyBackdropView
+        GeometryReader { screenGeo in
+            ZStack(alignment: .top) {
+                // 1. Sticky Sabit Kapak Görseli (Ekrana tam oturan genişlik)
+                stickyBackdropView(width: screenGeo.size.width)
 
-            // 2. Kaydırılabilir İçerik & Beraberinde Kayan Karartma Gradyanı
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    // Logo, Başlık ve Poster Alanı
-                    heroContent
-                        .padding(.top, 220)
-                        .padding(.bottom, 6)
+                // 2. Kaydırılabilir İçerik & Beraberinde Kayan Karartma Gradyanı
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        // Logo, Başlık ve Poster Alanı
+                        heroContent
+                            .padding(.top, 220)
+                            .padding(.bottom, 6)
 
-                    // Oynat Butonu
-                    actionButtons
-                        .padding(.horizontal)
-
-                    // Konu Özeti (Başlık ile)
-                    if let plot = currentItem.overview, !plot.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(currentItem.name)
-                                .font(.system(size: 17, weight: .bold, design: .rounded))
-                                .foregroundStyle(.primary)
-
-                            Text(plot)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .lineSpacing(5)
-                        }
-                        .padding(.horizontal)
-                    }
-
-                    // Oyuncular ve Ekip
-                    if (director != nil && !director!.isEmpty) || (cast != nil && !cast!.isEmpty) {
-                        castAndCrewSection
+                        // Oynat Butonu
+                        actionButtons
                             .padding(.horizontal)
-                    }
 
-                    // Dizi Sezon ve Bölümleri
-                    if currentItem.type == .series {
-                        seriesEpisodesSection
-                    }
+                        // Konu Özeti (Başlık ile)
+                        if let plot = currentItem.overview, !plot.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(currentItem.name)
+                                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.primary)
 
-                    // Benzer İçerikler
-                    if !relatedItems.isEmpty {
-                        MediaShelfRow(
-                            title: "Benzer İçerikler",
-                            items: relatedItems,
-                            onPlay: { rel in
-                                playItem(rel)
+                                Text(plot)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .lineSpacing(5)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
-                        )
-                        .padding(.top, 4)
-                    }
-                }
-                .padding(.bottom, 48)
-                .background(
-                    // Scroll ile beraber yukarı kayan dinamik karartma katmanı
-                    VStack(spacing: 0) {
-                        LinearGradient(
-                            stops: [
-                                .init(color: .black.opacity(0.0), location: 0.0),
-                                .init(color: .black.opacity(0.35), location: 0.35),
-                                .init(color: .black.opacity(0.85), location: 0.72),
-                                .init(color: .black, location: 1.0)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                        .frame(height: 380)
+                            .padding(.horizontal)
+                        }
 
-                        Color.black
+                        // Oyuncular ve Ekip
+                        if (director != nil && !director!.isEmpty) || (cast != nil && !cast!.isEmpty) {
+                            castAndCrewSection
+                                .padding(.horizontal)
+                        }
+
+                        // Dizi Sezon ve Bölümleri
+                        if currentItem.type == .series {
+                            seriesEpisodesSection
+                        }
+
+                        // Benzer İçerikler
+                        if !relatedItems.isEmpty {
+                            MediaShelfRow(
+                                title: "Benzer İçerikler",
+                                items: relatedItems,
+                                onPlay: { rel in
+                                    playItem(rel)
+                                }
+                            )
+                            .padding(.top, 4)
+                        }
                     }
-                    .ignoresSafeArea(edges: .bottom)
-                )
+                    .padding(.bottom, 48)
+                    .frame(width: screenGeo.size.width, alignment: .leading)
+                    .background(
+                        // Scroll ile beraber yukarı kayan dinamik karartma katmanı
+                        VStack(spacing: 0) {
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .black.opacity(0.0), location: 0.0),
+                                    .init(color: .black.opacity(0.35), location: 0.35),
+                                    .init(color: .black.opacity(0.85), location: 0.72),
+                                    .init(color: .black, location: 1.0)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                            .frame(height: 380)
+
+                            Color.black
+                        }
+                        .ignoresSafeArea(edges: .bottom)
+                    )
+                }
+                .scrollEdgeEffectStyle(.soft, for: .all)
             }
-            .scrollEdgeEffectStyle(.soft, for: .all)
         }
         .ignoresSafeArea(edges: .top)
         .navigationTitle("")
@@ -144,7 +148,7 @@ public struct MediaDetailView: View {
     // MARK: - Sticky Backdrop View (Sabit Kapak)
 
     @ViewBuilder
-    private var stickyBackdropView: some View {
+    private func stickyBackdropView(width: CGFloat) -> some View {
         ZStack(alignment: .top) {
             Color.black
 
@@ -153,7 +157,7 @@ public struct MediaDetailView: View {
                     image
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(maxWidth: .infinity, maxHeight: 520)
+                        .frame(width: width, height: 520)
                         .clipped()
                 } placeholder: {
                     Color.white.opacity(0.04)
@@ -166,9 +170,10 @@ public struct MediaDetailView: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: 100)
+            .frame(width: width, height: 100)
         }
-        .frame(height: 520)
+        .frame(width: width, height: 520)
+        .clipped()
         .ignoresSafeArea(edges: .top)
     }
 
@@ -176,13 +181,13 @@ public struct MediaDetailView: View {
 
     @ViewBuilder
     private var heroContent: some View {
-        HStack(alignment: .bottom, spacing: 16) {
+        HStack(alignment: .bottom, spacing: 14) {
             // Yüzen Poster Kartı
             MediaPosterView(
                 posterUrl: currentItem.streamIcon ?? currentItem.backdropUrl,
                 title: currentItem.name,
-                width: 100,
-                height: 150,
+                width: 95,
+                height: 142,
                 cornerRadius: 12,
                 isSeries: currentItem.type == .series
             )
@@ -196,7 +201,7 @@ public struct MediaDetailView: View {
                         logo
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(maxHeight: 38, alignment: .leading)
+                            .frame(maxHeight: 34, alignment: .leading)
                             .shadow(color: .black.opacity(0.7), radius: 4)
                     } placeholder: {
                         EmptyView()
@@ -204,58 +209,62 @@ public struct MediaDetailView: View {
                 }
 
                 Text(currentItem.name)
-                    .font(.system(size: 18, weight: .bold))
+                    .font(.system(size: 17, weight: .bold))
                     .foregroundStyle(.white)
                     .lineLimit(2)
                     .shadow(radius: 4)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                // Meta Bilgi Rozetleri
-                HStack(spacing: 6) {
-                    Text(currentItem.type.rawValue)
-                        .font(.system(size: 11, weight: .bold))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3.5)
-                        .background(Color.white.opacity(0.18), in: Capsule())
-                        .foregroundStyle(.white)
-
-                    if let rating = currentItem.rating, let score = Double(rating), score > 0 {
-                        HStack(spacing: 3) {
-                            Image(systemName: "star.fill")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.yellow)
-                            Text(String(format: "%.1f", score))
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3.5)
-                        .background(Color.white.opacity(0.18), in: Capsule())
-                    }
-
-                    if let release = currentItem.releaseDate, !release.isEmpty {
-                        Text(release.prefix(4))
-                            .font(.system(size: 11, weight: .semibold))
+                // Meta Bilgi Rozetleri (Taşmayı önleyen esnek kaydırmalı / sarmalı bar)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 5) {
+                        Text(currentItem.type.rawValue)
+                            .font(.system(size: 10.5, weight: .bold))
                             .padding(.horizontal, 7)
-                            .padding(.vertical, 3.5)
-                            .background(Color.white.opacity(0.12), in: Capsule())
-                            .foregroundStyle(.white.opacity(0.85))
-                    }
+                            .padding(.vertical, 3)
+                            .background(Color.white.opacity(0.18), in: Capsule())
+                            .foregroundStyle(.white)
 
-                    if let dur = currentItem.duration, !dur.isEmpty && dur != "0" {
-                        let durDisplay = dur.contains(":") ? dur : "\(dur) dk"
-                        Text(durDisplay)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.8))
+                        if let rating = currentItem.rating, let score = Double(rating), score > 0 {
+                            HStack(spacing: 3) {
+                                Image(systemName: "star.fill")
+                                    .font(.system(size: 8.5))
+                                    .foregroundStyle(.yellow)
+                                Text(String(format: "%.1f", score))
+                                    .font(.system(size: 10.5, weight: .bold))
+                                    .foregroundStyle(.white)
+                            }
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Color.white.opacity(0.18), in: Capsule())
+                        }
+
+                        if let release = currentItem.releaseDate, !release.isEmpty {
+                            Text(release.prefix(4))
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Color.white.opacity(0.12), in: Capsule())
+                                .foregroundStyle(.white.opacity(0.85))
+                        }
+
+                        if let dur = currentItem.duration, !dur.isEmpty && dur != "0" {
+                            let durDisplay = dur.contains(":") ? dur : "\(dur) dk"
+                            Text(durDisplay)
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
                     }
                 }
 
                 if let genre = currentItem.genre, !genre.isEmpty {
                     Text(genre)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 11.5, weight: .medium))
                         .foregroundStyle(.white.opacity(0.75))
                         .lineLimit(1)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 16)
     }
@@ -309,6 +318,7 @@ public struct MediaDetailView: View {
                     Text(director)
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
@@ -324,9 +334,11 @@ public struct MediaDetailView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Series Episodes Section
