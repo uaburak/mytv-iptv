@@ -21,7 +21,9 @@ public struct HeroBannerView: View {
                         .tag(index)
                 }
             }
+            #if os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
             .tabViewStyle(.page(indexDisplayMode: .automatic))
+            #endif
             .frame(height: 380)
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .padding(.horizontal)

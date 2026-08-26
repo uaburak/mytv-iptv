@@ -83,7 +83,7 @@ public struct MoviesView: View {
             .refreshable {
                 await appState.syncActiveAccount()
             }
-            .sheet(item: $selectedMovieForDetail) { movie in
+            .navigationDestination(item: $selectedMovieForDetail) { movie in
                 MediaDetailView(item: movie)
             }
         }

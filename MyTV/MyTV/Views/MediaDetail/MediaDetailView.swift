@@ -34,78 +34,65 @@ public struct MediaDetailView: View {
     }
 
     public var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    // 1. Cinematic Hero Header
-                    heroHeader
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                // 1. Cinematic Hero Header
+                heroHeader
 
-                    // 2. Action Buttons (Play & Favorite)
-                    actionButtons
-                        .padding(.horizontal)
+                // 2. Action Buttons (Play & Favorite)
+                actionButtons
+                    .padding(.horizontal)
 
-                    // 3. Storyline / Overview
-                    if let plot = item.overview, !plot.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Konu Özeti")
-                                .font(.headline)
-                                .foregroundStyle(.primary)
+                // 3. Storyline / Overview
+                if let plot = item.overview, !plot.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Konu Özeti")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
 
-                            Text(plot)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .lineSpacing(4)
-                        }
-                        .padding(.horizontal)
+                        Text(plot)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(4)
                     }
+                    .padding(.horizontal)
+                }
 
-                    // 4. Series Seasons & Episodes (Only for Series)
-                    if item.type == .series {
-                        seriesEpisodesSection
-                    }
+                // 4. Series Seasons & Episodes (Only for Series)
+                if item.type == .series {
+                    seriesEpisodesSection
+                }
 
-                    // 5. Related Content Shelf
-                    if !relatedItems.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Benzer İçerikler")
-                                .font(.headline)
-                                .padding(.horizontal)
+                // 5. Related Content Shelf
+                if !relatedItems.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Benzer İçerikler")
+                            .font(.headline)
+                            .padding(.horizontal)
 
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                LazyHStack(spacing: 14) {
-                                    ForEach(relatedItems) { rel in
-                                        MediaCardView(item: rel, width: 120) {
-                                            playItem(rel)
-                                        }
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(spacing: 14) {
+                                ForEach(relatedItems) { rel in
+                                    MediaCardView(item: rel, width: 120) {
+                                        playItem(rel)
                                     }
                                 }
-                                .padding(.horizontal)
                             }
+                            .padding(.horizontal)
                         }
-                        .padding(.top, 8)
                     }
-                }
-                .padding(.bottom, 40)
-            }
-            .navigationTitle(item.name)
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 20))
-                            .foregroundStyle(.secondary)
-                    }
+                    .padding(.top, 8)
                 }
             }
-            .task {
-                if item.type == .series {
-                    await loadEpisodes()
-                }
+            .padding(.bottom, 40)
+        }
+        .navigationTitle(item.name)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .task {
+            if item.type == .series {
+                await loadEpisodes()
             }
         }
     }
@@ -407,7 +394,12 @@ public struct MediaDetailView: View {
             subtitle: vod.genre ?? (vod.type == .movie ? "Film" : "Dizi"),
             posterUrl: vod.streamIcon,
             streamUrl: vod.streamUrl,
-            contentType: vod.type
+            contentType: vod.type,
+            rating: vod.rating,
+            releaseDate: vod.releaseDate,
+            duration: vod.duration,
+            overview: vod.overview,
+            genre: vod.genre
         )
         playback.play(media: media)
         dismiss()
@@ -420,7 +412,15 @@ public struct MediaDetailView: View {
             subtitle: "S\(episode.seasonNum):E\(episode.episodeNum) • \(episode.title)",
             posterUrl: item.streamIcon,
             streamUrl: episode.streamUrl,
-            contentType: .series
+            contentType: .series,
+            rating: item.rating,
+            releaseDate: item.releaseDate,
+            duration: item.duration,
+            overview: item.overview,
+            genre: item.genre,
+            seriesId: item.id,
+            episodeNum: episode.episodeNum,
+            seasonNum: episode.seasonNum
         )
         playback.play(media: media)
         dismiss()

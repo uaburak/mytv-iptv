@@ -71,7 +71,10 @@ public final class XtreamCodesAPIService: Sendable {
             base.removeLast()
         }
 
-        var urlString = "\(base)/player_api.php?username=\(username)&password=\(password)"
+        let encodedUsername = username.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? username
+        let encodedPassword = password.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? password
+
+        var urlString = "\(base)/player_api.php?username=\(encodedUsername)&password=\(encodedPassword)"
         if let action {
             urlString += "&action=\(action)"
         }

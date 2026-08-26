@@ -1,6 +1,9 @@
 import Foundation
 import Combine
 import AVFoundation
+#if canImport(AVFAudio)
+import AVFAudio
+#endif
 import KSPlayer
 
 public struct PlayableMedia: Identifiable, Sendable, Equatable {
@@ -12,6 +15,15 @@ public struct PlayableMedia: Identifiable, Sendable, Equatable {
     public let streamUrl: String
     public let contentType: ContentType
     public let alternativeUrls: [String]
+    public let rating: String?
+    public let releaseDate: String?
+    public let duration: String?
+    public let overview: String?
+    public let genre: String?
+    public let director: String?
+    public let seriesId: String?
+    public let episodeNum: Int?
+    public let seasonNum: Int?
 
     public init(
         mediaId: String,
@@ -20,7 +32,16 @@ public struct PlayableMedia: Identifiable, Sendable, Equatable {
         posterUrl: String? = nil,
         streamUrl: String,
         contentType: ContentType,
-        alternativeUrls: [String] = []
+        alternativeUrls: [String] = [],
+        rating: String? = nil,
+        releaseDate: String? = nil,
+        duration: String? = nil,
+        overview: String? = nil,
+        genre: String? = nil,
+        director: String? = nil,
+        seriesId: String? = nil,
+        episodeNum: Int? = nil,
+        seasonNum: Int? = nil
     ) {
         self.mediaId = mediaId
         self.title = title
@@ -29,6 +50,15 @@ public struct PlayableMedia: Identifiable, Sendable, Equatable {
         self.streamUrl = streamUrl
         self.contentType = contentType
         self.alternativeUrls = alternativeUrls
+        self.rating = rating
+        self.releaseDate = releaseDate
+        self.duration = duration
+        self.overview = overview
+        self.genre = genre
+        self.director = director
+        self.seriesId = seriesId
+        self.episodeNum = episodeNum
+        self.seasonNum = seasonNum
     }
 }
 
@@ -64,7 +94,7 @@ public final class PlaybackManager: ObservableObject {
             return
         }
 
-        #if os(iOS) || os(tvOS)
+        #if canImport(AVFAudio) && (os(iOS) || os(tvOS) || os(visionOS))
         Task.detached(priority: .userInitiated) {
             do {
                 let session = AVAudioSession.sharedInstance()

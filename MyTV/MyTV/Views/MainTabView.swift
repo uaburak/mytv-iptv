@@ -43,15 +43,14 @@ public struct MainTabView: View {
             if appState.isSyncing && !appState.isAddAccountPresented && appState.channels.isEmpty {
                 SyncProgressOverlayView()
             }
+
+            // Direct Full-Window Player Screen (No modal/sheet presentation on iOS, macOS, tvOS)
+            if playback.isPresented {
+                NativePlayerView()
+                    .transition(.opacity)
+                    .zIndex(999)
+            }
         }
-        #if os(macOS)
-        .sheet(isPresented: $playback.isPresented) {
-            NativePlayerView()
-        }
-        #else
-        .fullScreenCover(isPresented: $playback.isPresented) {
-            NativePlayerView()
-        }
-        #endif
+        .animation(.easeInOut(duration: 0.25), value: playback.isPresented)
     }
 }

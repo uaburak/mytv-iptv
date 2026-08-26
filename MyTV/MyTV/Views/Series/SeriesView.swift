@@ -83,7 +83,7 @@ public struct SeriesView: View {
             .refreshable {
                 await appState.syncActiveAccount()
             }
-            .sheet(item: $selectedSeriesForDetail) { series in
+            .navigationDestination(item: $selectedSeriesForDetail) { series in
                 MediaDetailView(item: series)
             }
         }

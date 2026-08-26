@@ -54,7 +54,7 @@ public struct HomeView: View {
             .sheet(isPresented: $appState.isAddAccountPresented) {
                 AddAccountView()
             }
-            .sheet(item: $selectedMediaForDetail) { item in
+            .navigationDestination(item: $selectedMediaForDetail) { item in
                 MediaDetailView(item: item)
             }
         }
@@ -200,7 +200,12 @@ public struct HomeView: View {
                 subtitle: item.genre ?? "Film",
                 posterUrl: item.streamIcon,
                 streamUrl: item.streamUrl,
-                contentType: .movie
+                contentType: .movie,
+                rating: item.rating,
+                releaseDate: item.releaseDate,
+                duration: item.duration,
+                overview: item.overview,
+                genre: item.genre
             )
             playback.play(media: media)
         }
