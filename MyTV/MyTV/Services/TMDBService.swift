@@ -25,24 +25,33 @@ public struct TMDBMetadata: Sendable, Codable {
     }
 }
 
-public actor TMDBService {
+public final class TMDBService: @unchecked Sendable {
     public static let shared = TMDBService()
 
     private let apiKey = "15d2ea6d0dc1d476efbca3eba2b9bbfb"
-    private var cache: [String: TMDBMetadata] = [:]
+    private let lock = NSLock()
+    private var memoryCache: [String: TMDBMetadata] = [:]
     private let urlSession: URLSession
 
     private init() {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 10
+        config.timeoutIntervalForRequest = 8
         config.requestCachePolicy = .returnCacheDataElseLoad
         self.urlSession = URLSession(configuration: config)
     }
 
+    /// Instant synchronous memory lookup (0ms latency for view initialization)
+    public func cachedMetadata(title: String, isSeries: Bool) -> TMDBMetadata? {
+        let key = makeCacheKey(title: title, isSeries: isSeries)
+        lock.lock()
+        defer { lock.unlock() }
+        return memoryCache[key]
+    }
+
     /// Fetches the highest quality clear logo and cinematic backdrop for a movie or TV show.
     public func getMetadata(title: String, isSeries: Bool) async -> TMDBMetadata? {
-        let cacheKey = "\(isSeries ? "tv" : "movie")_\(title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines))"
-        if let cached = cache[cacheKey] {
+        let cacheKey = makeCacheKey(title: title, isSeries: isSeries)
+        if let cached = cachedMetadata(title: title, isSeries: isSeries) {
             return cached
         }
 
@@ -51,7 +60,7 @@ public actor TMDBService {
 
         let mediaType = isSeries ? "tv" : "movie"
 
-        // Build robust search URL using URLComponents
+        // Build search URL using URLComponents
         var components = URLComponents(string: "https://api.themoviedb.org/3/search/\(mediaType)")
         var queryItems = [
             URLQueryItem(name: "api_key", value: apiKey),
@@ -172,8 +181,15 @@ public actor TMDBService {
             voteCount: firstItem.vote_count
         )
 
-        cache[cacheKey] = meta
+        lock.lock()
+        memoryCache[cacheKey] = meta
+        lock.unlock()
+
         return meta
+    }
+
+    private func makeCacheKey(title: String, isSeries: Bool) -> String {
+        "\(isSeries ? "tv" : "movie")_\(title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines))"
     }
 
     private func cleanTitleAndYear(from raw: String) -> (title: String, year: String?) {

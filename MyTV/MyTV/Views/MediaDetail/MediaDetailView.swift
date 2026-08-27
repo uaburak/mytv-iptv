@@ -26,6 +26,9 @@ public struct MediaDetailView: View {
         self._cast = State(initialValue: item.cast)
         self._director = State(initialValue: item.director)
         self._youtubeTrailer = State(initialValue: item.youtubeTrailer)
+
+        let cached = TMDBService.shared.cachedMetadata(title: item.name, isSeries: item.type == .series)
+        self._clearLogoUrl = State(initialValue: cached?.logoUrl)
     }
 
     private var isFav: Bool {
@@ -393,22 +396,8 @@ public struct MediaDetailView: View {
     @ViewBuilder
     private var storylineAndCastSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            // İçerik Logosu, İsmi & Konu Özeti
-            VStack(alignment: .leading, spacing: 8) {
-                if let logoStr = clearLogoUrl, let logoUrl = URL.fromUserString(logoStr) {
-                    AsyncImage(url: logoUrl) { phase in
-                        if let image = phase.image {
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(maxWidth: 220, maxHeight: 52, alignment: .leading)
-                                .shadow(color: .black.opacity(0.85), radius: 6)
-                        } else {
-                            EmptyView()
-                        }
-                    }
-                }
-
+            // İçerik İsmi & Konu Özeti
+            VStack(alignment: .leading, spacing: 6) {
                 Text(currentItem.name)
                     .font(.system(size: 18, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary)
