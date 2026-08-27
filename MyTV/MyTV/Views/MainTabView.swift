@@ -3,36 +3,50 @@ import SwiftUI
 public struct MainTabView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var playback = PlaybackManager.shared
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var selectedTab: AppTab = .home
     @State private var searchText = ""
 
     public init() {}
 
     public var body: some View {
         ZStack {
-            TabView {
-                Tab("Ana Sayfa", systemImage: "house") {
+            TabView(selection: $selectedTab) {
+                Tab(value: AppTab.home) {
                     HomeView()
+                } label: {
+                    tabLabel(for: .home)
                 }
 
-                Tab("Favoriler", systemImage: "heart") {
-                    FavoritesView()
-                }
-
-                Tab("Ayarlar", systemImage: "gearshape") {
-                    SettingsView()
-                }
-
-                Tab(role: .search) {
+                Tab(value: AppTab.search) {
                     NavigationStack {
                         SearchView(searchText: $searchText)
                     }
+                } label: {
+                    tabLabel(for: .search)
+                }
+
+                Tab(value: AppTab.favorites) {
+                    FavoritesView()
+                } label: {
+                    tabLabel(for: .favorites)
+                }
+
+                Tab(value: AppTab.settings) {
+                    SettingsView()
+                } label: {
+                    tabLabel(for: .settings)
                 }
             }
-            .searchable(text: $searchText, prompt: "Kanal, Film veya Dizi Ara...")
-            .tabViewSearchActivation(.searchTabSelection)
             #if os(iOS)
             .tabBarMinimizeBehavior(.onScrollDown)
             #endif
+            .onAppear {
+                TabBarConfigurator.configure(tabs: AppTab.allCases)
+            }
+            .onChange(of: colorScheme) { _, _ in
+                TabBarConfigurator.configure(tabs: AppTab.allCases)
+            }
 
             if appState.isSyncing && !appState.isAddAccountPresented && appState.channels.isEmpty {
                 SyncProgressOverlayView()
@@ -46,5 +60,15 @@ public struct MainTabView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: playback.isPresented)
+    }
+
+    // MARK: - Tab Label (Finvo Style Outline/Fill Template Icons)
+    private func tabLabel(for tab: AppTab) -> some View {
+        Label {
+            Text(tab.title)
+        } icon: {
+            Image(tab.iconName(isActive: false))
+                .renderingMode(.template)
+        }
     }
 }
