@@ -10,6 +10,7 @@ public struct MediaShelfRow: View {
         title: String,
         subtitle: String? = nil,
         items: [VODItem],
+        namespace: Namespace.ID? = nil,
         onSeeAll: (() -> Void)? = nil,
         onPlay: @escaping (VODItem) -> Void
     ) {
@@ -19,8 +20,13 @@ public struct MediaShelfRow: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 11) {
                     ForEach(items) { item in
-                        MediaCardView(item: item, width: 110) {
+                        let card = MediaCardView(item: item, width: 110) {
                             onPlay(item)
+                        }
+                        if #available(iOS 18.0, macOS 15.0, tvOS 18.0, visionOS 2.0, *), let namespace {
+                            card.matchedTransitionSource(id: item.id, in: namespace)
+                        } else {
+                            card
                         }
                     }
                 }
@@ -55,28 +61,28 @@ public struct MediaShelfRow: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Header (Kibar Başlık ve opsiyonel Tümü butonu)
-            HStack(alignment: .center) {
-                Text(title)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundStyle(.primary)
-
-                Spacer()
-
+            // Header (Kibar Başlık ve sağında inline ok ile Tümü aksiyonu)
+            HStack {
                 if let onSeeAll {
-                    Button {
-                        onSeeAll()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Text("Tümü")
-                                .font(.system(size: 12, weight: .medium))
+                    Button(action: onSeeAll) {
+                        HStack(spacing: 4) {
+                            Text(title)
+                                .font(.system(size: 14.5, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.primary)
+
                             Image(systemName: "chevron.right")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.secondary)
                         }
-                        .foregroundStyle(.tint)
                     }
                     .buttonStyle(.plain)
+                } else {
+                    Text(title)
+                        .font(.system(size: 14.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.primary)
                 }
+
+                Spacer()
             }
             .padding(.horizontal)
 

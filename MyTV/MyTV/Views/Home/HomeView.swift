@@ -13,6 +13,7 @@ public struct HomeView: View {
         public var id: String { rawValue }
     }
 
+    @Namespace private var detailNamespace
     @State private var navigationTarget: HomeNavigationTarget?
     @State private var selectedMediaForDetail: VODItem?
     @State private var selectedCategoryForGrid: MediaCategory?
@@ -37,6 +38,11 @@ public struct HomeView: View {
         Array(appState.channels.prefix(20))
     }
 
+    private var watchlistItems: [VODItem] {
+        let all = appState.movies + appState.series
+        return all.filter { storage.isInWatchlist(id: $0.id) }
+    }
+
     public var body: some View {
         NavigationStack {
             Group {
@@ -55,7 +61,12 @@ public struct HomeView: View {
                 AddAccountView()
             }
             .navigationDestination(item: $selectedMediaForDetail) { item in
-                MediaDetailView(item: item)
+                if #available(iOS 18.0, macOS 15.0, tvOS 18.0, visionOS 2.0, *) {
+                    MediaDetailView(item: item)
+                        .navigationTransition(.zoom(sourceID: item.id, in: detailNamespace))
+                } else {
+                    MediaDetailView(item: item)
+                }
             }
             .navigationDestination(item: $selectedCategoryForGrid) { cat in
                 CategoryMediaListView(category: cat)
@@ -96,6 +107,19 @@ public struct HomeView: View {
                 // 2. Hub Quick Access Cards (Canlı TV, Filmler, Diziler)
                 quickNavigationHub
 
+                // 3. Listem (Kullanıcının Listesine Eklediği İçerikler)
+                if !watchlistItems.isEmpty {
+                    MediaShelfRow(
+                        title: "Listem",
+                        items: watchlistItems,
+                        namespace: detailNamespace,
+                        onSeeAll: nil,
+                        onPlay: { item in
+                            selectedMediaForDetail = item
+                        }
+                    )
+                }
+
                 // 3. Canlı TV Öne Çıkanlar (Horizontal Live Channels Shelf)
                 if !featuredChannels.isEmpty {
                     MediaShelfRow(
@@ -115,6 +139,7 @@ public struct HomeView: View {
                     MediaShelfRow(
                         title: "Trend Filmler",
                         items: trendingMovies,
+                        namespace: detailNamespace,
                         onSeeAll: {
                             navigationTarget = .movies
                         },
@@ -129,6 +154,7 @@ public struct HomeView: View {
                     MediaShelfRow(
                         title: "Popüler Diziler",
                         items: popularSeries,
+                        namespace: detailNamespace,
                         onSeeAll: {
                             navigationTarget = .series
                         },
@@ -145,6 +171,7 @@ public struct HomeView: View {
                         MediaShelfRow(
                             title: cat.name,
                             items: Array(catItems.prefix(15)),
+                            namespace: detailNamespace,
                             onSeeAll: {
                                 selectedCategoryForGrid = cat
                             },
@@ -162,6 +189,7 @@ public struct HomeView: View {
                         MediaShelfRow(
                             title: cat.name,
                             items: Array(catItems.prefix(15)),
+                            namespace: detailNamespace,
                             onSeeAll: {
                                 selectedCategoryForGrid = cat
                             },
@@ -174,8 +202,7 @@ public struct HomeView: View {
             }
             .padding(.bottom, 36)
         }
-        .scrollEdgeEffectStyle(.soft, for: .all)
-        .refreshable {
+                .refreshable {
             await appState.syncActiveAccount()
         }
     }

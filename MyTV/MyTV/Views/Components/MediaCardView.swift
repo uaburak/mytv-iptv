@@ -1,6 +1,9 @@
 import SwiftUI
 
 public struct MediaCardView: View {
+    @ObservedObject private var storage = StorageManager.shared
+
+    let id: String?
     let title: String
     let imageUrl: String?
     let isLive: Bool
@@ -12,6 +15,7 @@ public struct MediaCardView: View {
 
     // MARK: - Genel Başlatıcı
     public init(
+        id: String? = nil,
         title: String,
         imageUrl: String?,
         isLive: Bool = false,
@@ -21,6 +25,7 @@ public struct MediaCardView: View {
         aspectRatio: CGFloat = 2/3,
         onPlay: @escaping () -> Void
     ) {
+        self.id = id
         self.title = title
         self.imageUrl = imageUrl
         self.isLive = isLive
@@ -33,6 +38,7 @@ public struct MediaCardView: View {
 
     // MARK: - VODItem (Film / Dizi) Başlatıcısı
     public init(item: VODItem, width: CGFloat = 110, aspectRatio: CGFloat = 2/3, onPlay: @escaping () -> Void) {
+        self.id = item.id
         self.title = item.name
         self.imageUrl = item.streamIcon ?? item.backdropUrl
         self.isLive = false
@@ -45,6 +51,7 @@ public struct MediaCardView: View {
 
     // MARK: - Channel (Canlı TV) Başlatıcısı
     public init(channel: Channel, width: CGFloat = 110, aspectRatio: CGFloat = 2/3, onPlay: @escaping () -> Void) {
+        self.id = channel.id
         self.title = channel.name
         self.imageUrl = channel.streamIcon
         self.isLive = true
@@ -59,80 +66,79 @@ public struct MediaCardView: View {
         Button {
             onPlay()
         } label: {
-            VStack(alignment: .leading, spacing: 5) {
-                ZStack(alignment: .topTrailing) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color.white.opacity(0.06))
+            ZStack(alignment: .topTrailing) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.white.opacity(0.06))
 
-                        if let url = URL.fromUserString(imageUrl) {
-                            CachedAsyncImage(url: url) { image in
-                                if isLive {
-                                    // Kanal logosu
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .padding(10)
-                                } else {
-                                    // Film / Dizi afişi
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                }
-                            } placeholder: {
-                                fallbackImage
+                    if let url = URL.fromUserString(imageUrl) {
+                        CachedAsyncImage(url: url) { image in
+                            if isLive {
+                                // Kanal logosu
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .padding(8)
+                            } else {
+                                // Film / Dizi afişi
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
                             }
-                        } else {
+                        } placeholder: {
                             fallbackImage
                         }
-                    }
-                    .frame(width: width, height: width / aspectRatio)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
-                    )
-
-                    // Canlı Yayın Rozeti
-                    if isLive {
-                        HStack(spacing: 3) {
-                            Circle()
-                                .fill(.red)
-                                .frame(width: 4, height: 4)
-                            Text("CANLI")
-                                .font(.system(size: 8, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white)
-                        }
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2.5)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .padding(5)
-                    } else if let rating, let score = Double(rating), score > 0 {
-                        // Puan Rozeti
-                        HStack(spacing: 2) {
-                            Image(systemName: "star.fill")
-                                .font(.system(size: 8))
-                                .foregroundStyle(.yellow)
-                            Text(String(format: "%.1f", score))
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2.5)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .padding(5)
+                    } else {
+                        fallbackImage
                     }
                 }
+                .frame(width: width, height: width / aspectRatio)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+                )
 
-                // Sadece Başlık (Kibar ve kompakt)
-                Text(title)
-                    .font(.system(size: 11.5, weight: .medium))
-                    .lineLimit(1)
-                    .foregroundStyle(.primary)
-                    .frame(width: width, alignment: .leading)
+                // Puan Rozeti (Film & Dizi)
+                if let rating, let score = Double(rating), score > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.yellow)
+                        Text(String(format: "%.1f", score))
+                            .font(.system(size: 9.5, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2.5)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(5)
+                }
             }
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button {
+                onPlay()
+            } label: {
+                Label("İzlemeye Başla", systemImage: "play.fill")
+            }
+
+            if let id, !id.isEmpty {
+                let isFav = storage.isFavorite(id: id)
+                Button {
+                    withAnimation {
+                        storage.toggleFavorite(id: id)
+                    }
+                } label: {
+                    if isFav {
+                        Label("Favorilerden Çıkar", systemImage: "heart.slash")
+                    } else {
+                        Label("Favorilere Ekle", systemImage: "heart.fill")
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -149,6 +155,13 @@ public struct MediaCardView: View {
                         .font(.system(size: 10, weight: .bold, design: .rounded))
                         .foregroundStyle(.secondary)
                 }
+            } else {
+                Text(title)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .padding(.horizontal, 6)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -168,3 +168,21 @@ public struct SeasonInfo: Identifiable, Codable, Hashable, Sendable {
         self.overview = overview
     }
 }
+
+public struct MediaDetailPayload: Identifiable, Codable, Hashable, Sendable {
+    public var id: String { item.id }
+    public let item: VODItem
+    public let vodDetail: XtreamCodesAPIService.VODDetailResponse?
+    public let seriesDetail: XtreamCodesAPIService.SeriesDetailResponse?
+
+    public init(
+        item: VODItem,
+        vodDetail: XtreamCodesAPIService.VODDetailResponse? = nil,
+        seriesDetail: XtreamCodesAPIService.SeriesDetailResponse? = nil
+    ) {
+        self.item = item
+        self.vodDetail = vodDetail
+        self.seriesDetail = seriesDetail
+    }
+}
+

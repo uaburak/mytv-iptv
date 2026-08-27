@@ -211,7 +211,7 @@ public final class XtreamCodesAPIService: Sendable {
                 id: dto.stream_id.stringValue,
                 name: dto.name,
                 streamIcon: dto.stream_icon,
-                backdropUrl: dto.backdrop_path?.firstUrl ?? dto.stream_icon,
+                backdropUrl: dto.backdrop_path?.firstUrl,
                 rating: dto.rating?.stringValue,
                 releaseDate: dto.release_date?.stringValue ?? dto.releaseDate?.stringValue,
                 duration: dto.episode_run_time?.stringValue,
@@ -260,7 +260,7 @@ public final class XtreamCodesAPIService: Sendable {
                 id: dto.series_id.stringValue,
                 name: dto.name,
                 streamIcon: dto.cover,
-                backdropUrl: dto.backdrop_path?.firstUrl ?? dto.cover,
+                backdropUrl: dto.backdrop_path?.firstUrl,
                 rating: dto.rating?.stringValue,
                 releaseDate: dto.release_date?.stringValue ?? dto.releaseDate?.stringValue,
                 duration: nil,
@@ -274,7 +274,7 @@ public final class XtreamCodesAPIService: Sendable {
         }
     }
 
-    public struct VODDetailResponse: Sendable {
+    public struct VODDetailResponse: Codable, Hashable, Sendable {
         public let movieImage: String?
         public let backdropUrl: String?
         public let plot: String?
@@ -290,7 +290,7 @@ public final class XtreamCodesAPIService: Sendable {
         public let mpaaRating: String?
     }
 
-    public struct SeriesDetailResponse: Sendable {
+    public struct SeriesDetailResponse: Codable, Hashable, Sendable {
         public let cover: String?
         public let backdropUrl: String?
         public let plot: String?

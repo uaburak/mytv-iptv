@@ -50,9 +50,6 @@ public struct MainTabView: View {
                     tabLabel(for: .profile)
                 }
             }
-            #if os(iOS)
-            .tabBarMinimizeBehavior(.onScrollDown)
-            #endif
             .onAppear {
                 TabBarConfigurator.configure(tabs: AppTab.allCases)
             }

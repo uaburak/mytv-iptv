@@ -3,6 +3,7 @@ import SwiftUI
 public struct CategoryMediaListView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var playback = PlaybackManager.shared
+    @Namespace private var detailNamespace
 
     let category: MediaCategory
     @State private var selectedMediaForDetail: VODItem?
@@ -35,14 +36,24 @@ public struct CategoryMediaListView: View {
                     }
                 case .movie:
                     ForEach(movies) { movie in
-                        MediaCardView(item: movie, width: 100) {
+                        let card = MediaCardView(item: movie, width: 100) {
                             selectedMediaForDetail = movie
+                        }
+                        if #available(iOS 18.0, macOS 15.0, tvOS 18.0, visionOS 2.0, *) {
+                            card.matchedTransitionSource(id: movie.id, in: detailNamespace)
+                        } else {
+                            card
                         }
                     }
                 case .series:
                     ForEach(series) { s in
-                        MediaCardView(item: s, width: 100) {
+                        let card = MediaCardView(item: s, width: 100) {
                             selectedMediaForDetail = s
+                        }
+                        if #available(iOS 18.0, macOS 15.0, tvOS 18.0, visionOS 2.0, *) {
+                            card.matchedTransitionSource(id: s.id, in: detailNamespace)
+                        } else {
+                            card
                         }
                     }
                 }
@@ -51,13 +62,17 @@ public struct CategoryMediaListView: View {
             .padding(.top, 12)
             .padding(.bottom, 36)
         }
-        .scrollEdgeEffectStyle(.soft, for: .all)
         .navigationTitle(category.name)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .navigationDestination(item: $selectedMediaForDetail) { item in
-            MediaDetailView(item: item)
+            if #available(iOS 18.0, macOS 15.0, tvOS 18.0, visionOS 2.0, *) {
+                MediaDetailView(item: item)
+                    .navigationTransition(.zoom(sourceID: item.id, in: detailNamespace))
+            } else {
+                MediaDetailView(item: item)
+            }
         }
     }
 

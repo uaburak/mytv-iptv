@@ -3,6 +3,7 @@ import SwiftUI
 public struct SeriesView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var playback = PlaybackManager.shared
+    @Namespace private var detailNamespace
 
     @State private var destinationCategory: MediaCategory?
     @State private var selectedSeriesForDetail: VODItem?
@@ -29,7 +30,6 @@ public struct SeriesView: View {
                         .padding(.top, 8)
                         .padding(.bottom, 36)
                 }
-                .scrollEdgeEffectStyle(.soft, for: .all)
             }
         }
         .navigationTitle("Diziler")
@@ -43,7 +43,12 @@ public struct SeriesView: View {
             CategoryMediaListView(category: cat)
         }
         .navigationDestination(item: $selectedSeriesForDetail) { series in
-            MediaDetailView(item: series)
+            if #available(iOS 18.0, macOS 15.0, tvOS 18.0, visionOS 2.0, *) {
+                MediaDetailView(item: series)
+                    .navigationTransition(.zoom(sourceID: series.id, in: detailNamespace))
+            } else {
+                MediaDetailView(item: series)
+            }
         }
     }
 
@@ -58,6 +63,7 @@ public struct SeriesView: View {
                     MediaShelfRow(
                         title: cat.name,
                         items: Array(items.prefix(15)),
+                        namespace: detailNamespace,
                         onSeeAll: {
                             destinationCategory = cat
                         },

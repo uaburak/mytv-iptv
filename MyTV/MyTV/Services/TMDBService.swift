@@ -31,14 +31,56 @@ public final class TMDBService: @unchecked Sendable {
     private let apiKey = "15d2ea6d0dc1d476efbca3eba2b9bbfb"
     private let lock = NSLock()
     private var memoryCache: [String: TMDBMetadata] = [:]
+    private var pendingRequests: [String: Task<TMDBMetadata?, Never>] = [:]
     private let urlSession: URLSession
+    private let fileManager = FileManager.default
 
     private init() {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 8
         config.requestCachePolicy = .returnCacheDataElseLoad
         self.urlSession = URLSession(configuration: config)
+
+        loadDiskCache()
     }
+
+    // MARK: - Disk Cache Persistence
+
+    private var cacheFileURL: URL? {
+        guard let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let dir = appSupport.appendingPathComponent("MyTVCache", isDirectory: true)
+        if !fileManager.fileExists(atPath: dir.path) {
+            try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir.appendingPathComponent("tmdb_metadata_cache.json")
+    }
+
+    private func loadDiskCache() {
+        guard let url = cacheFileURL, fileManager.fileExists(atPath: url.path) else { return }
+        if let data = try? Data(contentsOf: url),
+           let decoded = try? JSONDecoder().decode([String: TMDBMetadata].self, from: data) {
+            lock.lock()
+            self.memoryCache = decoded
+            lock.unlock()
+        }
+    }
+
+    private func saveDiskCache() {
+        guard let url = cacheFileURL else { return }
+        lock.lock()
+        let snapshot = self.memoryCache
+        lock.unlock()
+
+        Task.detached(priority: .background) {
+            if let data = try? JSONEncoder().encode(snapshot) {
+                try? data.write(to: url, options: .atomic)
+            }
+        }
+    }
+
+    // MARK: - Instant Lookup
 
     /// Instant synchronous memory lookup (0ms latency for view initialization)
     public func cachedMetadata(title: String, isSeries: Bool) -> TMDBMetadata? {
@@ -48,13 +90,56 @@ public final class TMDBService: @unchecked Sendable {
         return memoryCache[key]
     }
 
+    // MARK: - Background Prefetching
+
+    /// Prefetches TMDB metadata in background for a batch of items so they are ready before the user taps them.
+    public func prefetch(items: [VODItem]) {
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            for item in items.prefix(25) {
+                _ = await self.getMetadata(title: item.name, isSeries: item.type == .series)
+            }
+        }
+    }
+
+    // MARK: - Fetch Metadata
+
     /// Fetches the highest quality clear logo and cinematic backdrop for a movie or TV show.
     public func getMetadata(title: String, isSeries: Bool) async -> TMDBMetadata? {
         let cacheKey = makeCacheKey(title: title, isSeries: isSeries)
+
         if let cached = cachedMetadata(title: title, isSeries: isSeries) {
             return cached
         }
 
+        // Deduplicate in-flight network requests for the same item
+        lock.lock()
+        if let ongoing = pendingRequests[cacheKey] {
+            lock.unlock()
+            return await ongoing.value
+        }
+
+        let task = Task<TMDBMetadata?, Never> {
+            let result = await self.performFetch(title: title, isSeries: isSeries)
+            self.lock.lock()
+            self.pendingRequests.removeValue(forKey: cacheKey)
+            if let result {
+                self.memoryCache[cacheKey] = result
+            }
+            self.lock.unlock()
+            if result != nil {
+                self.saveDiskCache()
+            }
+            return result
+        }
+
+        pendingRequests[cacheKey] = task
+        lock.unlock()
+
+        return await task.value
+    }
+
+    private func performFetch(title: String, isSeries: Bool) async -> TMDBMetadata? {
         let (cleanTitle, year) = cleanTitleAndYear(from: title)
         guard !cleanTitle.isEmpty else { return nil }
 
@@ -172,7 +257,7 @@ public final class TMDBService: @unchecked Sendable {
             }
         }
 
-        let meta = TMDBMetadata(
+        return TMDBMetadata(
             logoUrl: bestLogoUrl,
             backdropUrl: bestBackdropUrl,
             posterUrl: bestPosterUrl,
@@ -180,12 +265,6 @@ public final class TMDBService: @unchecked Sendable {
             rating: firstItem.vote_average,
             voteCount: firstItem.vote_count
         )
-
-        lock.lock()
-        memoryCache[cacheKey] = meta
-        lock.unlock()
-
-        return meta
     }
 
     private func makeCacheKey(title: String, isSeries: Bool) -> String {

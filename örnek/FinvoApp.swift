@@ -77,8 +77,7 @@ struct FinvoApp: App {
             // Tüm uygulama için yumuşak scroll kenar efekti. Bu modifier alt hiyerarşideki
             // tüm ScrollView/List'lere (sheet'ler ve navigation destination'lar dahil) yayılır,
             // bu yüzden tek tek ekranlara eklenmesine gerek yok.
-            .scrollEdgeEffectStyle(.soft, for: .all)
-            .environment(\.locale, Locale(identifier: appLanguage))
+                        .environment(\.locale, Locale(identifier: appLanguage))
             .environment(\.theme, DefaultTheme(colorIdentifier: appThemeColor))
             // Bundle.setLanguage(...) üzerinden localizedString kaynağı zaten değişiyor.
             .onChange(of: appLanguage) { _, newLanguage in

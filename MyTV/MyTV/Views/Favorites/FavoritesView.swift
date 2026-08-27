@@ -4,6 +4,7 @@ public struct FavoritesView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var playback = PlaybackManager.shared
     @ObservedObject private var storage = StorageManager.shared
+    @Namespace private var detailNamespace
 
     @State private var selectedScope: FavoriteScope = .all
     @State private var selectedMediaForDetail: VODItem?
@@ -74,14 +75,18 @@ public struct FavoritesView: View {
                         .padding(.top, 8)
                         .padding(.bottom, 36)
                     }
-                    .scrollEdgeEffectStyle(.soft, for: .all)
                 }
             }
             #if !os(macOS)
             .toolbar(.hidden, for: .navigationBar)
             #endif
             .navigationDestination(item: $selectedMediaForDetail) { item in
-                MediaDetailView(item: item)
+                if #available(iOS 18.0, macOS 15.0, tvOS 18.0, visionOS 2.0, *) {
+                    MediaDetailView(item: item)
+                        .navigationTransition(.zoom(sourceID: item.id, in: detailNamespace))
+                } else {
+                    MediaDetailView(item: item)
+                }
             }
         }
     }
@@ -131,7 +136,7 @@ public struct FavoritesView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Canlı Kanallar")
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .font(.system(size: 14.5, weight: .semibold, design: .rounded))
                 Spacer()
             }
             .padding(.horizontal)
@@ -152,15 +157,20 @@ public struct FavoritesView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Filmler")
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .font(.system(size: 14.5, weight: .semibold, design: .rounded))
                 Spacer()
             }
             .padding(.horizontal)
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 95, maximum: 140), spacing: 12)], spacing: 14) {
                 ForEach(favoriteMovies) { movie in
-                    MediaCardView(item: movie, width: 100) {
+                    let card = MediaCardView(item: movie, width: 100) {
                         selectedMediaForDetail = movie
+                    }
+                    if #available(iOS 18.0, macOS 15.0, tvOS 18.0, visionOS 2.0, *) {
+                        card.matchedTransitionSource(id: movie.id, in: detailNamespace)
+                    } else {
+                        card
                     }
                 }
             }
@@ -173,15 +183,20 @@ public struct FavoritesView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Diziler")
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .font(.system(size: 14.5, weight: .semibold, design: .rounded))
                 Spacer()
             }
             .padding(.horizontal)
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 95, maximum: 140), spacing: 12)], spacing: 14) {
                 ForEach(favoriteSeries) { series in
-                    MediaCardView(item: series, width: 100) {
+                    let card = MediaCardView(item: series, width: 100) {
                         selectedMediaForDetail = series
+                    }
+                    if #available(iOS 18.0, macOS 15.0, tvOS 18.0, visionOS 2.0, *) {
+                        card.matchedTransitionSource(id: series.id, in: detailNamespace)
+                    } else {
+                        card
                     }
                 }
             }

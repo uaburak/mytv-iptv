@@ -8,14 +8,17 @@ public final class StorageManager: ObservableObject {
     private let accountsKey = "mytv_saved_accounts"
     private let activeAccountIdKey = "mytv_active_account_id"
     private let favoritesKey = "mytv_favorite_ids"
+    private let watchlistKey = "mytv_watchlist_ids"
 
     @Published public private(set) var accounts: [Account] = []
     @Published public private(set) var activeAccount: Account?
     @Published public private(set) var favorites: Set<String> = []
+    @Published public private(set) var watchlist: Set<String> = []
 
     private init() {
         loadAccounts()
         loadFavorites()
+        loadWatchlist()
     }
 
     // MARK: - Accounts Management
@@ -79,15 +82,37 @@ public final class StorageManager: ObservableObject {
         UserDefaults.standard.set(Array(favorites), forKey: favoritesKey)
     }
 
+    // MARK: - Watchlist (Listem) Management
+
+    public func loadWatchlist() {
+        let list = UserDefaults.standard.stringArray(forKey: watchlistKey) ?? []
+        self.watchlist = Set(list)
+    }
+
+    public func isInWatchlist(id: String) -> Bool {
+        watchlist.contains(id)
+    }
+
+    public func toggleWatchlist(id: String) {
+        if watchlist.contains(id) {
+            watchlist.remove(id)
+        } else {
+            watchlist.insert(id)
+        }
+        UserDefaults.standard.set(Array(watchlist), forKey: watchlistKey)
+    }
+
     // MARK: - Clear All
 
     public func clearAll() {
         accounts.removeAll()
         activeAccount = nil
         favorites.removeAll()
+        watchlist.removeAll()
         UserDefaults.standard.removeObject(forKey: accountsKey)
         UserDefaults.standard.removeObject(forKey: activeAccountIdKey)
         UserDefaults.standard.removeObject(forKey: favoritesKey)
+        UserDefaults.standard.removeObject(forKey: watchlistKey)
     }
 
     private func persistAccounts() {

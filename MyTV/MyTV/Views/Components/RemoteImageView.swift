@@ -148,6 +148,7 @@ public final class ImageCacheService {
 
 public struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     private let url: URL?
+    private let animationDuration: Double
     private let content: (Image) -> Content
     private let placeholder: () -> Placeholder
 
@@ -155,24 +156,32 @@ public struct CachedAsyncImage<Content: View, Placeholder: View>: View {
 
     public init(
         url: URL?,
+        animationDuration: Double = 0.6,
         @ViewBuilder content: @escaping (Image) -> Content,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
         self.url = url
+        self.animationDuration = animationDuration
         self.content = content
         self.placeholder = placeholder
+        if let url, let cached = ImageCacheService.shared.cachedImage(for: url) {
+            self._loadedImage = State(initialValue: cached)
+        }
     }
 
     public var body: some View {
-        Group {
+        ZStack {
             if let loadedImage {
                 #if canImport(UIKit)
                 content(Image(uiImage: loadedImage))
+                    .transition(.opacity)
                 #elseif canImport(AppKit)
                 content(Image(nsImage: loadedImage))
+                    .transition(.opacity)
                 #endif
             } else {
                 placeholder()
+                    .transition(.opacity)
             }
         }
         .task(id: url) {
@@ -181,14 +190,21 @@ public struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     }
 
     private func fetchImage() async {
-        guard let url else { return }
+        guard let url else {
+            self.loadedImage = nil
+            return
+        }
         if let cached = ImageCacheService.shared.cachedImage(for: url) {
             self.loadedImage = cached
             return
         }
+        // If switching to a new uncached URL, clear old image to avoid morphing
+        if self.loadedImage != nil {
+            self.loadedImage = nil
+        }
         let fetched = await ImageCacheService.shared.loadImage(from: url)
         if let fetched {
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(.easeInOut(duration: animationDuration)) {
                 self.loadedImage = fetched
             }
         }

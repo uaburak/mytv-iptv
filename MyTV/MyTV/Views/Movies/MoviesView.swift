@@ -3,6 +3,7 @@ import SwiftUI
 public struct MoviesView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var playback = PlaybackManager.shared
+    @Namespace private var detailNamespace
 
     @State private var destinationCategory: MediaCategory?
     @State private var selectedMovieForDetail: VODItem?
@@ -29,7 +30,6 @@ public struct MoviesView: View {
                         .padding(.top, 8)
                         .padding(.bottom, 36)
                 }
-                .scrollEdgeEffectStyle(.soft, for: .all)
             }
         }
         .navigationTitle("Filmler")
@@ -43,7 +43,12 @@ public struct MoviesView: View {
             CategoryMediaListView(category: cat)
         }
         .navigationDestination(item: $selectedMovieForDetail) { movie in
-            MediaDetailView(item: movie)
+            if #available(iOS 18.0, macOS 15.0, tvOS 18.0, visionOS 2.0, *) {
+                MediaDetailView(item: movie)
+                    .navigationTransition(.zoom(sourceID: movie.id, in: detailNamespace))
+            } else {
+                MediaDetailView(item: movie)
+            }
         }
     }
 
@@ -58,6 +63,7 @@ public struct MoviesView: View {
                     MediaShelfRow(
                         title: cat.name,
                         items: Array(items.prefix(15)),
+                        namespace: detailNamespace,
                         onSeeAll: {
                             destinationCategory = cat
                         },
