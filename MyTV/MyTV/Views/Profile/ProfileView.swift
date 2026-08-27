@@ -98,7 +98,7 @@ public struct ProfileView: View {
                 // 3. İstatistikler
                 Section("İçerik İstatistikleri") {
                     LabeledContent {
-                        Text("\(storage.favoriteIds.count)")
+                        Text("\(storage.favorites.count)")
                             .font(.subheadline.bold())
                     } label: {
                         Label("Favori İçerikler", systemImage: "heart.fill")
