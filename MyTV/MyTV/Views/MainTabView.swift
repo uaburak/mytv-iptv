@@ -30,7 +30,9 @@ public struct MainTabView: View {
             }
             .searchable(text: $searchText, prompt: "Kanal, Film veya Dizi Ara...")
             .tabViewSearchActivation(.searchTabSelection)
+            #if os(iOS)
             .tabBarMinimizeBehavior(.onScrollDown)
+            #endif
 
             if appState.isSyncing && !appState.isAddAccountPresented && appState.channels.isEmpty {
                 SyncProgressOverlayView()
