@@ -210,9 +210,9 @@ public struct MediaDetailView: View {
     @ViewBuilder
     private var heroContent: some View {
         HStack(alignment: .bottom, spacing: 14) {
-            // Sol: Yüzen Dikey Afiş / Sezon Kapak Görseli
+            // Sol: Yüzen Dikey Afiş (Kartlardakiyle Birebir Aynı Orijinal Afiş)
             MediaPosterView(
-                posterUrl: currentPosterUrl,
+                posterUrl: initialItem.streamIcon ?? initialItem.backdropUrl,
                 title: currentItem.name,
                 width: 102,
                 height: 152,

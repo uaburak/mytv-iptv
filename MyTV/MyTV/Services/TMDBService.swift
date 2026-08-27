@@ -50,15 +50,21 @@ public actor TMDBService {
         guard !cleanTitle.isEmpty else { return nil }
 
         let mediaType = isSeries ? "tv" : "movie"
-        guard let encodedTitle = cleanTitle.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return nil }
 
-        var searchUrlStr = "https://api.themoviedb.org/3/search/\(mediaType)?api_key=\(apiKey)&query=\(encodedTitle)&language=tr-TR"
+        // Build robust search URL using URLComponents
+        var components = URLComponents(string: "https://api.themoviedb.org/3/search/\(mediaType)")
+        var queryItems = [
+            URLQueryItem(name: "api_key", value: apiKey),
+            URLQueryItem(name: "query", value: cleanTitle),
+            URLQueryItem(name: "language", value: "tr-TR")
+        ]
         if let year {
-            let yearParam = isSeries ? "&first_air_date_year=\(year)" : "&primary_release_year=\(year)"
-            searchUrlStr += yearParam
+            let yearParam = isSeries ? "first_air_date_year" : "primary_release_year"
+            queryItems.append(URLQueryItem(name: yearParam, value: year))
         }
+        components?.queryItems = queryItems
 
-        guard let searchUrl = URL(string: searchUrlStr) else { return nil }
+        guard let searchUrl = components?.url else { return nil }
 
         struct SearchResult: Decodable {
             struct Item: Decodable {
@@ -78,9 +84,14 @@ public actor TMDBService {
            let items = decoded.results, !items.isEmpty {
             results = items
         } else if year != nil {
-            // Retry without strict year filter
-            let retryUrlStr = "https://api.themoviedb.org/3/search/\(mediaType)?api_key=\(apiKey)&query=\(encodedTitle)&language=tr-TR"
-            if let retryUrl = URL(string: retryUrlStr),
+            // Retry without strict year filter if not found
+            var retryComponents = URLComponents(string: "https://api.themoviedb.org/3/search/\(mediaType)")
+            retryComponents?.queryItems = [
+                URLQueryItem(name: "api_key", value: apiKey),
+                URLQueryItem(name: "query", value: cleanTitle),
+                URLQueryItem(name: "language", value: "tr-TR")
+            ]
+            if let retryUrl = retryComponents?.url,
                let (data, resp) = try? await urlSession.data(from: retryUrl),
                let httpResp = resp as? HTTPURLResponse, (200...299).contains(httpResp.statusCode),
                let decoded = try? JSONDecoder().decode(SearchResult.self, from: data),
@@ -96,8 +107,12 @@ public actor TMDBService {
         let itemId = firstItem.id
 
         // Fetch all images (logos, backdrops, posters)
-        let imagesUrlStr = "https://api.themoviedb.org/3/\(mediaType)/\(itemId)/images?api_key=\(apiKey)&include_image_language=tr,en,null"
-        guard let imagesUrl = URL(string: imagesUrlStr) else { return nil }
+        var imgComponents = URLComponents(string: "https://api.themoviedb.org/3/\(mediaType)/\(itemId)/images")
+        imgComponents?.queryItems = [
+            URLQueryItem(name: "api_key", value: apiKey),
+            URLQueryItem(name: "include_image_language", value: "tr,en,null")
+        ]
+        guard let imagesUrl = imgComponents?.url else { return nil }
 
         struct ImagesResponse: Decodable {
             struct ImageItem: Decodable {
@@ -120,7 +135,6 @@ public actor TMDBService {
 
             // 1. Şeffaf Logo (ClearLogo - PNG)
             if let logos = decoded.logos, !logos.isEmpty {
-                // Prefer Turkish or English or first logo
                 let sortedLogos = logos.sorted {
                     let l0Lang = $0.iso_639_1 ?? ""
                     let l1Lang = $1.iso_639_1 ?? ""
@@ -175,7 +189,7 @@ public actor TMDBService {
         let patterns = [
             #"\[.*?\]"#,
             #"\(.*?\)"#,
-            #"(?i)\b(4k|fhd|hd|uhd|dual|dublaj|altyazılı|altyazi|tr|eng|netflix|bluray|web-dl)\b"#
+            #"(?i)\b(4k|fhd|hd|uhd|dual|dublaj|altyazılı|altyazi|netflix|bluray|web-dl)\b"#
         ]
         for p in patterns {
             clean = clean.replacingOccurrences(of: p, with: " ", options: .regularExpression)
