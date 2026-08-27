@@ -77,7 +77,9 @@ public struct FavoritesView: View {
                     .scrollEdgeEffectStyle(.soft, for: .all)
                 }
             }
+            #if !os(macOS)
             .toolbar(.hidden, for: .navigationBar)
+            #endif
             .navigationDestination(item: $selectedMediaForDetail) { item in
                 MediaDetailView(item: item)
             }

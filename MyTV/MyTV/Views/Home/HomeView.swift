@@ -48,7 +48,9 @@ public struct HomeView: View {
                     appleTVDashboardView
                 }
             }
+            #if !os(macOS)
             .toolbar(.hidden, for: .navigationBar)
+            #endif
             .sheet(isPresented: $appState.isAddAccountPresented) {
                 AddAccountView()
             }
