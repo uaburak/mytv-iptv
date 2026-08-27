@@ -622,38 +622,37 @@ public struct MediaDetailView: View {
     // MARK: - Actions & Loading
 
     private func loadRichDetails() async {
+        guard !isLoadingDetails else { return }
         isLoadingDetails = true
 
-        // 1. TMDB'den Şeffaf Logo (ClearLogo) ve Ana Sinematik Kapak (Backdrop) çek
-        if let tmdb = await TMDBService.shared.getMetadata(title: currentItem.name, isSeries: currentItem.type == .series) {
-            if let logo = tmdb.logoUrl {
-                self.clearLogoUrl = logo
-            }
-            if let bg = tmdb.backdropUrl {
+        // 1. TMDB'den Şeffaf Logo (ClearLogo) çek (Arka planı zıplatmadan sadece logo ve ek bilgileri zenginleştirir)
+        let tmdb = await TMDBService.shared.getMetadata(title: currentItem.name, isSeries: currentItem.type == .series)
+        if let logo = tmdb?.logoUrl {
+            self.clearLogoUrl = logo
+        }
+
+        // Eğer mevcut kapak yoksa TMDB'den yatay kapak ata
+        if currentItem.backdropUrl == nil || currentItem.backdropUrl?.isEmpty == true {
+            if let bg = tmdb?.backdropUrl {
                 self.currentItem = VODItem(
                     id: currentItem.id,
                     name: currentItem.name,
-                    streamIcon: tmdb.posterUrl ?? currentItem.streamIcon,
+                    streamIcon: currentItem.streamIcon,
                     backdropUrl: bg,
-                    rating: currentItem.rating ?? (tmdb.rating != nil ? String(format: "%.1f", tmdb.rating!) : nil),
+                    rating: currentItem.rating ?? (tmdb?.rating != nil ? String(format: "%.1f", tmdb!.rating!) : nil),
                     releaseDate: currentItem.releaseDate,
                     duration: currentItem.duration,
-                    overview: currentItem.overview ?? tmdb.overview,
+                    overview: currentItem.overview ?? tmdb?.overview,
                     streamUrl: currentItem.streamUrl,
                     categoryId: currentItem.categoryId,
                     type: currentItem.type,
                     containerExtension: currentItem.containerExtension,
-                    genre: currentItem.genre,
-                    cast: currentItem.cast,
-                    director: currentItem.director,
-                    youtubeTrailer: currentItem.youtubeTrailer,
-                    country: currentItem.country,
-                    age: currentItem.age,
-                    mpaaRating: currentItem.mpaaRating
+                    genre: currentItem.genre
                 )
             }
         }
 
+        // 2. Xtream Detaylarını Yükle (Bölümler, cast, yönetmen, fragman)
         guard let account = storage.activeAccount, account.type == .xtream else {
             isLoadingDetails = false
             return
@@ -667,12 +666,13 @@ public struct MediaDetailView: View {
                 self.director = details.director ?? self.director
                 self.youtubeTrailer = details.youtubeTrailer ?? self.youtubeTrailer
 
-                // Update backdrop / cover if richer image is available
+                // Mevcut arka planı koru, sadece yoksa ekle
+                let finalBackdrop = currentItem.backdropUrl ?? details.backdropUrl ?? tmdb?.backdropUrl
                 self.currentItem = VODItem(
                     id: currentItem.id,
                     name: currentItem.name,
-                    streamIcon: details.cover ?? currentItem.streamIcon,
-                    backdropUrl: currentItem.backdropUrl ?? details.backdropUrl,
+                    streamIcon: initialItem.streamIcon ?? details.cover ?? currentItem.streamIcon,
+                    backdropUrl: finalBackdrop,
                     rating: (currentItem.rating != nil && currentItem.rating != "0") ? currentItem.rating : details.rating,
                     releaseDate: details.releaseDate ?? currentItem.releaseDate,
                     duration: currentItem.duration,
@@ -700,11 +700,12 @@ public struct MediaDetailView: View {
                 self.director = details.director ?? self.director
                 self.youtubeTrailer = details.youtubeTrailer ?? self.youtubeTrailer
 
+                let finalBackdrop = currentItem.backdropUrl ?? details.backdropUrl ?? tmdb?.backdropUrl
                 self.currentItem = VODItem(
                     id: currentItem.id,
                     name: currentItem.name,
-                    streamIcon: details.movieImage ?? currentItem.streamIcon,
-                    backdropUrl: currentItem.backdropUrl ?? details.backdropUrl,
+                    streamIcon: initialItem.streamIcon ?? details.movieImage ?? currentItem.streamIcon,
+                    backdropUrl: finalBackdrop,
                     rating: (currentItem.rating != nil && currentItem.rating != "0") ? currentItem.rating : details.rating,
                     releaseDate: details.releaseDate ?? currentItem.releaseDate,
                     duration: details.duration ?? currentItem.duration,
