@@ -74,7 +74,7 @@ public struct FavoritesView: View {
                         .padding(.top, 8)
                         .padding(.bottom, 36)
                     }
-                    .scrollEdgeEffectStyle(.none, for: .all)
+                    .scrollEdgeEffectStyle(.soft, for: .all)
                 }
             }
             .toolbar(.hidden, for: .navigationBar)

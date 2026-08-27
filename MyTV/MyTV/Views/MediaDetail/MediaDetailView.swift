@@ -9,6 +9,7 @@ public struct MediaDetailView: View {
 
     // Detailed metadata loaded on appear
     @State private var currentItem: VODItem
+    @State private var clearLogoUrl: String?
     @State private var cast: String?
     @State private var director: String?
     @State private var youtubeTrailer: String?
@@ -149,7 +150,7 @@ public struct MediaDetailView: View {
                         .ignoresSafeArea(edges: .bottom)
                     )
                 }
-                .scrollEdgeEffectStyle(.none, for: .all)
+                .scrollEdgeEffectStyle(.soft, for: .all)
             }
         }
         .ignoresSafeArea(edges: .top)
@@ -220,9 +221,22 @@ public struct MediaDetailView: View {
             )
             .shadow(color: .black.opacity(0.85), radius: 12, x: 0, y: 6)
 
-            // Sağ: Büyük Puan ve Dinamik Meta Bilgileri
+            // Sağ: Logo, Büyük Puan ve Dinamik Meta Bilgileri
             VStack(alignment: .leading, spacing: 6) {
-                // 1. Büyük IMDb / TMDB Puanı (Üstte)
+                // 1. Şeffaf Başlık Logosu (ClearLogo - PNG)
+                if let logoStr = clearLogoUrl, let logoUrl = URL.fromUserString(logoStr) {
+                    CachedAsyncImage(url: logoUrl) { logo in
+                        logo
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxHeight: 38, alignment: .leading)
+                            .shadow(color: .black.opacity(0.85), radius: 6)
+                    } placeholder: {
+                        EmptyView()
+                    }
+                }
+
+                // 2. Büyük IMDb / TMDB Puanı (Üstte)
                 if let rating = currentItem.rating, let score = Double(rating), score > 0 {
                     HStack(alignment: .lastTextBaseline, spacing: 4) {
                         Image(systemName: "star.fill")
@@ -599,6 +613,9 @@ public struct MediaDetailView: View {
         guard let account = storage.activeAccount, account.type == .xtream else { return }
         isLoadingDetails = true
 
+        // 1. TMDB'den Şeffaf Logo (ClearLogo) ve Ana Sinematik Kapak (Backdrop) çek
+        async let tmdbTask = TMDBService.shared.getMetadata(title: currentItem.name, isSeries: currentItem.type == .series)
+
         if currentItem.type == .series {
             if let details = try? await XtreamCodesAPIService.shared.getSeriesDetails(account: account, seriesId: currentItem.id) {
                 self.episodes = details.episodes
@@ -607,16 +624,21 @@ public struct MediaDetailView: View {
                 self.director = details.director ?? self.director
                 self.youtubeTrailer = details.youtubeTrailer ?? self.youtubeTrailer
 
+                let tmdb = await tmdbTask
+                if let tmdbLogo = tmdb?.logoUrl {
+                    self.clearLogoUrl = tmdbLogo
+                }
+
                 // Update backdrop / cover if richer image is available
                 self.currentItem = VODItem(
                     id: currentItem.id,
                     name: currentItem.name,
                     streamIcon: details.cover ?? currentItem.streamIcon,
-                    backdropUrl: details.backdropUrl ?? currentItem.backdropUrl,
-                    rating: details.rating ?? currentItem.rating,
+                    backdropUrl: tmdb?.backdropUrl ?? details.backdropUrl ?? currentItem.backdropUrl,
+                    rating: details.rating ?? (tmdb?.rating != nil ? String(format: "%.1f", tmdb!.rating!) : currentItem.rating),
                     releaseDate: details.releaseDate ?? currentItem.releaseDate,
                     duration: currentItem.duration,
-                    overview: details.plot ?? currentItem.overview,
+                    overview: (details.plot?.isEmpty == false ? details.plot : tmdb?.overview) ?? currentItem.overview,
                     streamUrl: currentItem.streamUrl,
                     categoryId: currentItem.categoryId,
                     type: currentItem.type,
@@ -633,6 +655,28 @@ public struct MediaDetailView: View {
                 if let firstSeason = seasons.first {
                     self.selectedSeason = firstSeason
                 }
+            } else {
+                let tmdb = await tmdbTask
+                if let tmdbLogo = tmdb?.logoUrl {
+                    self.clearLogoUrl = tmdbLogo
+                }
+                if let tmdbBackdrop = tmdb?.backdropUrl {
+                    self.currentItem = VODItem(
+                        id: currentItem.id,
+                        name: currentItem.name,
+                        streamIcon: currentItem.streamIcon,
+                        backdropUrl: tmdbBackdrop,
+                        rating: currentItem.rating,
+                        releaseDate: currentItem.releaseDate,
+                        duration: currentItem.duration,
+                        overview: tmdb?.overview ?? currentItem.overview,
+                        streamUrl: currentItem.streamUrl,
+                        categoryId: currentItem.categoryId,
+                        type: currentItem.type,
+                        containerExtension: currentItem.containerExtension,
+                        genre: currentItem.genre
+                    )
+                }
             }
         } else {
             if let details = try? await XtreamCodesAPIService.shared.getVODInfo(account: account, vodId: currentItem.id) {
@@ -640,15 +684,20 @@ public struct MediaDetailView: View {
                 self.director = details.director ?? self.director
                 self.youtubeTrailer = details.youtubeTrailer ?? self.youtubeTrailer
 
+                let tmdb = await tmdbTask
+                if let tmdbLogo = tmdb?.logoUrl {
+                    self.clearLogoUrl = tmdbLogo
+                }
+
                 self.currentItem = VODItem(
                     id: currentItem.id,
                     name: currentItem.name,
                     streamIcon: details.movieImage ?? currentItem.streamIcon,
-                    backdropUrl: details.backdropUrl ?? currentItem.backdropUrl,
-                    rating: details.rating ?? currentItem.rating,
+                    backdropUrl: tmdb?.backdropUrl ?? details.backdropUrl ?? currentItem.backdropUrl,
+                    rating: details.rating ?? (tmdb?.rating != nil ? String(format: "%.1f", tmdb!.rating!) : currentItem.rating),
                     releaseDate: details.releaseDate ?? currentItem.releaseDate,
                     duration: details.duration ?? currentItem.duration,
-                    overview: details.plot ?? currentItem.overview,
+                    overview: (details.plot?.isEmpty == false ? details.plot : tmdb?.overview) ?? currentItem.overview,
                     streamUrl: currentItem.streamUrl,
                     categoryId: currentItem.categoryId,
                     type: currentItem.type,
@@ -661,6 +710,28 @@ public struct MediaDetailView: View {
                     age: details.age ?? currentItem.age,
                     mpaaRating: details.mpaaRating ?? currentItem.mpaaRating
                 )
+            } else {
+                let tmdb = await tmdbTask
+                if let tmdbLogo = tmdb?.logoUrl {
+                    self.clearLogoUrl = tmdbLogo
+                }
+                if let tmdbBackdrop = tmdb?.backdropUrl {
+                    self.currentItem = VODItem(
+                        id: currentItem.id,
+                        name: currentItem.name,
+                        streamIcon: currentItem.streamIcon,
+                        backdropUrl: tmdbBackdrop,
+                        rating: currentItem.rating,
+                        releaseDate: currentItem.releaseDate,
+                        duration: currentItem.duration,
+                        overview: tmdb?.overview ?? currentItem.overview,
+                        streamUrl: currentItem.streamUrl,
+                        categoryId: currentItem.categoryId,
+                        type: currentItem.type,
+                        containerExtension: currentItem.containerExtension,
+                        genre: currentItem.genre
+                    )
+                }
             }
         }
 

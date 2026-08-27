@@ -29,7 +29,7 @@ public struct LiveTVView: View {
                         .padding(.top, 8)
                         .padding(.bottom, 36)
                 }
-                .scrollEdgeEffectStyle(.none, for: .all)
+                .scrollEdgeEffectStyle(.soft, for: .all)
             }
         }
         .navigationTitle("Canlı TV")
