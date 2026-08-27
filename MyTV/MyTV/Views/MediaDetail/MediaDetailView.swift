@@ -138,17 +138,28 @@ public struct MediaDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    storage.toggleFavorite(id: currentItem.id)
-                } label: {
-                    Image(systemName: isFav ? "heart.fill" : "heart")
-                        .foregroundStyle(isFav ? .red : .primary)
-                }
+            #if os(macOS)
+            ToolbarItem(placement: .automatic) {
+                favoriteToolbarButton
             }
+            #else
+            ToolbarItem(placement: .topBarTrailing) {
+                favoriteToolbarButton
+            }
+            #endif
         }
         .task {
             await loadRichDetails()
+        }
+    }
+
+    @ViewBuilder
+    private var favoriteToolbarButton: some View {
+        Button {
+            storage.toggleFavorite(id: currentItem.id)
+        } label: {
+            Image(systemName: isFav ? "heart.fill" : "heart")
+                .foregroundStyle(isFav ? .red : .primary)
         }
     }
 
