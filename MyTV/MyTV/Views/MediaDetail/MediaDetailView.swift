@@ -225,14 +225,16 @@ public struct MediaDetailView: View {
             VStack(alignment: .leading, spacing: 6) {
                 // 1. Şeffaf Başlık Logosu (ClearLogo - PNG)
                 if let logoStr = clearLogoUrl, let logoUrl = URL.fromUserString(logoStr) {
-                    CachedAsyncImage(url: logoUrl) { logo in
-                        logo
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxHeight: 38, alignment: .leading)
-                            .shadow(color: .black.opacity(0.85), radius: 6)
-                    } placeholder: {
-                        EmptyView()
+                    AsyncImage(url: logoUrl) { phase in
+                        if let image = phase.image {
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: 160, maxHeight: 42, alignment: .leading)
+                                .shadow(color: .black.opacity(0.9), radius: 6)
+                        } else {
+                            EmptyView()
+                        }
                     }
                 }
 
@@ -394,14 +396,16 @@ public struct MediaDetailView: View {
             // İçerik Logosu, İsmi & Konu Özeti
             VStack(alignment: .leading, spacing: 8) {
                 if let logoStr = clearLogoUrl, let logoUrl = URL.fromUserString(logoStr) {
-                    CachedAsyncImage(url: logoUrl) { logo in
-                        logo
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxHeight: 48, alignment: .leading)
-                            .shadow(color: .black.opacity(0.85), radius: 6)
-                    } placeholder: {
-                        EmptyView()
+                    AsyncImage(url: logoUrl) { phase in
+                        if let image = phase.image {
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: 220, maxHeight: 52, alignment: .leading)
+                                .shadow(color: .black.opacity(0.85), radius: 6)
+                        } else {
+                            EmptyView()
+                        }
                     }
                 }
 
