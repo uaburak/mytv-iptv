@@ -4,6 +4,7 @@ public struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var storage = StorageManager.shared
 
+    @AppStorage("appLanguage") private var appLanguage: String = "en"
     @State private var isResetAlertPresented = false
 
     public init() {}
@@ -93,12 +94,23 @@ public struct SettingsView: View {
                     }
                 }
 
-                Section("Uygulama Bilgisi") {
-                    LabeledContent("Uygulama Adı", value: "MyTV")
-                    LabeledContent("Sürüm", value: "1.0")
+                // Dil / Language Seçimi
+                Section(appLanguage == "tr" ? "Dil ve Tercihler" : "Language & Preferences") {
+                    Picker(selection: $appLanguage) {
+                        Text("English").tag("en")
+                        Text("Türkçe").tag("tr")
+                    } label: {
+                        Label(appLanguage == "tr" ? "Uygulama Dili" : "App Language", systemImage: "globe")
+                    }
+                    .pickerStyle(.menu)
+                }
+
+                Section(appLanguage == "tr" ? "Uygulama Bilgisi" : "App Info") {
+                    LabeledContent(appLanguage == "tr" ? "Uygulama Adı" : "App Name", value: "MyTV")
+                    LabeledContent(appLanguage == "tr" ? "Sürüm" : "Version", value: "1.0")
                 }
             }
-            .navigationTitle("Ayarlar")
+            .navigationTitle(appLanguage == "tr" ? "Ayarlar" : "Settings")
             .sheet(isPresented: $appState.isAddAccountPresented) {
                 AddAccountView()
             }

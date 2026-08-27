@@ -3,6 +3,7 @@ import SwiftUI
 public struct ProfileView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var storage = StorageManager.shared
+    @AppStorage("appLanguage") private var appLanguage: String = "en"
 
     public init() {}
 
@@ -29,7 +30,7 @@ public struct ProfileView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(storage.activeAccount?.name ?? "Kullanıcı Profili")
+                            Text(storage.activeAccount?.name ?? (appLanguage == "tr" ? "Kullanıcı Profili" : "User Profile"))
                                 .font(.title3.bold())
 
                             if let active = storage.activeAccount {
@@ -37,7 +38,7 @@ public struct ProfileView: View {
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             } else {
-                                Text("Giriş Yapılmadı")
+                                Text(appLanguage == "tr" ? "Giriş Yapılmadı" : "No Active Account")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
@@ -50,12 +51,12 @@ public struct ProfileView: View {
 
                 // 2. Aktif Hesap ve Abonelik Durumu
                 if let active = storage.activeAccount {
-                    Section("Abonelik ve Sunucu Durumu") {
+                    Section(appLanguage == "tr" ? "Abonelik ve Sunucu Durumu" : "Subscription & Server Status") {
                         LabeledContent {
                             Text(active.type.rawValue)
                                 .fontWeight(.semibold)
                         } label: {
-                            Label("Hesap Türü", systemImage: "badge.plus.radiowaves.right")
+                            Label(appLanguage == "tr" ? "Hesap Türü" : "Account Type", systemImage: "badge.plus.radiowaves.right")
                         }
 
                         if active.type == .xtream && !active.serverUrl.isEmpty {
@@ -64,7 +65,7 @@ public struct ProfileView: View {
                                     .lineLimit(1)
                                     .foregroundStyle(.secondary)
                             } label: {
-                                Label("Sunucu Adresi", systemImage: "server.rack")
+                                Label(appLanguage == "tr" ? "Sunucu Adresi" : "Server Address", systemImage: "server.rack")
                             }
                         }
 
@@ -74,13 +75,13 @@ public struct ProfileView: View {
                                 HStack(spacing: 6) {
                                     Text(exp.formatted(date: .abbreviated, time: .omitted))
                                     if daysLeft > 0 {
-                                        Text("(\(daysLeft) gün)")
+                                        Text(appLanguage == "tr" ? "(\(daysLeft) gün)" : "(\(daysLeft) days)")
                                             .font(.caption.bold())
                                             .foregroundStyle(daysLeft < 7 ? .red : .green)
                                     }
                                 }
                             } label: {
-                                Label("Bitiş Tarihi", systemImage: "calendar.badge.clock")
+                                Label(appLanguage == "tr" ? "Bitiş Tarihi" : "Expiry Date", systemImage: "calendar.badge.clock")
                             }
                         }
 
@@ -89,19 +90,19 @@ public struct ProfileView: View {
                                 Text(last.formatted(date: .abbreviated, time: .shortened))
                                     .foregroundStyle(.secondary)
                             } label: {
-                                Label("Son Senkronizasyon", systemImage: "arrow.clockwise")
+                                Label(appLanguage == "tr" ? "Son Senkronizasyon" : "Last Sync", systemImage: "arrow.clockwise")
                             }
                         }
                     }
                 }
 
                 // 3. İstatistikler
-                Section("İçerik İstatistikleri") {
+                Section(appLanguage == "tr" ? "İçerik İstatistikleri" : "Content Statistics") {
                     LabeledContent {
                         Text("\(storage.favorites.count)")
                             .font(.subheadline.bold())
                     } label: {
-                        Label("Favori İçerikler", systemImage: "heart.fill")
+                        Label(appLanguage == "tr" ? "Favori İçerikler" : "Favorites", systemImage: "heart.fill")
                             .foregroundStyle(.red)
                     }
 
@@ -109,7 +110,7 @@ public struct ProfileView: View {
                         Text("\(appState.channels.count)")
                             .font(.subheadline.bold())
                     } label: {
-                        Label("Canlı Kanallar", systemImage: "tv.fill")
+                        Label(appLanguage == "tr" ? "Canlı Kanallar" : "Live Channels", systemImage: "tv.fill")
                             .foregroundStyle(.blue)
                     }
 
@@ -117,7 +118,7 @@ public struct ProfileView: View {
                         Text("\(appState.movies.count)")
                             .font(.subheadline.bold())
                     } label: {
-                        Label("Filmler", systemImage: "film.fill")
+                        Label(appLanguage == "tr" ? "Filmler" : "Movies", systemImage: "film.fill")
                             .foregroundStyle(.purple)
                     }
 
@@ -125,22 +126,33 @@ public struct ProfileView: View {
                         Text("\(appState.series.count)")
                             .font(.subheadline.bold())
                     } label: {
-                        Label("Diziler", systemImage: "play.tv.fill")
+                        Label(appLanguage == "tr" ? "Diziler" : "Series", systemImage: "play.tv.fill")
                             .foregroundStyle(.orange)
                     }
                 }
 
-                // 4. Ayarlara Geçiş
+                // 4. Dil / Language
+                Section(appLanguage == "tr" ? "Dil ve Tercihler" : "Language & Preferences") {
+                    Picker(selection: $appLanguage) {
+                        Text("English").tag("en")
+                        Text("Türkçe").tag("tr")
+                    } label: {
+                        Label(appLanguage == "tr" ? "Uygulama Dili" : "App Language", systemImage: "globe")
+                    }
+                    .pickerStyle(.menu)
+                }
+
+                // 5. Ayarlara Geçiş
                 Section {
                     NavigationLink {
                         SettingsView()
                     } label: {
-                        Label("Uygulama Ayarları", systemImage: "gearshape.fill")
+                        Label(appLanguage == "tr" ? "Uygulama Ayarları" : "App Settings", systemImage: "gearshape.fill")
                             .font(.headline)
                     }
                 }
             }
-            .navigationTitle("Profil")
+            .navigationTitle(appLanguage == "tr" ? "Profil" : "Profile")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     NavigationLink {

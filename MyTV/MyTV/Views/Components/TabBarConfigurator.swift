@@ -23,12 +23,13 @@ public enum AppTab: String, CaseIterable, Identifiable {
     public var id: String { rawValue }
 
     public var title: String {
+        let isTurkish = UserDefaults.standard.string(forKey: "appLanguage") == "tr"
         switch self {
-        case .home:      return "Anasayfa"
-        case .favorites: return "Favoriler"
-        case .playlists: return "Listeler"
-        case .search:    return "Arama"
-        case .profile:   return "Profil"
+        case .home:      return isTurkish ? "Özet" : "Home"
+        case .favorites: return isTurkish ? "Favoriler" : "Favorites"
+        case .playlists: return isTurkish ? "Listeler" : "Playlists"
+        case .search:    return isTurkish ? "Arama" : "Search"
+        case .profile:   return isTurkish ? "Profil" : "Profile"
         }
     }
 

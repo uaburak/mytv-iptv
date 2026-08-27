@@ -3,7 +3,7 @@ import SwiftUI
 public struct MainTabView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var playback = PlaybackManager.shared
-    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("appLanguage") private var appLanguage: String = "en"
     @State private var selectedTab: AppTab = .home
     @State private var searchText = ""
 
@@ -12,28 +12,28 @@ public struct MainTabView: View {
     public var body: some View {
         ZStack {
             TabView(selection: $selectedTab) {
-                // 1. Anasayfa
+                // 1. Özet / Home
                 Tab(value: AppTab.home) {
                     HomeView()
                 } label: {
                     tabLabel(for: .home)
                 }
 
-                // 2. Favoriler
+                // 2. Favoriler / Favorites
                 Tab(value: AppTab.favorites) {
                     FavoritesView()
                 } label: {
                     tabLabel(for: .favorites)
                 }
 
-                // 3. Listeler
+                // 3. Listeler / Playlists
                 Tab(value: AppTab.playlists) {
                     PlaylistsView()
                 } label: {
                     tabLabel(for: .playlists)
                 }
 
-                // 4. Arama
+                // 4. Arama / Search
                 Tab(value: AppTab.search) {
                     NavigationStack {
                         SearchView(searchText: $searchText)
@@ -42,7 +42,7 @@ public struct MainTabView: View {
                     tabLabel(for: .search)
                 }
 
-                // 5. Profil
+                // 5. Profil / Profile
                 Tab(value: AppTab.profile) {
                     ProfileView()
                 } label: {
@@ -58,6 +58,10 @@ public struct MainTabView: View {
             .onChange(of: colorScheme) { _, _ in
                 TabBarConfigurator.configure(tabs: AppTab.allCases)
             }
+            .onChange(of: appLanguage) { _, _ in
+                TabBarConfigurator.configure(tabs: AppTab.allCases)
+            }
+            .environment(\.locale, Locale(identifier: appLanguage))
             .tint(.brandPrimary)
 
             if appState.isSyncing && !appState.isAddAccountPresented && appState.channels.isEmpty {
