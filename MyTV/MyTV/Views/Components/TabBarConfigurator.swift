@@ -64,6 +64,8 @@ public enum TabBarConfigurator {
 
     #if canImport(UIKit) && !os(watchOS) && !os(tvOS)
     private static func applyImages(to tabBar: UITabBar, tabs: [AppTab]) {
+        tabBar.tintColor = .brandPrimary
+
         guard let items = tabBar.items else { return }
 
         for (index, tab) in tabs.enumerated() where index < items.count {

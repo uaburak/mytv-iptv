@@ -58,6 +58,7 @@ public struct MainTabView: View {
             .onChange(of: colorScheme) { _, _ in
                 TabBarConfigurator.configure(tabs: AppTab.allCases)
             }
+            .tint(.brandPrimary)
 
             if appState.isSyncing && !appState.isAddAccountPresented && appState.channels.isEmpty {
                 SyncProgressOverlayView()

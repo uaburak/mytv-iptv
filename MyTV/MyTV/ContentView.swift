@@ -21,6 +21,7 @@ struct ContentView: View {
     var body: some View {
         MainTabView()
             .preferredColorScheme(.dark)
+            .tint(.brandPrimary)
     }
 }
 
