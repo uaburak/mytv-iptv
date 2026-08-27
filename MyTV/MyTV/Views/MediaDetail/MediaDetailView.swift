@@ -68,30 +68,6 @@ public struct MediaDetailView: View {
             .filter { !$0.isEmpty && $0.count < 25 }
     }
 
-    private var detectedLanguages: [String] {
-        var tags: [String] = []
-        let lowerName = currentItem.name.lowercased()
-
-        if lowerName.contains("dual") || lowerName.contains("multi") {
-            tags.append("Dual")
-        }
-        if lowerName.contains("dublaj") || lowerName.contains("tr dub") || lowerName.contains("[tr]") || lowerName.contains("turkce") || lowerName.contains("türkçe") {
-            tags.append("TR Dublaj")
-        }
-        if lowerName.contains("altyaz") || lowerName.contains("sub") || lowerName.contains("softsub") {
-            tags.append("TR Altyazı")
-        }
-        if lowerName.contains("en") || lowerName.contains("eng") || lowerName.contains("english") {
-            if !tags.contains("Dual") && !tags.contains("TR Dublaj") {
-                tags.append("EN")
-            }
-        }
-        if tags.isEmpty {
-            tags.append("TR")
-        }
-        return tags
-    }
-
     public var body: some View {
         GeometryReader { screenGeo in
             ZStack(alignment: .top) {
@@ -321,33 +297,18 @@ public struct MediaDetailView: View {
                     }
                 }
 
-                // 4. İkinci Dinamik Satır (Dil Paketleri ve Türler Birlikte Akar)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 4) {
-                        ForEach(detectedLanguages, id: \.self) { lang in
-                            HStack(spacing: 3) {
-                                Image(systemName: lang.contains("Altyazı") ? "captions.bubble.fill" : "speaker.wave.2.fill")
-                                    .font(.system(size: 8))
-                                Text(lang)
-                                    .font(.system(size: 10, weight: .bold))
+                // 4. İkinci Dinamik Satır (Tür Rozetleri)
+                if !genreList.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 4) {
+                            ForEach(genreList, id: \.self) { g in
+                                Text(g)
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 3)
+                                    .background(Color.white.opacity(0.10), in: Capsule())
+                                    .foregroundStyle(.white.opacity(0.85))
                             }
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(Color.blue.opacity(0.28), in: Capsule())
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(Color.blue.opacity(0.45), lineWidth: 0.6)
-                            )
-                            .foregroundStyle(.white)
-                        }
-
-                        ForEach(genreList, id: \.self) { g in
-                            Text(g)
-                                .font(.system(size: 10.5, weight: .medium))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(Color.white.opacity(0.10), in: Capsule())
-                                .foregroundStyle(.white.opacity(0.85))
                         }
                     }
                 }
