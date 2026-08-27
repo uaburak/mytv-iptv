@@ -17,6 +17,15 @@ public struct SearchView: View {
         case series = "Diziler"
 
         public var id: String { rawValue }
+
+        public var icon: String {
+            switch self {
+            case .all: return "square.grid.2x2.fill"
+            case .live: return "play.tv.fill"
+            case .movies: return "film.fill"
+            case .series: return "tv.fill"
+            }
+        }
     }
 
     public init(searchText: Binding<String>) {
@@ -233,17 +242,23 @@ public struct SearchView: View {
                 ForEach(SearchScope.allCases) { scope in
                     let isSelected = (selectedScope == scope)
                     Button {
-                        selectedScope = scope
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            selectedScope = scope
+                        }
                     } label: {
-                        Text(scope.rawValue)
-                            .font(.caption.weight(isSelected ? .bold : .regular))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(
-                                isSelected ? Color.accentColor : Color.secondary.opacity(0.12),
-                                in: Capsule()
-                            )
-                            .foregroundStyle(isSelected ? .white : .primary)
+                        HStack(spacing: 6) {
+                            Image(systemName: scope.icon)
+                                .font(.system(size: 13, weight: .semibold))
+                            Text(scope.rawValue)
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(
+                            isSelected ? Color.brandPrimary : Color.white.opacity(0.08),
+                            in: Capsule()
+                        )
+                        .foregroundStyle(isSelected ? .black : .white)
                     }
                     .buttonStyle(.plain)
                 }

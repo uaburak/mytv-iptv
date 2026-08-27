@@ -111,6 +111,7 @@ public struct PlaylistsView: View {
                                     }
                                 }
                             }
+                            #if !os(tvOS)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button(role: .destructive) {
                                     accountToDelete = account
@@ -130,6 +131,26 @@ public struct PlaylistsView: View {
                                     Label("Yenile", systemImage: "arrow.clockwise")
                                 }
                                 .tint(.blue)
+                            }
+                            #endif
+                            .contextMenu {
+                                Button {
+                                    Task {
+                                        if !isActive {
+                                            storage.setActiveAccount(account)
+                                        }
+                                        await appState.syncActiveAccount()
+                                    }
+                                } label: {
+                                    Label("Yenile", systemImage: "arrow.clockwise")
+                                }
+
+                                Button(role: .destructive) {
+                                    accountToDelete = account
+                                    isDeleteConfirmationPresented = true
+                                } label: {
+                                    Label("Sil", systemImage: "trash")
+                                }
                             }
                         }
                     }

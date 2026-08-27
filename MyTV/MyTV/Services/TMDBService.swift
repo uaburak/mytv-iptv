@@ -104,6 +104,30 @@ public final class TMDBService: @unchecked Sendable {
 
     // MARK: - Fetch Metadata
 
+    private func getOngoingTask(for cacheKey: String) -> Task<TMDBMetadata?, Never>? {
+        lock.lock()
+        defer { lock.unlock() }
+        return pendingRequests[cacheKey]
+    }
+
+    private func registerTask(_ task: Task<TMDBMetadata?, Never>, for cacheKey: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        pendingRequests[cacheKey] = task
+    }
+
+    private func completeTask(for cacheKey: String, result: TMDBMetadata?) {
+        lock.lock()
+        pendingRequests.removeValue(forKey: cacheKey)
+        if let result {
+            memoryCache[cacheKey] = result
+        }
+        lock.unlock()
+        if result != nil {
+            saveDiskCache()
+        }
+    }
+
     /// Fetches the highest quality clear logo and cinematic backdrop for a movie or TV show.
     public func getMetadata(title: String, isSeries: Bool) async -> TMDBMetadata? {
         let cacheKey = makeCacheKey(title: title, isSeries: isSeries)
@@ -113,28 +137,17 @@ public final class TMDBService: @unchecked Sendable {
         }
 
         // Deduplicate in-flight network requests for the same item
-        lock.lock()
-        if let ongoing = pendingRequests[cacheKey] {
-            lock.unlock()
+        if let ongoing = getOngoingTask(for: cacheKey) {
             return await ongoing.value
         }
 
         let task = Task<TMDBMetadata?, Never> {
             let result = await self.performFetch(title: title, isSeries: isSeries)
-            self.lock.lock()
-            self.pendingRequests.removeValue(forKey: cacheKey)
-            if let result {
-                self.memoryCache[cacheKey] = result
-            }
-            self.lock.unlock()
-            if result != nil {
-                self.saveDiskCache()
-            }
+            self.completeTask(for: cacheKey, result: result)
             return result
         }
 
-        pendingRequests[cacheKey] = task
-        lock.unlock()
+        registerTask(task, for: cacheKey)
 
         return await task.value
     }

@@ -149,6 +149,7 @@ public struct NativePlayerView: View {
                                 toggleControlsVisibility()
                             }
                         }
+                        #if !os(tvOS)
                         .gesture(
                             DragGesture(minimumDistance: 25)
                                 .onEnded { value in
@@ -162,6 +163,7 @@ public struct NativePlayerView: View {
                                     }
                                 }
                         )
+                        #endif
 
                     // 3. Apple Native Glass Kontroller Katmanı
                     if isControlsVisible {
@@ -578,8 +580,15 @@ public struct NativePlayerView: View {
                         .foregroundStyle(.white.opacity(0.85))
                         .frame(minWidth: 42, alignment: .leading)
 
+                    #if os(tvOS)
+                    ProgressView(
+                        value: isScrubbing ? scrubTime : currentPlaybackTime,
+                        total: max(1, totalDuration)
+                    )
+                    .tint(.white)
+                    #else
                     Slider(
-                        value: Binding(
+                        value: Binding<Double>(
                             get: { isScrubbing ? scrubTime : currentPlaybackTime },
                             set: { scrubTime = $0 }
                         ),
@@ -596,6 +605,7 @@ public struct NativePlayerView: View {
                         }
                     )
                     .tint(.white)
+                    #endif
 
                     let remaining = max(0, totalDuration - (isScrubbing ? scrubTime : currentPlaybackTime))
                     Text("-\(formatTime(Int(remaining)))")

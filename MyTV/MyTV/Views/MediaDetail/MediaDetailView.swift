@@ -180,73 +180,116 @@ public struct MediaDetailView: View {
 
     public var body: some View {
         ZStack(alignment: .top) {
-            // 1. Koyu Arka Plan
+            // 1. Koyu Zemin
             Color(red: 0.05, green: 0.05, blue: 0.07)
                 .ignoresSafeArea()
 
-            // 2. Ekranın En Üstüne Sabitlenen Arka Plan Resmi (Safe Area Üst Boşluğu Yok)
+            // 2. Ekranın En Üstüne Sabitlenen Backdrop Resmi (Bağımsız Katman)
             stickyBackdropLayer
 
             // 3. Kaydırılabilir İçerik
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
-                    // Arka plan resminin görünmesi için üst boşluk
+                    // Arka plandaki görselin üst kısmının net görünmesi için üst boşluk
                     Color.clear
-                        .frame(height: 220)
+                        .frame(height: 190)
 
-                    // Hero Bilgi Alanı (Afiş, Başlık, Meta rozetleri, Oynat/Listem butonları)
-                    heroInformationSection
-                        .padding(.horizontal, 20)
-
-                    // Detay Alanı (Türler, Konu Özeti, Künye Bilgileri)
-                    detailsContentSection
-                        .padding(.horizontal, 20)
-                        .padding(.top, 24)
-
-                    // Fragmanlar Alanı (Apple TV Tarzı)
-                    trailersSection
-                        .padding(.horizontal, 20)
-                        .padding(.top, 28)
-
-                    // Diziler İçin Sezonlar & Bölümler
-                    if item.type == .series {
-                        seriesEpisodesSection
-                            .padding(.top, 28)
-                    }
-
-                    Spacer(minLength: 60)
+                    // Poster ve Tüm Verileri İçeren Kapsayıcı (Aşağıdan yukarıya siyah geçiş + blur efektli)
+                    mainContentContainer
                 }
             }
         }
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            #if !os(tvOS)
+            ToolbarItem(placement: .topBarTrailing) {
                 ShareLink(item: item.name, subject: Text(item.name), message: Text("\(item.name) - MyTV'de İzle")) {
                     Image(systemName: "square.and.arrow.up")
                         .foregroundStyle(.white)
                 }
                 .tint(.white)
             }
+            #endif
 
-            ToolbarSpacer(.fixed, placement: .primaryAction)
-
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
                         storage.toggleFavorite(id: item.id)
                     }
                 } label: {
                     Image(systemName: isFavorite ? "heart.fill" : "heart")
-                        .foregroundStyle(.white)
+                        .foregroundStyle(isFavorite ? .red : .white)
                 }
                 .tint(.white)
             }
         }
         #if !os(macOS)
-        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         #endif
         .task {
             await fetchServerDetails()
         }
+    }
+
+    // MARK: - Main Content Container (Poster ve Tüm Bilgilerin Bulunduğu Kapsayıcı)
+
+    @ViewBuilder
+    private var mainContentContainer: some View {
+        VStack(spacing: 0) {
+            // 1. Hero Bilgi Alanı (Afiş, Başlık, Meta Rozetleri, Butonlar)
+            heroInformationSection
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+
+            // 2. Detay Alanı (Türler, Konu Özeti, Künye Bilgileri)
+            detailsContentSection
+                .padding(.horizontal, 20)
+                .padding(.top, 24)
+
+            // 3. Fragmanlar Alanı (Apple TV Tarzı)
+            trailersSection
+                .padding(.horizontal, 20)
+                .padding(.top, 28)
+
+            // 4. Diziler İçin Sezonlar & Bölümler
+            if item.type == .series {
+                seriesEpisodesSection
+                    .padding(.top, 28)
+            }
+
+            Spacer(minLength: 60)
+        }
+        .frame(maxWidth: .infinity)
+        .background(
+            ZStack(alignment: .top) {
+                // Aşağıdan Yukarıya Blur / Frosted Glass Katmanı
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .mask(
+                        LinearGradient(
+                            stops: [
+                                .init(color: .clear, location: 0.0),
+                                .init(color: .black.opacity(0.6), location: 0.12),
+                                .init(color: .black, location: 0.28)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+
+                // Aşağıdan Yukarıya Siyah / Koyu Degrade Geçiş
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0.0),
+                        .init(color: Color(red: 0.05, green: 0.05, blue: 0.07).opacity(0.7), location: 0.10),
+                        .init(color: Color(red: 0.05, green: 0.05, blue: 0.07).opacity(0.95), location: 0.24),
+                        .init(color: Color(red: 0.05, green: 0.05, blue: 0.07), location: 0.40)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+            .ignoresSafeArea(edges: .bottom)
+        )
     }
 
     // MARK: - Sticky Backdrop Layer (Sunucudan Gelen Yatay Görsel)

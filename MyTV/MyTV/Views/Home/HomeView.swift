@@ -17,6 +17,7 @@ public struct HomeView: View {
     @State private var navigationTarget: HomeNavigationTarget?
     @State private var selectedMediaForDetail: VODItem?
     @State private var selectedCategoryForGrid: MediaCategory?
+    @State private var showProfileSheet = false
 
     public init() {}
 
@@ -55,8 +56,25 @@ public struct HomeView: View {
                 }
             }
             #if !os(macOS)
-            .toolbar(.hidden, for: .navigationBar)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             #endif
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        #if os(iOS)
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        #endif
+                        showProfileSheet = true
+                    } label: {
+                        ProfileImageView(size: 32)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .sheet(isPresented: $showProfileSheet) {
+                ProfileView()
+            }
             .sheet(isPresented: $appState.isAddAccountPresented) {
                 AddAccountView()
             }
@@ -95,7 +113,7 @@ public struct HomeView: View {
                     HeroBannerView(
                         items: featuredItems,
                         onPlay: { item in
-                            handlePlay(item)
+                            selectedMediaForDetail = item
                         },
                         onSelect: { item in
                             selectedMediaForDetail = item
@@ -202,7 +220,7 @@ public struct HomeView: View {
             }
             .padding(.bottom, 36)
         }
-                .refreshable {
+        .refreshable {
             await appState.syncActiveAccount()
         }
     }
@@ -297,24 +315,7 @@ public struct HomeView: View {
     // MARK: - Actions
 
     private func handlePlay(_ item: VODItem) {
-        if item.type == .series {
-            selectedMediaForDetail = item
-        } else {
-            let media = PlayableMedia(
-                mediaId: item.id,
-                title: item.name,
-                subtitle: item.genre ?? "Film",
-                posterUrl: item.streamIcon,
-                streamUrl: item.streamUrl,
-                contentType: .movie,
-                rating: item.rating,
-                releaseDate: item.releaseDate,
-                duration: item.duration,
-                overview: item.overview,
-                genre: item.genre
-            )
-            playback.play(media: media)
-        }
+        selectedMediaForDetail = item
     }
 
     private func playChannel(_ channel: Channel) {
