@@ -3,6 +3,7 @@ import SwiftUI
 public struct MainTabView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var playback = PlaybackManager.shared
+    @Environment(\.colorScheme) private var colorScheme
     @AppStorage("appLanguage") private var appLanguage: String = "en"
     @State private var selectedTab: AppTab = .home
     @State private var searchText = ""
