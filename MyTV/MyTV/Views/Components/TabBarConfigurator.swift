@@ -15,18 +15,20 @@ import UIKit
 // MARK: - Tab Tanımları
 public enum AppTab: String, CaseIterable, Identifiable {
     case home      = "home"
-    case search    = "analysis"
     case favorites = "family"
-    case settings  = "setting"
+    case playlists = "add"
+    case search    = "analysis"
+    case profile   = "setting"
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
-        case .home:      return "Ana Sayfa"
-        case .search:    return "Arama"
+        case .home:      return "Anasayfa"
         case .favorites: return "Favoriler"
-        case .settings:  return "Ayarlar"
+        case .playlists: return "Listeler"
+        case .search:    return "Arama"
+        case .profile:   return "Profil"
         }
     }
 

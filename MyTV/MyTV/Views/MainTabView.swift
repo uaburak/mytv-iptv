@@ -12,12 +12,28 @@ public struct MainTabView: View {
     public var body: some View {
         ZStack {
             TabView(selection: $selectedTab) {
+                // 1. Anasayfa
                 Tab(value: AppTab.home) {
                     HomeView()
                 } label: {
                     tabLabel(for: .home)
                 }
 
+                // 2. Favoriler
+                Tab(value: AppTab.favorites) {
+                    FavoritesView()
+                } label: {
+                    tabLabel(for: .favorites)
+                }
+
+                // 3. Listeler
+                Tab(value: AppTab.playlists) {
+                    PlaylistsView()
+                } label: {
+                    tabLabel(for: .playlists)
+                }
+
+                // 4. Arama
                 Tab(value: AppTab.search) {
                     NavigationStack {
                         SearchView(searchText: $searchText)
@@ -26,16 +42,11 @@ public struct MainTabView: View {
                     tabLabel(for: .search)
                 }
 
-                Tab(value: AppTab.favorites) {
-                    FavoritesView()
+                // 5. Profil
+                Tab(value: AppTab.profile) {
+                    ProfileView()
                 } label: {
-                    tabLabel(for: .favorites)
-                }
-
-                Tab(value: AppTab.settings) {
-                    SettingsView()
-                } label: {
-                    tabLabel(for: .settings)
+                    tabLabel(for: .profile)
                 }
             }
             #if os(iOS)
