@@ -79,12 +79,17 @@ enum L10n {
     static var season: String { isTurkish ? "Sezon" : "Season" }
     static var more: String { isTurkish ? "DAHA FAZLASI" : "MORE" }
     static var less: String { isTurkish ? "DAHA AZ" : "LESS" }
-    static var castAndCrew: String { isTurkish ? "Künye ve Oyuncular" : "Cast & Crew" }
+    static var castAndCrew: String { isTurkish ? "Künye ve Detaylar" : "Cast & Details" }
     static var relatedContent: String { isTurkish ? "Benzer İçerikler" : "Similar Content" }
     static var director: String { isTurkish ? "Yönetmen" : "Director" }
     static var cast: String { isTurkish ? "Oyuncular" : "Cast" }
     static var genre: String { isTurkish ? "Tür" : "Genre" }
     static var releaseYear: String { isTurkish ? "Yıl" : "Year" }
+    static var originalTitle: String { isTurkish ? "Orijinal Başlık" : "Original Title" }
+    static var status: String { isTurkish ? "Durum" : "Status" }
+    static var country: String { isTurkish ? "Ülke" : "Country" }
+    static var runtime: String { isTurkish ? "Süre" : "Runtime" }
+    static var watchTrailer: String { isTurkish ? "Fragman" : "Trailer" }
 
     // MARK: - Ana Sayfa (Home) & Katalog
     static var continueWatching: String { isTurkish ? "İzlemeye Devam Et" : "Continue Watching" }

@@ -200,6 +200,8 @@ final class DetailViewController: UIViewController {
 
     // MARK: - İçerik
 
+    private var tmdbMetadata: TMDBMetadata?
+
     private func render() {
         let current = detail?.item ?? item
 
@@ -211,9 +213,9 @@ final class DetailViewController: UIViewController {
                 title: current.title,
                 displayWidth: metrics.heroImageWidth
             )
-            hero.hideLoadingBlur(animated: false)
+            hero.stopLoadingAnimation(animated: false)
         } else {
-            hero.showLoadingBlur()
+            hero.startLoadingAnimation()
         }
 
         // Logo varsa başlık gizli, yoksa başlık görünür.
@@ -223,8 +225,17 @@ final class DetailViewController: UIViewController {
         hero.titleLabel.text = current.title
         hero.titleLabel.font = metrics.titleFont
 
+        // Slogan (Tagline)
+        if let tagline = tmdbMetadata?.tagline, !tagline.isEmpty {
+            hero.taglineLabel.text = "\"\(tagline)\""
+            hero.taglineLabel.isHidden = false
+        } else {
+            hero.taglineLabel.isHidden = true
+        }
+
         var genreParts = [current.kind.title]
-        genreParts.append(contentsOf: current.genres.prefix(2))
+        let displayGenres = !current.genres.isEmpty ? current.genres : (tmdbMetadata?.genres ?? [])
+        genreParts.append(contentsOf: displayGenres.prefix(3))
         hero.genreLabel.text = genreParts.joined(separator: " · ")
 
         hero.playButton.configuration?.title = playTitle(for: current)
@@ -232,15 +243,28 @@ final class DetailViewController: UIViewController {
             systemName: model.activity.isFavorite(current) ? "checkmark" : "plus"
         )
 
-        hero.plotLabel.text = current.plot
-        hero.plotLabel.isHidden = current.plot?.isEmpty != false
-        hero.moreButton.isHidden = (current.plot?.count ?? 0) <= 140
+        let plotText = current.plot ?? tmdbMetadata?.overview
+        hero.plotLabel.text = plotText
+        hero.plotLabel.isHidden = plotText?.isEmpty != false
+        hero.moreButton.isHidden = (plotText?.count ?? 0) <= 140
 
         var metaParts: [String] = []
-        if let year = current.yearText { metaParts.append(year) }
-        if let duration = current.durationText { metaParts.append(duration) }
-        if let percent = current.ratingPercent { metaParts.append("%\(percent)") }
-        if let country = detail?.country { metaParts.append(country) }
+        if let year = current.yearText ?? tmdbMetadata?.releaseYear { metaParts.append(year) }
+        if let duration = current.durationText ?? (tmdbMetadata?.runtimeMinutes.map { "\($0) dk" }) {
+            metaParts.append(duration)
+        }
+        if let percent = current.ratingPercent {
+            if let votes = tmdbMetadata?.voteCount, votes > 0 {
+                let votesText = votes >= 1000 ? String(format: "%.1fk", Double(votes) / 1000.0) : "\(votes)"
+                metaParts.append("%\(percent) ⭐ (\(votesText))")
+            } else {
+                metaParts.append("%\(percent) ⭐")
+            }
+        } else if let rating = tmdbMetadata?.rating, rating > 0 {
+            let percent = Int((rating * 10).rounded())
+            metaParts.append("%\(percent) ⭐")
+        }
+        if let country = detail?.country ?? tmdbMetadata?.country { metaParts.append(country) }
         hero.metaLabel.text = metaParts.joined(separator: "   ")
 
         renderEpisodes()
@@ -365,11 +389,18 @@ final class DetailViewController: UIViewController {
     private func renderCredits() {
         creditsSection.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
-        // Xtream liste yanıtı künyeyi zaten taşıyor; ağ yanıtını beklemeden
-        // gösteriyoruz, detay gelince üstüne yazılıyor.
-        let cast = detail?.cast.nilIfEmptyList ?? item.cast
-        let director = detail?.director ?? item.director
-        guard !cast.isEmpty || director != nil else {
+        // TMDB veya sağlayıcıdan gelen künye ve detaylar
+        let cast = tmdbMetadata?.cast.nilIfEmptyList ?? detail?.cast.nilIfEmptyList ?? item.cast
+        let director = tmdbMetadata?.director ?? detail?.director ?? item.director
+        let originalTitle = tmdbMetadata?.originalTitle
+        let originalLang = tmdbMetadata?.originalLanguage
+        let releaseDate = tmdbMetadata?.releaseDate
+        let status = tmdbMetadata?.status
+        let country = tmdbMetadata?.country ?? detail?.country
+        let trailerURL = tmdbMetadata?.trailerURL ?? detail?.trailerURL ?? item.trailerURL
+
+        let hasAnyInfo = !cast.isEmpty || director != nil || originalTitle != nil || releaseDate != nil || trailerURL != nil
+        guard hasAnyInfo else {
             creditsSection.isHidden = true
             return
         }
@@ -386,13 +417,50 @@ final class DetailViewController: UIViewController {
         }
         if !cast.isEmpty {
             creditsSection.addArrangedSubview(
-                makeCreditLine(title: L10n.cast, value: cast.prefix(6).joined(separator: ", "))
+                makeCreditLine(title: L10n.cast, value: cast.prefix(8).joined(separator: ", "))
             )
         }
+        if let originalTitle, originalTitle.lowercased() != item.title.lowercased() {
+            let langSuffix = originalLang != nil ? " (\(originalLang!))" : ""
+            creditsSection.addArrangedSubview(
+                makeCreditLine(title: L10n.originalTitle, value: "\(originalTitle)\(langSuffix)")
+            )
+        }
+        if let releaseDate, !releaseDate.isEmpty {
+            creditsSection.addArrangedSubview(makeCreditLine(title: L10n.releaseYear, value: releaseDate))
+        }
+        if let country, !country.isEmpty {
+            creditsSection.addArrangedSubview(makeCreditLine(title: L10n.country, value: country))
+        }
+        if let status, !status.isEmpty {
+            creditsSection.addArrangedSubview(makeCreditLine(title: L10n.status, value: status))
+        }
+        if let trailerURL {
+            let trailerButton = makeTrailerButton(url: trailerURL)
+            creditsSection.addArrangedSubview(trailerButton)
+        }
+
         creditsSection.isLayoutMarginsRelativeArrangement = true
         creditsSection.directionalLayoutMargins = .init(
             top: 0, leading: metrics.screenPadding, bottom: 0, trailing: metrics.screenPadding
         )
+    }
+
+    private func makeTrailerButton(url: URL) -> UIView {
+        var config = UIButton.Configuration.tinted()
+        config.title = L10n.watchTrailer
+        config.image = UIImage(systemName: "play.rectangle.fill")
+        config.imagePadding = 8
+        config.cornerStyle = .capsule
+        config.baseForegroundColor = AppPalette.accent
+        config.baseBackgroundColor = AppPalette.accent.withAlphaComponent(0.18)
+
+        let button = UIButton(configuration: config)
+        button.addAction(UIAction { _ in
+            UIApplication.shared.open(url)
+        }, for: .touchUpInside)
+        button.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        return button
     }
 
     private func makeCreditLine(title: String, value: String) -> UIView {
@@ -464,14 +532,29 @@ final class DetailViewController: UIViewController {
         await enrichWithTMDB(startTime: startTime)
     }
 
-    /// TMDB'den sinematik yatay görsel, şeffaf logo ve Türkçe/İngilizce özet.
-    /// Yükleme esnasında blur katmanı gösterilir ve 400-500ms sonunda yumuşakça açılır.
+    /// TMDB'den sinematik görsel, şeffaf logo ve zengin bilgiler.
+    /// Yükleme süresince blur katmanı nabız animasyonuyla gösterilir ve TMDB tamamlandığında yumuşakça açılır.
+    /// Poster asla önceden basılmaz; yalnızca TMDB'den görsel dönmezse fallback olarak yerleştirilir.
     private func enrichWithTMDB(startTime: Double) async {
         let current = detail?.item ?? item
-        var tmdbBackdropURL: URL?
 
         if TMDBService.isConfigured, let metadata = await TMDBService.shared.metadata(for: current, language: AppLanguage.current) {
-            tmdbBackdropURL = metadata.backdropURL ?? metadata.posterURL
+            tmdbMetadata = metadata
+
+            // Resim: Sadece ve sadece TMDB'den gelen resim (backdrop veya poster).
+            // Eğer TMDB'den resim gelmezse fallback olarak sağlayıcı posterini koy.
+            let tmdbImage = metadata.backdropURL ?? metadata.posterURL
+            let finalImageURL = tmdbImage ?? current.posterURL
+
+            if let finalImageURL {
+                hero.artwork.configure(
+                    url: finalImageURL,
+                    title: current.title,
+                    displayWidth: metrics.heroImageWidth
+                )
+                detail?.item.backdropURL = finalImageURL
+                item.backdropURL = finalImageURL
+            }
 
             if let logoURL = metadata.logoURL {
                 let image = await ImageLoader.shared.image(for: logoURL, maxPixelSize: 900)
@@ -485,23 +568,48 @@ final class DetailViewController: UIViewController {
             if let overview = metadata.overview, !overview.isEmpty {
                 detail?.item.plot = overview
                 item.plot = overview
-                hero.plotLabel.text = overview
-                hero.plotLabel.isHidden = false
-                hero.moreButton.isHidden = overview.count <= 140
+            }
+            if let rating = metadata.rating {
+                detail?.item.rating = rating
+                item.rating = rating
+            }
+            if let releaseYear = metadata.releaseYear.flatMap(Int.init) {
+                detail?.item.year = releaseYear
+                item.year = releaseYear
+            }
+            if let durationMin = metadata.runtimeMinutes {
+                let durationSec = durationMin * 60
+                detail?.item.durationSeconds = durationSec
+                item.durationSeconds = durationSec
+            }
+            if !metadata.genres.isEmpty {
+                detail?.item.genres = metadata.genres
+                item.genres = metadata.genres
+            }
+            if !metadata.cast.isEmpty {
+                detail?.cast = metadata.cast
+            }
+            if let director = metadata.director {
+                detail?.director = director
+            }
+            if let country = metadata.country {
+                detail?.country = country
+            }
+            if let trailerURL = metadata.trailerURL {
+                detail?.trailerURL = trailerURL
+            }
+        } else {
+            // TMDB'den sonuç gelmediyse sağlayıcı posterini fallback olarak yerleştir
+            if let localPoster = current.posterURL {
+                hero.artwork.configure(
+                    url: localPoster,
+                    title: current.title,
+                    displayWidth: metrics.heroImageWidth
+                )
             }
         }
 
-        // Hero için yalnızca tek resim (TMDB'den gelen sinematik görsel, yoksa yedek)
-        let finalImageURL = tmdbBackdropURL ?? current.backdropURL ?? current.posterURL
-        if let finalImageURL {
-            hero.artwork.configure(
-                url: finalImageURL,
-                title: current.title,
-                displayWidth: metrics.heroImageWidth
-            )
-        }
-
-        // Karta tıklandıktan sonra 400-500ms blur görünümü garanti edilir
+        // Karta tıklandıktan sonra 400-500ms blur animasyonu gösterilir
         let elapsed = CACurrentMediaTime() - startTime
         let targetDelay: Double = 0.45 // 450ms
         if elapsed < targetDelay {
@@ -510,7 +618,8 @@ final class DetailViewController: UIViewController {
         }
 
         await MainActor.run {
-            self.hero.hideLoadingBlur(animated: true)
+            self.render()
+            self.hero.stopLoadingAnimation(animated: true)
         }
     }
 

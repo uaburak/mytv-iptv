@@ -12,6 +12,7 @@ final class DetailHeroView: UIView {
     /// TMDB'den gelen şeffaf logo. Varsa başlık yerine bu gösteriliyor.
     let logoView = UIImageView()
     let titleLabel = UILabel()
+    let taglineLabel = UILabel()
     let genreLabel = UILabel()
     let plotLabel = UILabel()
     let metaLabel = UILabel()
@@ -26,6 +27,7 @@ final class DetailHeroView: UIView {
 
     /// İlk açılışta TMDB görseli yüklenene kadar gösterilen geçiş blur katmanı.
     private let loadingBlurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterialDark))
+    private let pulseOverlay = UIView()
 
     private var artworkTop: NSLayoutConstraint!
     private var artworkHeight: NSLayoutConstraint!
@@ -62,10 +64,14 @@ final class DetailHeroView: UIView {
         scrim.locations = [0.0, 0.35, 0.55, 0.75, 0.90, 1.0]
         artwork.layer.addSublayer(scrim)
 
-        // Açılış blur katmanı
+        // Açılış blur ve nabız (pulse) katmanı
         loadingBlurView.translatesAutoresizingMaskIntoConstraints = false
         loadingBlurView.alpha = 1
         artwork.addSubview(loadingBlurView)
+
+        pulseOverlay.translatesAutoresizingMaskIntoConstraints = false
+        pulseOverlay.backgroundColor = UIColor.white.withAlphaComponent(0.05)
+        loadingBlurView.contentView.addSubview(pulseOverlay)
 
         buildContent()
 
@@ -85,21 +91,37 @@ final class DetailHeroView: UIView {
             loadingBlurView.topAnchor.constraint(equalTo: artwork.topAnchor),
             loadingBlurView.bottomAnchor.constraint(equalTo: artwork.bottomAnchor),
 
+            pulseOverlay.leadingAnchor.constraint(equalTo: loadingBlurView.leadingAnchor),
+            pulseOverlay.trailingAnchor.constraint(equalTo: loadingBlurView.trailingAnchor),
+            pulseOverlay.topAnchor.constraint(equalTo: loadingBlurView.topAnchor),
+            pulseOverlay.bottomAnchor.constraint(equalTo: loadingBlurView.bottomAnchor),
+
             contentStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
             contentStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
             contentStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -24),
         ])
     }
 
-    func showLoadingBlur() {
+    func startLoadingAnimation() {
         loadingBlurView.alpha = 1
         loadingBlurView.isHidden = false
+        pulseOverlay.layer.removeAllAnimations()
+
+        let pulse = CABasicAnimation(keyPath: "opacity")
+        pulse.fromValue = 0.2
+        pulse.toValue = 0.9
+        pulse.duration = 0.8
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        pulseOverlay.layer.add(pulse, forKey: "pulse")
     }
 
-    func hideLoadingBlur(animated: Bool = true) {
+    func stopLoadingAnimation(animated: Bool = true) {
+        pulseOverlay.layer.removeAllAnimations()
         guard !loadingBlurView.isHidden, loadingBlurView.alpha > 0 else { return }
         if animated {
-            UIView.animate(withDuration: 0.35, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) {
+            UIView.animate(withDuration: 0.4, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) {
                 self.loadingBlurView.alpha = 0
             } completion: { _ in
                 self.loadingBlurView.isHidden = true
@@ -118,6 +140,12 @@ final class DetailHeroView: UIView {
         titleLabel.textColor = .white
         titleLabel.textAlignment = .center
         titleLabel.numberOfLines = 3
+
+        taglineLabel.font = .italicSystemFont(ofSize: 14)
+        taglineLabel.textColor = UIColor.white.withAlphaComponent(0.8)
+        taglineLabel.textAlignment = .center
+        taglineLabel.numberOfLines = 2
+        taglineLabel.isHidden = true
 
         genreLabel.font = .systemFont(ofSize: 15)
         genreLabel.textColor = UIColor.white.withAlphaComponent(0.85)
@@ -156,7 +184,7 @@ final class DetailHeroView: UIView {
         contentStack.spacing = 12
         contentStack.alignment = .center
         contentStack.translatesAutoresizingMaskIntoConstraints = false
-        [logoView, titleLabel, genreLabel, buttons, plotLabel, moreButton, metaLabel]
+        [logoView, titleLabel, taglineLabel, genreLabel, buttons, plotLabel, moreButton, metaLabel]
             .forEach(contentStack.addArrangedSubview)
         addSubview(contentStack)
 

@@ -6,10 +6,23 @@ struct TMDBMetadata: Codable, Sendable {
     var logoURL: URL?
     /// Sinematik dikey görsel (afiş).
     var posterURL: URL?
-    /// Yatay kapak; şimdilik kullanılmıyor ama önbellekte tutuluyor.
+    /// Sinematik 16:9 yatay görsel.
     var backdropURL: URL?
     var overview: String?
+    var tagline: String?
     var rating: Double?
+    var voteCount: Int?
+    var releaseDate: String?
+    var releaseYear: String?
+    var runtimeMinutes: Int?
+    var genres: [String] = []
+    var status: String?
+    var originalTitle: String?
+    var originalLanguage: String?
+    var country: String?
+    var director: String?
+    var cast: [String] = []
+    var trailerURL: URL?
 }
 
 /// TMDB istemcisi.
@@ -46,7 +59,7 @@ actor TMDBService {
     /// eşleşme bulunamayanlar da hatırlanıyor.
     private var cache: [String: TMDBMetadata?] = [:]
     private let store = LocalStore(folder: "tmdb")
-    private let cacheKey = "metadata"
+    private let cacheKey = "metadata_v2"
 
     private init() {
         if let saved = store.read([String: TMDBMetadata].self, key: cacheKey) {
@@ -89,22 +102,63 @@ actor TMDBService {
 
         let images = await imagesTask
         let details = await detailsTask
-        guard images.logo != nil || images.poster != nil || details != nil else { return nil }
+        guard images.logo != nil || images.poster != nil || images.backdrop != nil || details != nil else { return nil }
+
+        return makeMetadata(details: details, images: images)
+    }
+
+    private func details(mediaType: String, id: Int, language: AppLanguage) async -> TMDBDetailResponse? {
+        guard let data = await get(
+            path: "\(mediaType)/\(id)",
+            query: ["language": language.tmdbLanguageCode, "append_to_response": "credits,videos"]
+        ) else {
+            return nil
+        }
+        return try? decoder.decode(TMDBDetailResponse.self, from: data)
+    }
+
+    private func makeMetadata(
+        details: TMDBDetailResponse?,
+        images: (logo: URL?, poster: URL?, backdrop: URL?)
+    ) -> TMDBMetadata {
+        let releaseDate = details?.releaseDate ?? details?.firstAirDate
+        let releaseYear = releaseDate.flatMap { str -> String? in
+            guard str.count >= 4 else { return nil }
+            return String(str.prefix(4))
+        }
+
+        let castList = details?.credits?.cast?
+            .sorted(by: { ($0.order ?? 99) < ($1.order ?? 99) })
+            .prefix(12)
+            .map(\.name) ?? []
+
+        let director = details?.credits?.crew?
+            .first(where: { $0.job == "Director" })?.name
+
+        let trailerKey = details?.videos?.results?
+            .first(where: { $0.site.lowercased() == "youtube" && ($0.type == "Trailer" || $0.type == "Teaser") })?.key
+        let trailerURL = trailerKey.flatMap { URL(string: "https://www.youtube.com/watch?v=\($0)") }
 
         return TMDBMetadata(
             logoURL: images.logo,
             posterURL: images.poster,
             backdropURL: images.backdrop,
-            overview: details?.overview?.isEmpty == false ? details?.overview : nil,
-            rating: details?.voteAverage
+            overview: details?.overview?.nilIfEmpty,
+            tagline: details?.tagline?.nilIfEmpty,
+            rating: details?.voteAverage,
+            voteCount: details?.voteCount,
+            releaseDate: releaseDate,
+            releaseYear: releaseYear,
+            runtimeMinutes: details?.runtime ?? details?.episodeRunTime?.first,
+            genres: details?.genres?.map(\.name) ?? [],
+            status: details?.status,
+            originalTitle: details?.originalTitle ?? details?.originalName,
+            originalLanguage: details?.originalLanguage?.uppercased(),
+            country: details?.productionCountries?.compactMap(\.name).first,
+            director: director,
+            cast: Array(castList),
+            trailerURL: trailerURL
         )
-    }
-
-    private func details(mediaType: String, id: Int, language: AppLanguage) async -> SearchResponse.Item? {
-        guard let data = await get(path: "\(mediaType)/\(id)", query: ["language": language.tmdbLanguageCode]) else {
-            return nil
-        }
-        return try? decoder.decode(SearchResponse.Item.self, from: data)
     }
 
     private func persist() {
@@ -133,14 +187,13 @@ actor TMDBService {
         }
         guard let match else { return nil }
 
-        let images = await images(mediaType: mediaType, id: match.id, language: language)
-        return TMDBMetadata(
-            logoURL: images.logo,
-            posterURL: images.poster,
-            backdropURL: images.backdrop,
-            overview: match.overview?.isEmpty == false ? match.overview : nil,
-            rating: match.voteAverage
-        )
+        async let imagesTask = images(mediaType: mediaType, id: match.id, language: language)
+        async let detailsTask = details(mediaType: mediaType, id: match.id, language: language)
+
+        let images = await imagesTask
+        let details = await detailsTask
+
+        return makeMetadata(details: details, images: images)
     }
 
     private func search(
@@ -394,5 +447,84 @@ private struct ImagesResponse: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case logos, posters, backdrops
+    }
+}
+
+struct TMDBDetailResponse: Decodable {
+    var id: Int?
+    var overview: String?
+    var tagline: String?
+    var voteAverage: Double?
+    var voteCount: Int?
+    var title: String?
+    var name: String?
+    var originalTitle: String?
+    var originalName: String?
+    var originalLanguage: String?
+    var releaseDate: String?
+    var firstAirDate: String?
+    var runtime: Int?
+    var episodeRunTime: [Int]?
+    var status: String?
+    var genres: [GenreItem]?
+    var productionCountries: [CountryItem]?
+    var credits: CreditsResponse?
+    var videos: VideosResponse?
+
+    struct GenreItem: Decodable {
+        var id: Int?
+        var name: String
+    }
+
+    struct CountryItem: Decodable {
+        var name: String?
+        var iso31661: String?
+
+        enum CodingKeys: String, CodingKey {
+            case name
+            case iso31661 = "iso_3166_1"
+        }
+    }
+
+    struct CreditsResponse: Decodable {
+        var cast: [CastItem]?
+        var crew: [CrewItem]?
+
+        struct CastItem: Decodable {
+            var name: String
+            var character: String?
+            var order: Int?
+        }
+
+        struct CrewItem: Decodable {
+            var name: String
+            var job: String?
+            var department: String?
+        }
+    }
+
+    struct VideosResponse: Decodable {
+        var results: [VideoItem]?
+
+        struct VideoItem: Decodable {
+            var key: String
+            var site: String
+            var type: String
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, overview, tagline, status, genres, credits, videos
+        case voteAverage = "vote_average"
+        case voteCount = "vote_count"
+        case title, name
+        case originalTitle = "original_title"
+        case originalName = "original_name"
+        case originalLanguage = "original_language"
+        case releaseDate = "release_date"
+        case firstAirDate = "first_air_date"
+        case runtime
+        case episodeRunTime = "episode_run_time"
+        case productionCountries = "production_countries"
     }
 }
