@@ -15,57 +15,203 @@ private final class HeroGradientView: UIView {
     }
 }
 
-/// Apple `.buttonStyle(.glass)` standartlarında, SF Symbol replace geçişli İzleme Listesi butonu.
-final class WatchlistGlassButton: UIControl {
-    let iconView = UIImageView()
-    private let backgroundPill = UIView()
+/// Apple Liquid Glass tasarım diline uygun, gerçek `UIVisualEffectView` tabanlı buton.
+/// Arka plandaki içeriği dinamik olarak bulanıklaştırır, yarı saydam cam efekti ve
+/// dokunulduğunda akıcı fiziksel yay (spring) tepkisi verir.
+open class LiquidGlassButton: UIControl {
+    public let effectView: UIVisualEffectView
+    public let highlightOverlay = UIView()
+    public let contentStack = UIStackView()
+    public let iconView = UIImageView()
+    public let titleLabel = UILabel()
 
-    override init(frame: CGRect) {
+    public var cornerRadius: CGFloat = 22 {
+        didSet {
+            layer.cornerRadius = cornerRadius
+            effectView.layer.cornerRadius = cornerRadius
+            highlightOverlay.layer.cornerRadius = cornerRadius
+        }
+    }
+
+    public override init(frame: CGRect) {
+        let blur = UIBlurEffect(style: .systemUltraThinMaterialDark)
+        self.effectView = UIVisualEffectView(effect: blur)
         super.init(frame: frame)
         build()
     }
 
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    public required init?(coder: NSCoder) {
+        let blur = UIBlurEffect(style: .systemUltraThinMaterialDark)
+        self.effectView = UIVisualEffectView(effect: blur)
+        super.init(coder: coder)
+        build()
+    }
 
     private func build() {
-        isUserInteractionEnabled = true
+        clipsToBounds = false
+
+        // 1. Liquid Glass Arka Planı (UIVisualEffectView)
+        effectView.isUserInteractionEnabled = false
+        effectView.clipsToBounds = true
+        effectView.layer.cornerRadius = cornerRadius
+        effectView.layer.borderWidth = 0.8
+        effectView.layer.borderColor = UIColor.white.withAlphaComponent(0.24).cgColor
+        effectView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(effectView)
+
+        // 2. Işık / Vurgu Katmanı
+        highlightOverlay.isUserInteractionEnabled = false
+        highlightOverlay.backgroundColor = UIColor.white.withAlphaComponent(0.08)
+        highlightOverlay.layer.cornerRadius = cornerRadius
+        highlightOverlay.clipsToBounds = true
+        highlightOverlay.translatesAutoresizingMaskIntoConstraints = false
+        effectView.contentView.addSubview(highlightOverlay)
+
+        // 3. İçerik (İkon + Başlık)
+        iconView.isUserInteractionEnabled = false
+        iconView.tintColor = .white
+        iconView.contentMode = .scaleAspectFit
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        titleLabel.isUserInteractionEnabled = false
+        titleLabel.textColor = .white
+        titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        contentStack.isUserInteractionEnabled = false
+        contentStack.axis = .horizontal
+        contentStack.spacing = 8
+        contentStack.alignment = .center
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.addArrangedSubview(iconView)
+        contentStack.addArrangedSubview(titleLabel)
+        effectView.contentView.addSubview(contentStack)
+
+        NSLayoutConstraint.activate([
+            effectView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            effectView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            effectView.topAnchor.constraint(equalTo: topAnchor),
+            effectView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            highlightOverlay.leadingAnchor.constraint(equalTo: effectView.leadingAnchor),
+            highlightOverlay.trailingAnchor.constraint(equalTo: effectView.trailingAnchor),
+            highlightOverlay.topAnchor.constraint(equalTo: effectView.topAnchor),
+            highlightOverlay.bottomAnchor.constraint(equalTo: effectView.bottomAnchor),
+
+            contentStack.centerXAnchor.constraint(equalTo: effectView.contentView.centerXAnchor),
+            contentStack.centerYAnchor.constraint(equalTo: effectView.contentView.centerYAnchor),
+            contentStack.leadingAnchor.constraint(greaterThanOrEqualTo: effectView.contentView.leadingAnchor, constant: 18),
+            contentStack.trailingAnchor.constraint(lessThanOrEqualTo: effectView.contentView.trailingAnchor, constant: -18),
+
+            iconView.widthAnchor.constraint(equalToConstant: 18),
+            iconView.heightAnchor.constraint(equalToConstant: 18),
+        ])
+    }
+
+    open override var isHighlighted: Bool {
+        didSet {
+            UIView.animate(
+                withDuration: isHighlighted ? 0.10 : 0.25,
+                delay: 0,
+                options: [.allowUserInteraction, .beginFromCurrentState]
+            ) {
+                self.transform = self.isHighlighted ? CGAffineTransform(scaleX: 0.94, y: 0.94) : .identity
+                self.highlightOverlay.backgroundColor = self.isHighlighted
+                    ? UIColor.white.withAlphaComponent(0.20)
+                    : UIColor.white.withAlphaComponent(0.08)
+            }
+        }
+    }
+}
+
+/// Apple Liquid Glass Oynat Butonu
+final class PlayLiquidGlassButton: LiquidGlassButton {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        let config = UIImage.SymbolConfiguration(pointSize: 16, weight: .bold)
+        iconView.image = UIImage(systemName: "play.fill", withConfiguration: config)
+        titleLabel.text = L10n.play
+        titleLabel.font = .systemFont(ofSize: 15, weight: .bold)
+        heightAnchor.constraint(equalToConstant: 44).isActive = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func setTitle(_ title: String) {
+        titleLabel.text = title
+    }
+}
+
+/// Apple SF Symbol `.replace.downUp` geçişli, gerçek `UIVisualEffectView` Liquid Glass İzleme Listesi butonu.
+final class WatchlistLiquidGlassButton: UIControl {
+    let effectView: UIVisualEffectView
+    let highlightOverlay = UIView()
+    let iconView = UIImageView()
+
+    override init(frame: CGRect) {
+        let blur = UIBlurEffect(style: .systemUltraThinMaterialDark)
+        self.effectView = UIVisualEffectView(effect: blur)
+        super.init(frame: frame)
+        build()
+    }
+
+    required init?(coder: NSCoder) {
+        let blur = UIBlurEffect(style: .systemUltraThinMaterialDark)
+        self.effectView = UIVisualEffectView(effect: blur)
+        super.init(coder: coder)
+        build()
+    }
+
+    private func build() {
+        clipsToBounds = false
         translatesAutoresizingMaskIntoConstraints = false
 
-        backgroundPill.isUserInteractionEnabled = false
-        backgroundPill.backgroundColor = UIColor.white.withAlphaComponent(0.18)
-        backgroundPill.layer.borderWidth = 0.8
-        backgroundPill.layer.borderColor = UIColor.white.withAlphaComponent(0.24).cgColor
-        backgroundPill.layer.cornerRadius = 22
-        backgroundPill.clipsToBounds = true
-        backgroundPill.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(backgroundPill)
+        effectView.isUserInteractionEnabled = false
+        effectView.clipsToBounds = true
+        effectView.layer.cornerRadius = 22
+        effectView.layer.borderWidth = 0.8
+        effectView.layer.borderColor = UIColor.white.withAlphaComponent(0.24).cgColor
+        effectView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(effectView)
+
+        highlightOverlay.isUserInteractionEnabled = false
+        highlightOverlay.backgroundColor = UIColor.white.withAlphaComponent(0.08)
+        highlightOverlay.layer.cornerRadius = 22
+        highlightOverlay.clipsToBounds = true
+        highlightOverlay.translatesAutoresizingMaskIntoConstraints = false
+        effectView.contentView.addSubview(highlightOverlay)
 
         iconView.isUserInteractionEnabled = false
         iconView.tintColor = .white
         iconView.contentMode = .scaleAspectFit
-        let config = UIImage.SymbolConfiguration(pointSize: 17, weight: .bold)
+        let config = UIImage.SymbolConfiguration(pointSize: 18, weight: .bold)
         iconView.image = UIImage(systemName: "plus", withConfiguration: config)
         iconView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(iconView)
+        effectView.contentView.addSubview(iconView)
 
         NSLayoutConstraint.activate([
             widthAnchor.constraint(equalToConstant: 44),
             heightAnchor.constraint(equalToConstant: 44),
 
-            backgroundPill.leadingAnchor.constraint(equalTo: leadingAnchor),
-            backgroundPill.trailingAnchor.constraint(equalTo: trailingAnchor),
-            backgroundPill.topAnchor.constraint(equalTo: topAnchor),
-            backgroundPill.bottomAnchor.constraint(equalTo: bottomAnchor),
+            effectView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            effectView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            effectView.topAnchor.constraint(equalTo: topAnchor),
+            effectView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
-            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            highlightOverlay.leadingAnchor.constraint(equalTo: effectView.leadingAnchor),
+            highlightOverlay.trailingAnchor.constraint(equalTo: effectView.trailingAnchor),
+            highlightOverlay.topAnchor.constraint(equalTo: effectView.topAnchor),
+            highlightOverlay.bottomAnchor.constraint(equalTo: effectView.bottomAnchor),
+
+            iconView.centerXAnchor.constraint(equalTo: effectView.contentView.centerXAnchor),
+            iconView.centerYAnchor.constraint(equalTo: effectView.contentView.centerYAnchor),
             iconView.widthAnchor.constraint(equalToConstant: 22),
             iconView.heightAnchor.constraint(equalToConstant: 22),
         ])
     }
 
     func setInWatchlist(_ inWatchlist: Bool, animated: Bool) {
-        let config = UIImage.SymbolConfiguration(pointSize: 17, weight: .bold)
+        let config = UIImage.SymbolConfiguration(pointSize: 18, weight: .bold)
         let newImage = UIImage(systemName: inWatchlist ? "checkmark" : "plus", withConfiguration: config)
 
         if animated {
@@ -82,20 +228,32 @@ final class WatchlistGlassButton: UIControl {
             #endif
 
             UIView.animate(withDuration: 0.10, delay: 0, options: [.curveEaseOut]) {
-                self.transform = CGAffineTransform(scaleX: 0.86, y: 0.86)
+                self.transform = CGAffineTransform(scaleX: 0.88, y: 0.88)
             } completion: { _ in
                 UIView.animate(withDuration: 0.36, delay: 0, usingSpringWithDamping: 0.55, initialSpringVelocity: 0.8) {
                     self.transform = .identity
-                    self.backgroundPill.backgroundColor = inWatchlist
+                    self.highlightOverlay.backgroundColor = inWatchlist
                         ? UIColor(red: 0.16, green: 0.62, blue: 1.0, alpha: 0.28)
-                        : UIColor.white.withAlphaComponent(0.18)
+                        : UIColor.white.withAlphaComponent(0.08)
                 }
             }
         } else {
             iconView.image = newImage
-            backgroundPill.backgroundColor = inWatchlist
+            highlightOverlay.backgroundColor = inWatchlist
                 ? UIColor(red: 0.16, green: 0.62, blue: 1.0, alpha: 0.28)
-                : UIColor.white.withAlphaComponent(0.18)
+                : UIColor.white.withAlphaComponent(0.08)
+        }
+    }
+
+    override var isHighlighted: Bool {
+        didSet {
+            UIView.animate(
+                withDuration: isHighlighted ? 0.10 : 0.25,
+                delay: 0,
+                options: [.allowUserInteraction, .beginFromCurrentState]
+            ) {
+                self.transform = self.isHighlighted ? CGAffineTransform(scaleX: 0.92, y: 0.92) : .identity
+            }
         }
     }
 }
@@ -122,8 +280,8 @@ final class DetailHeroView: UIView {
     let plotLabel = UILabel()
     let metaLabel = UILabel()
     let moreButton = UIButton(type: .system)
-    let playButton = UIButton(configuration: .filled())
-    let watchlistButton = WatchlistGlassButton()
+    let playButton = PlayLiquidGlassButton()
+    let watchlistButton = WatchlistLiquidGlassButton()
 
     let contentStack = UIStackView()
 
@@ -272,19 +430,6 @@ final class DetailHeroView: UIView {
         genreLabel.font = .systemFont(ofSize: 15)
         genreLabel.textColor = UIColor.white.withAlphaComponent(0.85)
         genreLabel.textAlignment = .center
-
-        var playConfiguration = UIButton.Configuration.filled()
-        playConfiguration.image = UIImage(systemName: "play.fill")
-        playConfiguration.imagePadding = 8
-        playConfiguration.baseBackgroundColor = UIColor.white.withAlphaComponent(0.18)
-        playConfiguration.baseForegroundColor = .white
-        playConfiguration.cornerStyle = .capsule
-        playConfiguration.contentInsets = .init(top: 11, leading: 24, bottom: 11, trailing: 24)
-        playButton.configuration = playConfiguration
-        playButton.layer.borderWidth = 0.8
-        playButton.layer.borderColor = UIColor.white.withAlphaComponent(0.24).cgColor
-        playButton.layer.cornerRadius = 22
-        playButton.clipsToBounds = true
 
         let buttons = UIStackView(arrangedSubviews: [playButton, watchlistButton])
         buttons.axis = .horizontal
