@@ -254,7 +254,7 @@ actor XtreamProvider: ContentProvider {
     private func convert(_ dto: XtreamStreamDTO, kind: MediaKind) -> MediaItem? {
         guard let reference = dto.identifier, let name = dto.name else { return nil }
         let artwork = LooseParse.url(dto.artwork)
-        let backdrop = LooseParse.url(dto.backdropPath.first) ?? artwork
+        let backdrop = LooseParse.url(dto.backdropPath.first)
 
         return MediaItem(
             id: MediaID(source: sourceID, kind: kind, raw: reference),
@@ -289,7 +289,7 @@ actor XtreamProvider: ContentProvider {
         item.genres = LooseParse.genres(info?.genre).isEmpty ? item.genres : LooseParse.genres(info?.genre)
         item.year = LooseParse.year(from: info?.releasedate ?? info?.releaseDate) ?? item.year
         item.posterURL = LooseParse.url(info?.movieImage ?? info?.coverBig) ?? item.posterURL
-        item.backdropURL = LooseParse.url(info?.backdropPath.first) ?? item.backdropURL ?? item.posterURL
+        item.backdropURL = LooseParse.url(info?.backdropPath.first) ?? item.backdropURL
         item.containerExtension = response.movieData?.containerExtension ?? item.containerExtension
         item.tmdbID = info?.tmdbID ?? item.tmdbID
 
@@ -313,14 +313,14 @@ actor XtreamProvider: ContentProvider {
         item.genres = LooseParse.genres(info?.genre).isEmpty ? item.genres : LooseParse.genres(info?.genre)
         item.year = LooseParse.year(from: info?.releaseDate ?? info?.releasedate) ?? item.year
         item.posterURL = LooseParse.url(info?.cover) ?? item.posterURL
-        item.backdropURL = LooseParse.url(info?.backdropPath.first) ?? item.backdropURL ?? item.posterURL
+        item.backdropURL = LooseParse.url(info?.backdropPath.first) ?? item.backdropURL
 
         // Sezon başlıkları `seasons` dizisinde, bölümler ayrı sözlükte geliyor.
         // Bazı sunucular `seasons`'ı hiç doldurmuyor; o zaman bölüm anahtarlarından üretiyoruz.
         let seasonNames = Dictionary(
             response.seasons.compactMap { dto -> (Int, String)? in
                 guard let number = dto.seasonNumber else { return nil }
-                return (number, dto.name ?? "\(number). Sezon")
+                return (number, dto.name ?? L10n.seasonName(number))
             },
             uniquingKeysWith: { first, _ in first }
         )
@@ -352,7 +352,7 @@ actor XtreamProvider: ContentProvider {
                 return Season(
                     id: "\(item.id.raw).s\(number)",
                     number: number,
-                    name: seasonNames[number] ?? "\(number). Sezon",
+                    name: seasonNames[number] ?? L10n.seasonName(number),
                     posterURL: seasonCovers[number] ?? item.posterURL,
                     episodes: converted
                 )

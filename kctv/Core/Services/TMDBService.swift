@@ -162,6 +162,10 @@ actor TMDBService {
     }
 
     private func persist() {
+        if cache.count > 1200 {
+            let keysToRemove = Array(cache.keys.prefix(300))
+            for key in keysToRemove { cache.removeValue(forKey: key) }
+        }
         let snapshot = cache.compactMapValues { $0 }
         store.write(snapshot, key: cacheKey)
     }

@@ -140,6 +140,7 @@ final class CatalogViewController: UIViewController {
             self?.visibleCount = Self.pageSize
             self?.reloadCategories()
             self?.reloadItems()
+            self?.tableView.setContentOffset(.zero, animated: false)
         }, for: .touchUpInside)
         return button
     }

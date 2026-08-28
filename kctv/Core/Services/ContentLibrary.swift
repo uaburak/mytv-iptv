@@ -306,8 +306,10 @@ final class ContentLibrary {
         guard let provider else { return MediaDetail(item: item) }
         let result = try await provider.detail(for: item)
         detailCache[item.id] = result
-        // Sınırsız birikmesin.
-        if detailCache.count > 200 { detailCache.removeAll() }
+        if detailCache.count > 250 {
+            let keysToRemove = Array(detailCache.keys.prefix(50))
+            for key in keysToRemove { detailCache.removeValue(forKey: key) }
+        }
         return result
     }
 
@@ -364,6 +366,21 @@ final class ContentLibrary {
             if lhsPrefix != rhsPrefix { return lhsPrefix }
             return lhs.title.count < rhs.title.count
         }
+    }
+
+    func reset() {
+        provider = nil
+        currentPlaylistID = nil
+        account = nil
+        rows = []
+        categories = [:]
+        catalog = [:]
+        spotlight = []
+        itemsByID = [:]
+        itemsByCategory = [:]
+        detailCache = [:]
+        state = .idle
+        notifyChange()
     }
 }
 

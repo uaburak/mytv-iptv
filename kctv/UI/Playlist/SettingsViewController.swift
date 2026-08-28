@@ -3,7 +3,7 @@ import UIKit
 /// Hesap, dil, listeler ve içerik yönetimi.
 final class SettingsViewController: UITableViewController {
     private enum Section: Int, CaseIterable {
-        case account, language, content
+        case account, language, content, developer
     }
 
     private let model: AppModel
@@ -50,6 +50,7 @@ final class SettingsViewController: UITableViewController {
         case .account: L10n.sectionAccount
         case .language: L10n.sectionLanguage
         case .content: L10n.sectionContent
+        case .developer: L10n.sectionDeveloper
         case nil: nil
         }
     }
@@ -59,6 +60,7 @@ final class SettingsViewController: UITableViewController {
         case .account: 2
         case .language: 1
         case .content: 1 + (model.library.account != nil ? 2 : 0)
+        case .developer: 1
         case nil: 0
         }
     }
@@ -105,6 +107,12 @@ final class SettingsViewController: UITableViewController {
                 configuration.secondaryText = "\(account?.activeConnections ?? 0)/\(account?.maxConnections ?? 0)"
             }
 
+        case .developer:
+            configuration.text = L10n.clearAllLocalData
+            configuration.textProperties.color = .systemRed
+            configuration.image = UIImage(systemName: "trash")
+            configuration.imageProperties.tintColor = .systemRed
+
         case nil:
             break
         }
@@ -136,7 +144,6 @@ final class SettingsViewController: UITableViewController {
             dismiss(animated: true)
 
         case .language:
-            // Hücreye tıklandığında da menü veya seçim tetiklenebilir
             let alert = UIAlertController(title: L10n.languageOption, message: nil, preferredStyle: .actionSheet)
             for lang in AppLanguage.allCases {
                 alert.addAction(UIAlertAction(title: lang.displayName, style: .default) { [weak self] _ in
@@ -153,8 +160,25 @@ final class SettingsViewController: UITableViewController {
         case .content where indexPath.row == 0:
             Task { await model.library.reload(force: true) }
 
+        case .developer:
+            confirmClearAllLocalData(sourceCell: tableView.cellForRow(at: indexPath))
+
         default:
             break
         }
+    }
+
+    private func confirmClearAllLocalData(sourceCell: UITableViewCell?) {
+        let alert = UIAlertController(
+            title: L10n.clearAllDataConfirmTitle,
+            message: L10n.clearAllDataConfirmMessage,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: L10n.clear, style: .destructive) { [weak self] _ in
+            self?.model.resetAllLocalData()
+            self?.dismiss(animated: true)
+        })
+        alert.addAction(UIAlertAction(title: L10n.cancel, style: .cancel))
+        present(alert, animated: true)
     }
 }

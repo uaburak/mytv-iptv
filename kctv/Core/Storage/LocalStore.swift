@@ -34,6 +34,13 @@ struct LocalStore: Sendable {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
+    static func deleteAllKCTVData() {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL.temporaryDirectory
+        let directory = base.appendingPathComponent("KCTV", isDirectory: true)
+        try? FileManager.default.removeItem(at: directory)
+    }
+
     /// Anlık görüntünün yaşı; yenileme kararı buna göre veriliyor.
     func age(key: String) -> TimeInterval? {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url(for: key).path),

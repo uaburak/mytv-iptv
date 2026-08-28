@@ -91,6 +91,12 @@ final class UserActivityStore {
         persist()
     }
 
+    func clearAll() {
+        favorites.removeAll()
+        progress.removeAll()
+        store.removeAll()
+    }
+
     private func persist() {
         store.write(favorites, key: favoritesKey)
         store.write(progress, key: progressKey)

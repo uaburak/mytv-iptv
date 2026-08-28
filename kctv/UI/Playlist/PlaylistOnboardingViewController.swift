@@ -3,6 +3,9 @@ import UIKit
 /// Henüz listesi olmayan kullanıcının gördüğü ilk ekran.
 final class PlaylistOnboardingViewController: UIViewController {
     private let model: AppModel
+    private let titleLabel = UILabel()
+    private let subtitleLabel = UILabel()
+    private let addButton = UIButton(configuration: .filled())
 
     init(model: AppModel) {
         self.model = model
@@ -20,29 +23,26 @@ final class PlaylistOnboardingViewController: UIViewController {
         icon.contentMode = .scaleAspectFit
         icon.heightAnchor.constraint(equalToConstant: 64).isActive = true
 
-        let title = UILabel()
-        title.text = "Henüz bir listen yok"
-        title.font = .systemFont(ofSize: 28, weight: .bold)
-        title.textColor = .white
-        title.textAlignment = .center
+        titleLabel.font = .systemFont(ofSize: 28, weight: .bold)
+        titleLabel.textColor = .white
+        titleLabel.textAlignment = .center
 
-        let subtitle = UILabel()
-        subtitle.text = "Xtream Codes hesabını ya da M3U bağlantını ekle;\ncanlı kanallar, filmler ve diziler burada görünsün."
-        subtitle.font = .systemFont(ofSize: 15)
-        subtitle.textColor = AppPalette.secondaryText
-        subtitle.textAlignment = .center
-        subtitle.numberOfLines = 0
+        subtitleLabel.font = .systemFont(ofSize: 15)
+        subtitleLabel.textColor = AppPalette.secondaryText
+        subtitleLabel.textAlignment = .center
+        subtitleLabel.numberOfLines = 0
 
         var addConfiguration = UIButton.Configuration.filled()
-        addConfiguration.title = "Liste Ekle"
         addConfiguration.image = UIImage(systemName: "plus")
         addConfiguration.imagePadding = 6
         addConfiguration.cornerStyle = .capsule
-        let addButton = UIButton(configuration: addConfiguration)
+        addButton.configuration = addConfiguration
         addButton.addTarget(self, action: #selector(addPlaylist), for: .touchUpInside)
         addButton.heightAnchor.constraint(equalToConstant: 48).isActive = true
 
-        let stack = UIStackView(arrangedSubviews: [icon, title, subtitle, addButton])
+        updateLocalizedTexts()
+
+        let stack = UIStackView(arrangedSubviews: [icon, titleLabel, subtitleLabel, addButton])
         stack.axis = .vertical
         stack.spacing = 16
         stack.alignment = .fill
@@ -55,11 +55,23 @@ final class PlaylistOnboardingViewController: UIViewController {
             stack.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 28),
             stack.widthAnchor.constraint(lessThanOrEqualToConstant: 420),
         ])
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(updateLocalizedTexts),
+            name: .appLanguageDidChange,
+            object: nil
+        )
+    }
+
+    @objc private func updateLocalizedTexts() {
+        titleLabel.text = L10n.noPlaylistsTitle
+        subtitleLabel.text = L10n.noPlaylistsSubtitle
+        addButton.configuration?.title = L10n.addPlaylist
     }
 
     @objc private func addPlaylist() {
         let controller = AddPlaylistViewController(model: model)
         present(UINavigationController(rootViewController: controller), animated: true)
     }
-
 }

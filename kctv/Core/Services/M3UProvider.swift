@@ -54,7 +54,7 @@ actor M3UProvider: ContentProvider {
                 Season(
                     id: "\(item.id.raw).s\(number)",
                     number: number,
-                    name: "\(number). Sezon",
+                    name: L10n.seasonName(number),
                     posterURL: item.posterURL,
                     episodes: episodes.sorted { $0.episodeNumber < $1.episodeNumber }
                 )
@@ -123,7 +123,7 @@ actor M3UProvider: ContentProvider {
                     id: MediaID(source: sourceID, kind: entry.kind, raw: reference),
                     title: entry.name,
                     posterURL: entry.logo,
-                    backdropURL: entry.logo,
+                    backdropURL: nil,
                     categoryID: categoryID,
                     categoryName: group,
                     year: LooseParse.year(from: entry.name),
@@ -149,7 +149,7 @@ actor M3UProvider: ContentProvider {
                         id: MediaID(source: sourceID, kind: .series, raw: key),
                         title: seriesTitle,
                         posterURL: entry.logo,
-                        backdropURL: entry.logo,
+                        backdropURL: nil,
                         categoryID: categoryID,
                         categoryName: group,
                         genres: group.map { [$0] } ?? [],
@@ -157,7 +157,6 @@ actor M3UProvider: ContentProvider {
                     )
                 } else if seriesItems[key]?.posterURL == nil {
                     seriesItems[key]?.posterURL = entry.logo
-                    seriesItems[key]?.backdropURL = entry.logo
                 }
 
                 let seasonNumber = entry.seasonNumber ?? 1

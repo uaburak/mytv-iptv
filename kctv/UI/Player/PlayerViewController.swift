@@ -1,3 +1,4 @@
+import AVFoundation
 import KSPlayer
 import UIKit
 
@@ -18,18 +19,26 @@ final class PlayerViewController: UIViewController {
     private let subtitleLabel = UILabel()
     private let closeButton = UIButton(type: .system)
     private let playPauseButton = UIButton(type: .system)
+    private let rewindButton = UIButton(type: .system)
+    private let forwardButton = UIButton(type: .system)
+    private let audioTracksButton = UIButton(type: .system)
+    private let subtitlesButton = UIButton(type: .system)
+    private let aspectButton = UIButton(type: .system)
+
     private let currentTimeLabel = UILabel()
     private let durationLabel = UILabel()
-    private let progressTrack = UIView()
-    private let progressFill = UIView()
+    private let slider = UISlider()
     private let liveBadge = UIStackView()
     private let spinner = UIActivityIndicatorView(style: .large)
-    private var progressWidth: NSLayoutConstraint?
 
     private var isPlaying = true
+    private var isScrubbing = false
     private var currentTime: Double = 0
     private var duration: Double = 0
     private var hideControlsWork: DispatchWorkItem?
+
+    private var selectedAudioTrackID: Int32?
+    private var selectedSubtitleID: Int32?
 
     init(context: PlaybackContext, model: AppModel) {
         self.context = context
@@ -51,7 +60,12 @@ final class PlayerViewController: UIViewController {
         scheduleControlsHide()
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(toggleControls))
+        tap.delegate = self
         view.addGestureRecognizer(tap)
+
+        if context.isLive {
+            loadLiveEPG()
+        }
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -65,15 +79,12 @@ final class PlayerViewController: UIViewController {
     // MARK: - Oynatma
 
     private func startPlayback() {
-        // Ses oturumunu ana iş parçacığında açmak arayüzü kilitleyebiliyor.
         Task.detached(priority: .userInitiated) { KSOptions.setAudioSession() }
 
-        // IPTV kaynaklarında AVFoundation'ın açabileceği bir kapsayıcı yok.
         KSOptions.firstPlayerType = KSMEPlayer.self
         KSOptions.secondPlayerType = nil
 
         let options = KSOptions()
-        // Bazı paneller bilinmeyen istemcileri reddediyor.
         options.userAgent = context.headers["User-Agent"] ?? "VLC/3.0.20 LibVLC/3.0.20"
         if let referer = context.headers["Referer"] { options.referer = referer }
         if let startAt = context.startAt, startAt > 0, !context.isLive {
@@ -100,6 +111,30 @@ final class PlayerViewController: UIViewController {
         model.recordProgress(for: context, position: currentTime, duration: duration)
     }
 
+    private func loadLiveEPG() {
+        // Canlı yayınlarda anlık program bilgisini alt başlık olarak göster
+        let parts = context.id.split(separator: "#", maxSplits: 1).map(String.init)
+        let mediaParts = parts[0].split(separator: "|", maxSplits: 2).map(String.init)
+        guard mediaParts.count == 3, let kind = MediaKind(rawValue: mediaParts[1]) else { return }
+        let mediaID = MediaID(source: mediaParts[0], kind: kind, raw: mediaParts[2])
+
+        if let item = model.library.item(for: mediaID) {
+            Task {
+                let epgEntries = await model.library.epg(for: item)
+                let now = Date()
+                if let currentProgram = epgEntries.first(where: { $0.start <= now && $0.end >= now }) {
+                    await MainActor.run {
+                        let formatter = DateFormatter()
+                        formatter.dateFormat = "HH:mm"
+                        let timeRange = "\(formatter.string(from: currentProgram.start)) - \(formatter.string(from: currentProgram.end))"
+                        self.subtitleLabel.text = "\(timeRange) · \(currentProgram.title)"
+                        self.subtitleLabel.isHidden = false
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Kontroller
 
     private func buildControls() {
@@ -119,19 +154,58 @@ final class PlayerViewController: UIViewController {
         closeButton.layer.cornerRadius = 20
         closeButton.addTarget(self, action: #selector(close), for: .touchUpInside)
 
+        // Üst sağ kontrol butonları (Ses, Altyazı, Aspect Ratio)
+        aspectButton.setImage(UIImage(systemName: "aspectratio"), for: .normal)
+        aspectButton.tintColor = .white
+        aspectButton.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+        aspectButton.layer.cornerRadius = 20
+        aspectButton.showsMenuAsPrimaryAction = true
+        aspectButton.menu = makeAspectMenu()
+
+        audioTracksButton.setImage(UIImage(systemName: "speaker.wave.2"), for: .normal)
+        audioTracksButton.tintColor = .white
+        audioTracksButton.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+        audioTracksButton.layer.cornerRadius = 20
+        audioTracksButton.showsMenuAsPrimaryAction = true
+
+        subtitlesButton.setImage(UIImage(systemName: "captions.bubble"), for: .normal)
+        subtitlesButton.tintColor = .white
+        subtitlesButton.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+        subtitlesButton.layer.cornerRadius = 20
+        subtitlesButton.showsMenuAsPrimaryAction = true
+
         playPauseButton.setImage(UIImage(systemName: "pause.fill"), for: .normal)
         playPauseButton.tintColor = .white
+        playPauseButton.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: 24, weight: .medium), forImageIn: .normal)
         playPauseButton.addTarget(self, action: #selector(togglePlayPause), for: .touchUpInside)
+
+        rewindButton.setImage(UIImage(systemName: "gobackward.15"), for: .normal)
+        rewindButton.tintColor = .white
+        rewindButton.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: 20, weight: .regular), forImageIn: .normal)
+        rewindButton.addTarget(self, action: #selector(seekBackward), for: .touchUpInside)
+
+        forwardButton.setImage(UIImage(systemName: "goforward.15"), for: .normal)
+        forwardButton.tintColor = .white
+        forwardButton.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: 20, weight: .regular), forImageIn: .normal)
+        forwardButton.addTarget(self, action: #selector(seekForward), for: .touchUpInside)
 
         for label in [currentTimeLabel, durationLabel] {
             label.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
             label.textColor = .white
         }
+        currentTimeLabel.text = "0:00"
+        durationLabel.text = "0:00"
 
-        progressTrack.backgroundColor = UIColor.white.withAlphaComponent(0.25)
-        progressTrack.layer.cornerRadius = 2.5
-        progressFill.backgroundColor = .white
-        progressFill.layer.cornerRadius = 2.5
+        // İnteraktif Scrubber Slider
+        slider.minimumValue = 0
+        slider.maximumValue = 1
+        slider.value = 0
+        slider.minimumTrackTintColor = .white
+        slider.maximumTrackTintColor = UIColor.white.withAlphaComponent(0.25)
+        slider.setThumbImage(makeThumbImage(), for: .normal)
+        slider.addTarget(self, action: #selector(sliderTouchDown), for: .touchDown)
+        slider.addTarget(self, action: #selector(sliderValueChanged), for: .valueChanged)
+        slider.addTarget(self, action: #selector(sliderTouchUp), for: [.touchUpInside, .touchUpOutside, .touchCancel])
 
         let dot = UIView()
         dot.backgroundColor = .systemRed
@@ -149,18 +223,26 @@ final class PlayerViewController: UIViewController {
         liveBadge.alignment = .center
         liveBadge.isHidden = !context.isLive
 
-        let scrubberRow = UIStackView(arrangedSubviews: context.isLive
+        let controlButtons: [UIView] = context.isLive
             ? [playPauseButton, liveBadge, UIView()]
-            : [playPauseButton, currentTimeLabel, progressTrack, durationLabel])
+            : [rewindButton, playPauseButton, forwardButton, currentTimeLabel, slider, durationLabel]
+
+        let scrubberRow = UIStackView(arrangedSubviews: controlButtons)
         scrubberRow.axis = .horizontal
         scrubberRow.spacing = 14
         scrubberRow.alignment = .center
 
         let bar = UIView()
-        bar.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        bar.backgroundColor = UIColor.black.withAlphaComponent(0.65)
         bar.layer.cornerRadius = 16
+        bar.layer.cornerCurve = .continuous
         scrubberRow.translatesAutoresizingMaskIntoConstraints = false
         bar.addSubview(scrubberRow)
+
+        let topButtons = UIStackView(arrangedSubviews: [aspectButton, audioTracksButton, subtitlesButton, closeButton])
+        topButtons.axis = .horizontal
+        topButtons.spacing = 10
+        topButtons.alignment = .center
 
         let titles = UIStackView(arrangedSubviews: [titleLabel, subtitleLabel])
         titles.axis = .vertical
@@ -168,7 +250,7 @@ final class PlayerViewController: UIViewController {
 
         controlsView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(controlsView)
-        for subview in [titles, closeButton, bar] {
+        for subview in [titles, topButtons, bar] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             controlsView.addSubview(subview)
         }
@@ -178,11 +260,10 @@ final class PlayerViewController: UIViewController {
         spinner.startAnimating()
         view.addSubview(spinner)
 
-        progressTrack.translatesAutoresizingMaskIntoConstraints = false
-        progressFill.translatesAutoresizingMaskIntoConstraints = false
-        progressTrack.addSubview(progressFill)
-        let fillWidth = progressFill.widthAnchor.constraint(equalToConstant: 0)
-        progressWidth = fillWidth
+        for btn in [aspectButton, audioTracksButton, subtitlesButton, closeButton] {
+            btn.widthAnchor.constraint(equalToConstant: 40).isActive = true
+            btn.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        }
 
         NSLayoutConstraint.activate([
             controlsView.topAnchor.constraint(equalTo: view.topAnchor),
@@ -192,32 +273,99 @@ final class PlayerViewController: UIViewController {
 
             titles.topAnchor.constraint(equalTo: controlsView.safeAreaLayoutGuide.topAnchor, constant: 12),
             titles.leadingAnchor.constraint(equalTo: controlsView.leadingAnchor, constant: 20),
-            titles.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -12),
+            titles.trailingAnchor.constraint(lessThanOrEqualTo: topButtons.leadingAnchor, constant: -12),
 
-            closeButton.topAnchor.constraint(equalTo: controlsView.safeAreaLayoutGuide.topAnchor, constant: 12),
-            closeButton.trailingAnchor.constraint(equalTo: controlsView.trailingAnchor, constant: -20),
-            closeButton.widthAnchor.constraint(equalToConstant: 40),
-            closeButton.heightAnchor.constraint(equalToConstant: 40),
+            topButtons.topAnchor.constraint(equalTo: controlsView.safeAreaLayoutGuide.topAnchor, constant: 12),
+            topButtons.trailingAnchor.constraint(equalTo: controlsView.trailingAnchor, constant: -20),
 
             bar.leadingAnchor.constraint(equalTo: controlsView.leadingAnchor, constant: 20),
             bar.trailingAnchor.constraint(equalTo: controlsView.trailingAnchor, constant: -20),
             bar.bottomAnchor.constraint(equalTo: controlsView.safeAreaLayoutGuide.bottomAnchor, constant: -20),
 
-            scrubberRow.topAnchor.constraint(equalTo: bar.topAnchor, constant: 14),
-            scrubberRow.bottomAnchor.constraint(equalTo: bar.bottomAnchor, constant: -14),
-            scrubberRow.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 20),
-            scrubberRow.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -20),
-
-            progressTrack.heightAnchor.constraint(equalToConstant: 5),
-            progressFill.leadingAnchor.constraint(equalTo: progressTrack.leadingAnchor),
-            progressFill.topAnchor.constraint(equalTo: progressTrack.topAnchor),
-            progressFill.bottomAnchor.constraint(equalTo: progressTrack.bottomAnchor),
-            fillWidth,
+            scrubberRow.topAnchor.constraint(equalTo: bar.topAnchor, constant: 12),
+            scrubberRow.bottomAnchor.constraint(equalTo: bar.bottomAnchor, constant: -12),
+            scrubberRow.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 16),
+            scrubberRow.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -16),
 
             spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor),
         ])
     }
+
+    private func makeThumbImage() -> UIImage {
+        let size = CGSize(width: 14, height: 14)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { context in
+            UIColor.white.setFill()
+            context.cgContext.fillEllipse(in: CGRect(origin: .zero, size: size))
+        }
+    }
+
+    private func makeAspectMenu() -> UIMenu {
+        let isTR = AppLanguage.current.effectiveLanguageCode == "tr"
+        let fit = UIAction(title: L10n.aspectFit, image: UIImage(systemName: "arrow.down.right.and.arrow.up.left")) { [weak self] _ in
+            self?.videoView?.contentMode = .scaleAspectFit
+            self?.playerLayer?.player.view?.contentMode = .scaleAspectFit
+        }
+        let fill = UIAction(title: L10n.aspectFill, image: UIImage(systemName: "arrow.up.left.and.arrow.down.right")) { [weak self] _ in
+            self?.videoView?.contentMode = .scaleAspectFill
+            self?.playerLayer?.player.view?.contentMode = .scaleAspectFill
+        }
+        let stretch = UIAction(title: isTR ? "Tam Ekran (Uzat)" : "Stretch (16:9)", image: UIImage(systemName: "rectangle.arrowtriangle.2.outward")) { [weak self] _ in
+            self?.videoView?.contentMode = .scaleToFill
+            self?.playerLayer?.player.view?.contentMode = .scaleToFill
+        }
+        return UIMenu(title: L10n.aspectRatio, children: [fit, fill, stretch])
+    }
+
+    private func updateTrackMenus() {
+        guard let player = playerLayer?.player else { return }
+
+        // Ses parçaları
+        let audioTracks = player.tracks(mediaType: .audio)
+        if !audioTracks.isEmpty {
+            let actions = audioTracks.map { track in
+                let isSelected = (self.selectedAudioTrackID == track.trackID) || (self.selectedAudioTrackID == nil && track.isEnabled)
+                let name = track.name.isEmpty ? "\(L10n.audioTracks) \(track.trackID)" : track.name
+                return UIAction(title: name, state: isSelected ? .on : .off) { [weak self] _ in
+                    self?.playerLayer?.player.select(track: track)
+                    self?.selectedAudioTrackID = track.trackID
+                    self?.updateTrackMenus()
+                }
+            }
+            audioTracksButton.menu = UIMenu(title: L10n.audioTracks, children: actions)
+            audioTracksButton.isHidden = false
+        } else {
+            audioTracksButton.isHidden = true
+        }
+
+        // Altyazı parçaları
+        let subTracks = player.tracks(mediaType: .subtitle)
+        if !subTracks.isEmpty {
+            var subActions: [UIAction] = [
+                UIAction(title: L10n.subtitlesOff, state: self.selectedSubtitleID == -1 ? .on : .off) { [weak self] _ in
+                    self?.selectedSubtitleID = -1
+                    // Altyazı kapatma
+                    self?.updateTrackMenus()
+                }
+            ]
+            subActions += subTracks.map { track in
+                let isSelected = self.selectedSubtitleID == track.trackID
+                let name = track.name.isEmpty ? "\(L10n.subtitles) \(track.trackID)" : track.name
+                return UIAction(title: name, state: isSelected ? .on : .off) { [weak self] _ in
+                    self?.playerLayer?.player.select(track: track)
+                    self?.selectedSubtitleID = track.trackID
+                    self?.updateTrackMenus()
+                }
+            }
+            subtitlesButton.menu = UIMenu(title: L10n.subtitles, children: subActions)
+            subtitlesButton.isHidden = false
+        } else {
+            subtitlesButton.isHidden = true
+        }
+    }
+
+    // MARK: - Aksiyonlar
 
     @objc private func close() {
         dismiss(animated: true)
@@ -230,6 +378,44 @@ final class PlayerViewController: UIViewController {
         isPlaying ? scheduleControlsHide() : showControls()
     }
 
+    @objc private func seekBackward() {
+        seek(by: -15)
+    }
+
+    @objc private func seekForward() {
+        seek(by: 15)
+    }
+
+    private func seek(by seconds: Double) {
+        guard duration > 0 else { return }
+        let target = max(0, min(duration, currentTime + seconds))
+        currentTime = target
+        currentTimeLabel.text = Self.timeText(target)
+        slider.value = Float(target / duration)
+        playerLayer?.seek(time: target, autoPlay: isPlaying, completion: { _ in })
+        showControls()
+    }
+
+    @objc private func sliderTouchDown() {
+        isScrubbing = true
+        hideControlsWork?.cancel()
+    }
+
+    @objc private func sliderValueChanged() {
+        guard duration > 0 else { return }
+        let targetTime = Double(slider.value) * duration
+        currentTimeLabel.text = Self.timeText(targetTime)
+    }
+
+    @objc private func sliderTouchUp() {
+        guard duration > 0 else { isScrubbing = false; return }
+        let targetTime = Double(slider.value) * duration
+        currentTime = targetTime
+        playerLayer?.seek(time: targetTime, autoPlay: isPlaying, completion: { _ in })
+        isScrubbing = false
+        scheduleControlsHide()
+    }
+
     @objc private func toggleControls() {
         controlsView.alpha > 0 ? hideControls() : showControls()
     }
@@ -240,6 +426,7 @@ final class PlayerViewController: UIViewController {
     }
 
     private func hideControls() {
+        guard !isScrubbing else { return }
         hideControlsWork?.cancel()
         UIView.animate(withDuration: 0.2) { self.controlsView.alpha = 0 }
     }
@@ -247,7 +434,7 @@ final class PlayerViewController: UIViewController {
     private func scheduleControlsHide() {
         hideControlsWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let self, isPlaying else { return }
+            guard let self, self.isPlaying, !self.isScrubbing else { return }
             UIView.animate(withDuration: 0.25) { self.controlsView.alpha = 0 }
         }
         hideControlsWork = work
@@ -266,29 +453,41 @@ final class PlayerViewController: UIViewController {
     }
 }
 
+extension PlayerViewController: UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        // Kontrol butonlarına veya slider'a dokunurken ekran jestinin araya girmesini engelle
+        if touch.view is UIControl || touch.view?.superview is UIControl {
+            return false
+        }
+        return true
+    }
+}
+
 extension PlayerViewController: KSPlayerLayerDelegate {
     func player(layer: KSPlayerLayer, state: KSPlayerState) {
         switch state {
         case .readyToPlay, .bufferFinished:
             spinner.stopAnimating()
+            updateTrackMenus()
         case .buffering, .preparing, .initialized:
             spinner.startAnimating()
         case .error:
             spinner.stopAnimating()
-            showFailure("Yayın açılamadı.")
+            showFailure(L10n.streamFailed)
         case .paused, .playedToTheEnd:
             spinner.stopAnimating()
         }
     }
 
     func player(layer: KSPlayerLayer, currentTime: TimeInterval, totalTime: TimeInterval) {
+        guard !isScrubbing else { return }
         self.currentTime = currentTime
         duration = totalTime.isFinite && totalTime > 0 ? totalTime : 0
 
         currentTimeLabel.text = Self.timeText(currentTime)
         durationLabel.text = Self.timeText(duration)
         guard duration > 0 else { return }
-        progressWidth?.constant = progressTrack.bounds.width * CGFloat(min(1, currentTime / duration))
+        slider.value = Float(currentTime / duration)
     }
 
     func player(layer: KSPlayerLayer, finish error: (any Error)?) {
@@ -300,7 +499,7 @@ extension PlayerViewController: KSPlayerLayerDelegate {
 
     private func showFailure(_ message: String) {
         let alert = UIAlertController(title: context.title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Kapat", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: L10n.close, style: .default) { [weak self] _ in
             self?.dismiss(animated: true)
         })
         present(alert, animated: true)

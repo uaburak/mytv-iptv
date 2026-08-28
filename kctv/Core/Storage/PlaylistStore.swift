@@ -59,6 +59,21 @@ final class PlaylistStore {
         KeychainStore.read(playlist.secretKey)
     }
 
+    func needsSecret(for playlist: Playlist) -> Bool {
+        switch playlist.source {
+        case .xtream:
+            let currentSecret = secret(for: playlist)
+            return currentSecret == nil || currentSecret?.isEmpty == true
+        case .m3u:
+            return false
+        }
+    }
+
+    func saveSecret(_ secret: String, for playlist: Playlist) {
+        guard !secret.isEmpty else { return }
+        KeychainStore.save(secret, for: playlist.secretKey)
+    }
+
     /// Firestore'dan gelen listeleri yereldekiyle birleştirir.
     /// Şifreler buluta gitmediği için yalnızca metadata güncellenir.
     func merge(remote: [Playlist]) {
@@ -69,6 +84,14 @@ final class PlaylistStore {
         playlists = merged.sorted { $0.createdAt < $1.createdAt }
         if selectedPlaylistID == nil { selectedPlaylistID = playlists.first?.id }
         persist()
+    }
+
+    func clearAll() {
+        playlists.removeAll()
+        selectedPlaylistID = nil
+        store.removeAll()
+        KeychainStore.deleteAll()
+        UserDefaults.standard.removeObject(forKey: selectionKey)
     }
 
     private func persist() {

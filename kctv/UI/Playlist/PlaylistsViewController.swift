@@ -113,13 +113,22 @@ extension PlaylistsViewController: UITableViewDataSource, UITableViewDelegate {
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "cell", for: indexPath)
         let playlist = model.playlists.playlists[indexPath.row]
+        let isTR = AppLanguage.current.effectiveLanguageCode == "tr"
+        let needsSecret = model.playlists.needsSecret(for: playlist)
 
         var configuration = cell.defaultContentConfiguration()
         configuration.text = playlist.name
-        configuration.secondaryText = "\(playlist.source.label) · \(playlist.subtitle)"
+        var subtitle = "\(playlist.source.label) · \(playlist.subtitle)"
+        if needsSecret {
+            subtitle += isTR ? " · ⚠️ (Şifre Gerekli)" : " · ⚠️ (Password Required)"
+        }
         if let expiresAt = playlist.expiresAt {
-            let expiresPrefix = AppLanguage.current.effectiveLanguageCode == "tr" ? "bitiş" : "expires"
-            configuration.secondaryText? += " · \(expiresPrefix) \(expiresAt.formatted(date: .numeric, time: .omitted))"
+            let expiresPrefix = isTR ? "bitiş" : "expires"
+            subtitle += " · \(expiresPrefix) \(expiresAt.formatted(date: .numeric, time: .omitted))"
+        }
+        configuration.secondaryText = subtitle
+        if needsSecret {
+            configuration.secondaryTextProperties.color = .systemOrange
         }
         cell.contentConfiguration = configuration
         cell.accessoryType = model.playlists.selected?.id == playlist.id ? .checkmark : .none
@@ -130,10 +139,39 @@ extension PlaylistsViewController: UITableViewDataSource, UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         let playlist = model.playlists.playlists[indexPath.row]
+
+        if model.playlists.needsSecret(for: playlist) {
+            promptForSecret(playlist: playlist)
+            return
+        }
+
         Task {
             await model.selectPlaylist(playlist)
             reload()
         }
+    }
+
+    private func promptForSecret(playlist: Playlist) {
+        let isTR = AppLanguage.current.effectiveLanguageCode == "tr"
+        let alert = UIAlertController(
+            title: L10n.enterPasswordTitle,
+            message: "\(playlist.name)\n\(L10n.enterPasswordMessage)",
+            preferredStyle: .alert
+        )
+        alert.addTextField { textField in
+            textField.placeholder = L10n.password
+            textField.isSecureTextEntry = true
+        }
+        alert.addAction(UIAlertAction(title: L10n.save, style: .default) { [weak self, weak alert] _ in
+            guard let self, let text = alert?.textFields?.first?.text, !text.isEmpty else { return }
+            self.model.playlists.saveSecret(text, for: playlist)
+            Task {
+                await self.model.selectPlaylist(playlist)
+                self.reload()
+            }
+        })
+        alert.addAction(UIAlertAction(title: L10n.cancel, style: .cancel))
+        present(alert, animated: true)
     }
 
     func tableView(

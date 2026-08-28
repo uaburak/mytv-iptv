@@ -1,5 +1,20 @@
 import UIKit
 
+/// `layerClass`'ı `CAGradientLayer` olan yerel UIKit gradient bileşeni.
+private final class HeroGradientView: UIView {
+    override class var layerClass: AnyClass { CAGradientLayer.self }
+    var gradientLayer: CAGradientLayer { layer as! CAGradientLayer }
+
+    var colors: [UIColor] = [] {
+        didSet { gradientLayer.colors = colors.map(\.cgColor) }
+    }
+
+    var locations: [NSNumber]? {
+        get { gradientLayer.locations }
+        set { gradientLayer.locations = newValue }
+    }
+}
+
 /// Detay ekranının üst bloğu: arka plan görseli, üzerindeki karartma/blur
 /// katmanı ve içerik (logo ya da başlık, butonlar, künye satırı).
 ///
@@ -7,6 +22,11 @@ import UIKit
 /// - aşağı çekildiğinde görsel üste sabitlenip büyür,
 /// - yukarı kaydırıldığında içerikten yavaş hareket eder (parallax).
 final class DetailHeroView: UIView {
+    /// Görsel, blur katmanı ve karartma gradyanını bir arada tutan kapsayıcı.
+    /// Kaydırma/esneme (stretchy header) efekti bu kapsayıcıya uygulanır;
+    /// böylece resim esnerken veya kayarken gradyan daima resmin altında kalır.
+    private let visualContainer = UIView()
+
     let artwork = RemoteImageView()
 
     /// TMDB'den gelen şeffaf logo. Varsa başlık yerine bu gösteriliyor.
@@ -22,15 +42,15 @@ final class DetailHeroView: UIView {
 
     let contentStack = UIStackView()
 
-    /// Görselin altından üstüne doğru siyah gradient (karartma).
-    private let scrim = CAGradientLayer()
+    /// Görselin ve blur katmanının üzerinde, butonların arkasında siyah gradient karartma.
+    private let scrimView = HeroGradientView()
 
     /// İlk açılışta TMDB görseli yüklenene kadar gösterilen geçiş blur katmanı.
     private let loadingBlurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterialDark))
     private let pulseOverlay = UIView()
 
-    private var artworkTop: NSLayoutConstraint!
-    private var artworkHeight: NSLayoutConstraint!
+    private var visualTop: NSLayoutConstraint!
+    private var visualHeight: NSLayoutConstraint!
     private var ownHeight: NSLayoutConstraint!
 
     private(set) var baseHeight: CGFloat = 660
@@ -46,55 +66,72 @@ final class DetailHeroView: UIView {
         // Büyüyen görsel kendi sınırlarının dışına taşacağı için kırpma kapalı.
         clipsToBounds = false
 
+        // 1. Görsel Kapsayıcısı (Stretchy & Parallax uygulanan ana blok)
+        visualContainer.translatesAutoresizingMaskIntoConstraints = false
+        visualContainer.clipsToBounds = true
+        addSubview(visualContainer)
+
         artwork.translatesAutoresizingMaskIntoConstraints = false
         artwork.clipsToBounds = true
-        // Görsel gelene kadar harf değil, sade koyu bir zemin dursun.
         artwork.showsInitials = false
-        addSubview(artwork)
-
-        // Resmin altından üstüne doğru kademeli siyah gradient
-        scrim.colors = [
-            UIColor.clear.cgColor,
-            UIColor.black.withAlphaComponent(0.08).cgColor,
-            UIColor.black.withAlphaComponent(0.35).cgColor,
-            UIColor.black.withAlphaComponent(0.72).cgColor,
-            UIColor.black.withAlphaComponent(0.94).cgColor,
-            UIColor.black.cgColor,
-        ]
-        scrim.locations = [0.0, 0.35, 0.55, 0.75, 0.90, 1.0]
-        artwork.layer.addSublayer(scrim)
+        visualContainer.addSubview(artwork)
 
         // Açılış blur ve nabız (pulse) katmanı
         loadingBlurView.translatesAutoresizingMaskIntoConstraints = false
         loadingBlurView.alpha = 1
-        artwork.addSubview(loadingBlurView)
+        visualContainer.addSubview(loadingBlurView)
 
         pulseOverlay.translatesAutoresizingMaskIntoConstraints = false
         pulseOverlay.backgroundColor = UIColor.white.withAlphaComponent(0.05)
         loadingBlurView.contentView.addSubview(pulseOverlay)
 
+        // Karartma katmanı: Hem görselin hem de blur katmanının üstünde yer alır.
+        // visualContainer içinde olduğu için resim esnedikçe gradyan da onunla birlikte esner.
+        scrimView.translatesAutoresizingMaskIntoConstraints = false
+        scrimView.isUserInteractionEnabled = false
+        scrimView.colors = [
+            UIColor.clear,
+            UIColor.black.withAlphaComponent(0.08),
+            UIColor.black.withAlphaComponent(0.35),
+            UIColor.black.withAlphaComponent(0.70),
+            UIColor.black.withAlphaComponent(0.92),
+            UIColor.black,
+        ]
+        scrimView.locations = [0.0, 0.35, 0.55, 0.75, 0.90, 1.0]
+        visualContainer.addSubview(scrimView)
+
         buildContent()
 
-        artworkTop = artwork.topAnchor.constraint(equalTo: topAnchor)
-        artworkHeight = artwork.heightAnchor.constraint(equalToConstant: baseHeight)
+        visualTop = visualContainer.topAnchor.constraint(equalTo: topAnchor)
+        visualHeight = visualContainer.heightAnchor.constraint(equalToConstant: baseHeight)
         ownHeight = heightAnchor.constraint(equalToConstant: baseHeight)
 
         NSLayoutConstraint.activate([
             ownHeight,
-            artworkTop,
-            artworkHeight,
-            artwork.leadingAnchor.constraint(equalTo: leadingAnchor),
-            artwork.trailingAnchor.constraint(equalTo: trailingAnchor),
+            visualTop,
+            visualHeight,
+            visualContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            visualContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
 
-            loadingBlurView.leadingAnchor.constraint(equalTo: artwork.leadingAnchor),
-            loadingBlurView.trailingAnchor.constraint(equalTo: artwork.trailingAnchor),
-            loadingBlurView.topAnchor.constraint(equalTo: artwork.topAnchor),
-            loadingBlurView.bottomAnchor.constraint(equalTo: artwork.bottomAnchor),
+            artwork.leadingAnchor.constraint(equalTo: visualContainer.leadingAnchor),
+            artwork.trailingAnchor.constraint(equalTo: visualContainer.trailingAnchor),
+            artwork.topAnchor.constraint(equalTo: visualContainer.topAnchor),
+            artwork.bottomAnchor.constraint(equalTo: visualContainer.bottomAnchor),
+
+            loadingBlurView.leadingAnchor.constraint(equalTo: visualContainer.leadingAnchor),
+            loadingBlurView.trailingAnchor.constraint(equalTo: visualContainer.trailingAnchor),
+            loadingBlurView.topAnchor.constraint(equalTo: visualContainer.topAnchor),
+            loadingBlurView.bottomAnchor.constraint(equalTo: visualContainer.bottomAnchor),
 
             pulseOverlay.leadingAnchor.constraint(equalTo: loadingBlurView.leadingAnchor),
             pulseOverlay.trailingAnchor.constraint(equalTo: loadingBlurView.trailingAnchor),
             pulseOverlay.topAnchor.constraint(equalTo: loadingBlurView.topAnchor),
             pulseOverlay.bottomAnchor.constraint(equalTo: loadingBlurView.bottomAnchor),
+
+            scrimView.leadingAnchor.constraint(equalTo: visualContainer.leadingAnchor),
+            scrimView.trailingAnchor.constraint(equalTo: visualContainer.trailingAnchor),
+            scrimView.topAnchor.constraint(equalTo: visualContainer.topAnchor),
+            scrimView.bottomAnchor.constraint(equalTo: visualContainer.bottomAnchor),
 
             contentStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
             contentStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
@@ -198,17 +235,15 @@ final class DetailHeroView: UIView {
         guard height > 0, abs(height - baseHeight) > 0.5 else { return }
         baseHeight = height
         ownHeight.constant = height
-        artworkHeight.constant = height
-        artworkTop.constant = 0
+        visualHeight.constant = height
+        visualTop.constant = 0
     }
 
-    /// `offset` kaydırma konumu. Negatifse görsel sabitlenip büyür, pozitifse
-    /// içerikten yavaş hareket eder.
+    /// `offset` kaydırma konumu. Negatifse görsel kapsayıcısı (resim+blur+gradient)
+    /// üste sabitlenip büyür, pozitifse içerikten yavaş hareket eder (parallax).
     ///
-    /// Kısıt güncelleyip her karede `layoutIfNeeded()` çağırmak yerine
-    /// `transform` kullanıyoruz: düzen geçişi tetiklenmediği için blur katmanı
-    /// kare başına yeniden kurulmuyor. (`glassEffect() tried to update multiple
-    /// times per frame` uyarısının kaynağı buydu.)
+    /// `visualContainer`'a uygulandığı için resim, blur ve karartma gradyanı
+    /// birlikte esner; resim asla gradyanın altından taşmaz.
     func apply(offset: CGFloat, parallaxFactor: CGFloat) {
         guard baseHeight > 0 else { return }
 
@@ -226,20 +261,6 @@ final class DetailHeroView: UIView {
             transform = CGAffineTransform(translationX: 0, y: min(offset * parallaxFactor, baseHeight))
         }
 
-        artwork.transform = transform
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        layoutLayers()
-    }
-
-    /// Katman çerçevelerini örtük animasyon olmadan günceller; aksi hâlde
-    /// görsel esnerken karartma bir kare geriden geliyor.
-    private func layoutLayers() {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        scrim.frame = artwork.bounds
-        CATransaction.commit()
+        visualContainer.transform = transform
     }
 }

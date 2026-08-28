@@ -103,6 +103,15 @@ final class RemoteImageView: UIView {
     /// Başlıktan türetilen sabit renk. `hashValue` her süreçte değiştiği için
     /// kullanılmıyor; bu toplama her açılışta aynı sonucu veriyor.
     private func applyPlaceholder(title: String) {
+        guard showsInitials else {
+            initialsLabel.text = ""
+            gradientLayer.colors = [
+                UIColor.black.cgColor,
+                UIColor.black.cgColor,
+            ]
+            return
+        }
+
         let words = title.split(separator: " ").prefix(2)
         let letters = words.compactMap(\.first)
         initialsLabel.text = letters.isEmpty ? "?" : String(letters).uppercased()

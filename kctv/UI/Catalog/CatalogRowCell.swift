@@ -116,11 +116,11 @@ final class CatalogRowCell: UITableViewCell {
         subtitleLabel.isHidden = parts.isEmpty
 
         menuButton.menu = UIMenu(children: [
-            UIAction(title: item.kind == .live ? "İzle" : "Oynat", image: UIImage(systemName: "play.fill")) { [weak self] _ in
+            UIAction(title: item.kind == .live ? L10n.watch : L10n.play, image: UIImage(systemName: "play.fill")) { [weak self] _ in
                 self?.onPlay?()
             },
             UIAction(
-                title: isFavorite ? "Favorilerden Çıkar" : "Favorilere Ekle",
+                title: isFavorite ? L10n.removeFromFavorites : L10n.addToFavorites,
                 image: UIImage(systemName: isFavorite ? "checkmark" : "plus")
             ) { [weak self] _ in
                 self?.onToggleFavorite?()

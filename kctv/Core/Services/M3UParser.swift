@@ -145,14 +145,16 @@ enum M3UParser {
         return .live
     }
 
-    /// "Dizi Adı S02 E05", "Dizi Adı - 2x05" gibi kalıpları ayrıştırır.
+    /// "Dizi Adı S02 E05", "Dizi Adı - 2x05", "Dizi Adı 1. Sezon 5. Bölüm" gibi kalıpları ayrıştırır.
     static func parseEpisodeTitle(_ title: String) -> (title: String, season: Int, episode: Int)? {
         let patterns = [
             #"^(.*?)[\s\-\._]*[Ss](\d{1,2})[\s\-\._]*[Ee](\d{1,3})"#,
             #"^(.*?)[\s\-\._]+(\d{1,2})[xX](\d{1,3})"#,
+            #"^(.*?)[\s\-\._]*(\d{1,2})\.?\s*[Ss]ezon[\s\-\._]*(\d{1,3})\.?\s*[Bb]ölüm"#,
+            #"^(.*?)[\s\-\._]*[Ss]ezon\s*(\d{1,2})[\s\-\._]*[Bb]ölüm\s*(\d{1,3})"#,
         ]
         for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern),
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
                   let match = regex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)),
                   let nameRange = Range(match.range(at: 1), in: title),
                   let seasonRange = Range(match.range(at: 2), in: title),
@@ -162,9 +164,28 @@ enum M3UParser {
             else { continue }
 
             let name = title[nameRange]
-                .trimmingCharacters(in: CharacterSet(charactersIn: " -._"))
+                .trimmingCharacters(in: CharacterSet(charactersIn: " -._:"))
             return (name.isEmpty ? title : name, season, episode)
         }
+
+        // Tek başına bölüm ("Dizi Adı 5. Bölüm" veya "Dizi Adı Bölüm 5") -> Sezon 1 varsayılır
+        let singleEpisodePatterns = [
+            #"^(.*?)[\s\-\._]*(\d{1,3})\.?\s*[Bb]ölüm"#,
+            #"^(.*?)[\s\-\._]*[Bb]ölüm\s*(\d{1,3})"#,
+        ]
+        for pattern in singleEpisodePatterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+                  let match = regex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)),
+                  let nameRange = Range(match.range(at: 1), in: title),
+                  let episodeRange = Range(match.range(at: 2), in: title),
+                  let episode = Int(title[episodeRange])
+            else { continue }
+
+            let name = title[nameRange]
+                .trimmingCharacters(in: CharacterSet(charactersIn: " -._:"))
+            return (name.isEmpty ? title : name, 1, episode)
+        }
+
         return nil
     }
 }

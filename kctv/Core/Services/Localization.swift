@@ -122,6 +122,11 @@ enum L10n {
     static var reloadPlaylist: String { isTurkish ? "Listeyi Yenile" : "Reload Playlist" }
     static var subscriptionExpires: String { isTurkish ? "Abonelik bitişi" : "Subscription expires" }
     static var activeConnections: String { isTurkish ? "Bağlantı" : "Connections" }
+    static var sectionDeveloper: String { isTurkish ? "Geliştirici" : "Developer" }
+    static var clearAllLocalData: String { isTurkish ? "Tüm Yerel Verileri Temizle" : "Clear All Local Data" }
+    static var clearAllDataConfirmTitle: String { isTurkish ? "Tüm Yerel Veriler Silinsin mi?" : "Clear All Local Data?" }
+    static var clearAllDataConfirmMessage: String { isTurkish ? "Bu cihazdaki tüm çalma listeleri, önbellek ve ayarlar silinecek ve oturum kapatılacaktır. (Bulut verileri silinmez)" : "All playlists, cache, and settings on this device will be deleted and you will be signed out. (Cloud data will not be deleted)" }
+    static var clear: String { isTurkish ? "Temizle" : "Clear" }
 
     // MARK: - Giriş & Onboarding (Auth & Playlists)
     static var appTagline: String { isTurkish ? "Kendi listeni ekle, bütün cihazlarında aynı yerden izle." : "Add your playlist, watch everywhere seamlessly." }
@@ -129,12 +134,32 @@ enum L10n {
     static var signInWithGoogle: String { isTurkish ? "Google ile Giriş Yap" : "Sign in with Google" }
     static var continueAsGuest: String { isTurkish ? "Misafir Olarak Devam Et" : "Continue as Guest" }
     static var addPlaylist: String { isTurkish ? "Çalma Listesi Ekle" : "Add Playlist" }
+    static var noPlaylistsTitle: String { isTurkish ? "Henüz bir listen yok" : "No playlists yet" }
+    static var noPlaylistsSubtitle: String { isTurkish ? "Xtream Codes hesabını ya da M3U bağlantını ekle;\ncanlı kanallar, filmler ve diziler burada görünsün." : "Add your Xtream Codes account or M3U link to browse live TV, movies and series." }
     static var playlistName: String { isTurkish ? "Liste Adı" : "Playlist Name" }
     static var serverURL: String { isTurkish ? "Sunucu Adresi (URL)" : "Server URL" }
     static var username: String { isTurkish ? "Kullanıcı Adı" : "Username" }
     static var password: String { isTurkish ? "Şifre" : "Password" }
+    static var enterPasswordTitle: String { isTurkish ? "Parolayı Girin" : "Enter Password" }
+    static var enterPasswordMessage: String { isTurkish ? "Bu liste için cihazınızda parola bulunamadı. Lütfen parolanızı girin." : "Password not found on this device for this playlist. Please enter your password." }
     static var save: String { isTurkish ? "Kaydet" : "Save" }
     static var cancel: String { isTurkish ? "Vazgeç" : "Cancel" }
     static var close: String { isTurkish ? "Kapat" : "Close" }
     static var error: String { isTurkish ? "Hata" : "Error" }
+
+    // MARK: - Oynatıcı & Hücre Aksiyonları (Player & Actions)
+    static var watch: String { isTurkish ? "İzle" : "Watch" }
+    static var addToFavorites: String { isTurkish ? "Favorilere Ekle" : "Add to Favorites" }
+    static var removeFromFavorites: String { isTurkish ? "Favorilerden Çıkar" : "Remove from Favorites" }
+    static var streamFailed: String { isTurkish ? "Yayın açılamadı." : "Playback failed." }
+    static var audioTracks: String { isTurkish ? "Ses Parçası" : "Audio Track" }
+    static var subtitles: String { isTurkish ? "Altyazı" : "Subtitles" }
+    static var subtitlesOff: String { isTurkish ? "Altyazı Kapalı" : "Subtitles Off" }
+    static var aspectRatio: String { isTurkish ? "Görüntü Boyutu" : "Aspect Ratio" }
+    static var aspectFit: String { isTurkish ? "Sığdır (Fit)" : "Fit" }
+    static var aspectFill: String { isTurkish ? "Doldur (Fill)" : "Fill" }
+
+    static func seasonName(_ number: Int) -> String {
+        isTurkish ? "\(number). Sezon" : "Season \(number)"
+    }
 }

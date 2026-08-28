@@ -148,6 +148,28 @@ final class AppModel {
         phase = .signedOut
     }
 
+    /// Geliştirici işlemi: Cihazda tutulan tüm yerel verileri (önbellek, keychain,
+    /// yerel listeler, ilerleme ve tercihler) temizler, oturumu kapatır ve uygulamayı
+    /// ilk kurulum haline getirir. Firestore verilerine dokunmaz.
+    func resetAllLocalData() {
+        try? auth.signOut()
+        user = nil
+        sync = nil
+        isGuest = false
+        playlists.clearAll()
+        activity.clearAll()
+        library.reset()
+        LocalStore.deleteAllKCTVData()
+        KeychainStore.deleteAll()
+        if let bundleID = Bundle.main.bundleIdentifier {
+            UserDefaults.standard.removePersistentDomain(forName: bundleID)
+        }
+        URLCache.shared.removeAllCachedResponses()
+        NotificationCenter.default.post(name: .appModelFavoritesDidChange, object: nil)
+        NotificationCenter.default.post(name: .contentLibraryDidChange, object: nil)
+        phase = .signedOut
+    }
+
     private func handleSignedIn(_ user: AuthUser) async {
         self.user = user
         isGuest = false

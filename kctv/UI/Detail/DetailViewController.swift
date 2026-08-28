@@ -59,6 +59,7 @@ final class DetailViewController: UIViewController {
         // Detay daha önce açıldıysa ağ beklemeden dolu gelsin.
         detail = model.library.cachedDetail(for: item)
         selectedSeason = detail?.seasons.first?.number
+        hero.startLoadingAnimation()
         render()
         Task { await load() }
     }
@@ -132,10 +133,7 @@ final class DetailViewController: UIViewController {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.showsVerticalScrollIndicator = false
         scrollView.contentInsetAdjustmentBehavior = .never
-        #if os(iOS)
-        scrollView.topEdgeEffect.isHidden = true
-        scrollView.bottomEdgeEffect.isHidden = true
-        #endif
+        scrollView.applyNativeScrollEdges()
         scrollView.delegate = self
         view.addSubview(scrollView)
 
@@ -204,19 +202,6 @@ final class DetailViewController: UIViewController {
 
     private func render() {
         let current = detail?.item ?? item
-
-        // Önceden yüklenmiş TMDB görseli varsa hemen göster;
-        // yoksa ilk açılışta sıçrama olmaması için blur gösterilip TMDB beklenir.
-        if let backdrop = current.backdropURL {
-            hero.artwork.configure(
-                url: backdrop,
-                title: current.title,
-                displayWidth: metrics.heroImageWidth
-            )
-            hero.stopLoadingAnimation(animated: false)
-        } else {
-            hero.startLoadingAnimation()
-        }
 
         // Logo varsa başlık gizli, yoksa başlık görünür.
         let hasLogo = hero.logoView.image != nil
@@ -405,35 +390,30 @@ final class DetailViewController: UIViewController {
             return
         }
         creditsSection.isHidden = false
-
-        let header = UILabel()
-        header.text = L10n.castAndCrew
-        header.font = metrics.rowTitleFont
-        header.textColor = .white
-        creditsSection.addArrangedSubview(header)
+        creditsSection.spacing = 18
 
         if let director {
-            creditsSection.addArrangedSubview(makeCreditLine(title: L10n.director, value: director))
+            creditsSection.addArrangedSubview(makeCreditBlock(title: L10n.director, value: director))
         }
         if !cast.isEmpty {
             creditsSection.addArrangedSubview(
-                makeCreditLine(title: L10n.cast, value: cast.prefix(8).joined(separator: ", "))
+                makeCreditBlock(title: L10n.cast, value: cast.prefix(12).joined(separator: ", "))
             )
         }
         if let originalTitle, originalTitle.lowercased() != item.title.lowercased() {
             let langSuffix = originalLang != nil ? " (\(originalLang!))" : ""
             creditsSection.addArrangedSubview(
-                makeCreditLine(title: L10n.originalTitle, value: "\(originalTitle)\(langSuffix)")
+                makeCreditBlock(title: L10n.originalTitle, value: "\(originalTitle)\(langSuffix)")
             )
         }
         if let releaseDate, !releaseDate.isEmpty {
-            creditsSection.addArrangedSubview(makeCreditLine(title: L10n.releaseYear, value: releaseDate))
+            creditsSection.addArrangedSubview(makeCreditBlock(title: L10n.releaseYear, value: releaseDate))
         }
         if let country, !country.isEmpty {
-            creditsSection.addArrangedSubview(makeCreditLine(title: L10n.country, value: country))
+            creditsSection.addArrangedSubview(makeCreditBlock(title: L10n.country, value: country))
         }
         if let status, !status.isEmpty {
-            creditsSection.addArrangedSubview(makeCreditLine(title: L10n.status, value: status))
+            creditsSection.addArrangedSubview(makeCreditBlock(title: L10n.status, value: status))
         }
         if let trailerURL {
             let trailerButton = makeTrailerButton(url: trailerURL)
@@ -463,24 +443,23 @@ final class DetailViewController: UIViewController {
         return button
     }
 
-    private func makeCreditLine(title: String, value: String) -> UIView {
+    private func makeCreditBlock(title: String, value: String) -> UIView {
         let titleLabel = UILabel()
         titleLabel.text = title
-        titleLabel.font = .systemFont(ofSize: 15)
-        titleLabel.textColor = AppPalette.secondaryText
-        titleLabel.setContentHuggingPriority(.required, for: .horizontal)
+        titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        titleLabel.textColor = .white
 
         let valueLabel = UILabel()
         valueLabel.text = value
-        valueLabel.font = .systemFont(ofSize: 15)
+        valueLabel.font = .systemFont(ofSize: 14, weight: .regular)
         valueLabel.textColor = AppPalette.secondaryText
         valueLabel.numberOfLines = 0
-        valueLabel.textAlignment = .right
 
-        let row = UIStackView(arrangedSubviews: [titleLabel, valueLabel])
-        row.axis = .horizontal
-        row.spacing = 16
-        return row
+        let stack = UIStackView(arrangedSubviews: [titleLabel, valueLabel])
+        stack.axis = .vertical
+        stack.spacing = 4
+        stack.alignment = .leading
+        return stack
     }
 
     private func renderRelated() {
@@ -533,27 +512,24 @@ final class DetailViewController: UIViewController {
     }
 
     /// TMDB'den sinematik görsel, şeffaf logo ve zengin bilgiler.
-    /// Yükleme süresince blur katmanı nabız animasyonuyla gösterilir ve TMDB tamamlandığında yumuşakça açılır.
-    /// Poster asla önceden basılmaz; yalnızca TMDB'den görsel dönmezse fallback olarak yerleştirilir.
+    /// Yükleme süresince koyu blur/nabız animasyonu gösterilir ve TMDB tamamlandığında yumuşakça açılır.
+    /// Afiş (dikey poster) asla hero arka planına basılmaz; yalnızca gerçek yatay backdrop konur.
     private func enrichWithTMDB(startTime: Double) async {
         let current = detail?.item ?? item
 
         if TMDBService.isConfigured, let metadata = await TMDBService.shared.metadata(for: current, language: AppLanguage.current) {
             tmdbMetadata = metadata
 
-            // Resim: Sadece ve sadece TMDB'den gelen resim (backdrop veya poster).
-            // Eğer TMDB'den resim gelmezse fallback olarak sağlayıcı posterini koy.
-            let tmdbImage = metadata.backdropURL ?? metadata.posterURL
-            let finalImageURL = tmdbImage ?? current.posterURL
-
-            if let finalImageURL {
+            // Arka plan: Yalnızca ve yalnızca TMDB'den gelen yatay sinematik backdrop.
+            // Dikey afiş/poster kesinlikle arka plana basılmaz!
+            if let backdropURL = metadata.backdropURL {
                 hero.artwork.configure(
-                    url: finalImageURL,
+                    url: backdropURL,
                     title: current.title,
                     displayWidth: metrics.heroImageWidth
                 )
-                detail?.item.backdropURL = finalImageURL
-                item.backdropURL = finalImageURL
+                detail?.item.backdropURL = backdropURL
+                item.backdropURL = backdropURL
             }
 
             if let logoURL = metadata.logoURL {
@@ -598,20 +574,11 @@ final class DetailViewController: UIViewController {
             if let trailerURL = metadata.trailerURL {
                 detail?.trailerURL = trailerURL
             }
-        } else {
-            // TMDB'den sonuç gelmediyse sağlayıcı posterini fallback olarak yerleştir
-            if let localPoster = current.posterURL {
-                hero.artwork.configure(
-                    url: localPoster,
-                    title: current.title,
-                    displayWidth: metrics.heroImageWidth
-                )
-            }
         }
 
-        // Karta tıklandıktan sonra 400-500ms blur animasyonu gösterilir
+        // Açılışta en az 350ms koyu efekt tutularak ani görsel sıçramaları önlenir
         let elapsed = CACurrentMediaTime() - startTime
-        let targetDelay: Double = 0.45 // 450ms
+        let targetDelay: Double = 0.35
         if elapsed < targetDelay {
             let sleepNanos = UInt64((targetDelay - elapsed) * 1_000_000_000)
             try? await Task.sleep(nanoseconds: sleepNanos)
