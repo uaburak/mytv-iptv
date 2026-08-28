@@ -106,25 +106,36 @@ final class DetailViewController: UIViewController {
     // MARK: - Toolbar
 
     private func setupToolbarItems() {
+        let current = detail?.item ?? item
+        let isFav = model.activity.isFavorite(current)
+
         let share = UIBarButtonItem(
             image: UIImage(systemName: "square.and.arrow.up"),
             style: .plain,
             target: self,
             action: #selector(shareItem)
         )
+        share.tintColor = .white
+
+        let spacer = UIBarButtonItem.fixedSpace(12)
+
         let favorite = UIBarButtonItem(
             image: favoriteImage,
             style: .plain,
             target: self,
             action: #selector(toggleFavorite)
         )
+        favorite.tintColor = isFav ? .systemRed : .white
         favoriteBarButton = favorite
-        navigationItem.rightBarButtonItems = [share, favorite]
+
+        // İki buton arasında spacer ile ayrı ayrı konumlandırma (Sağdan sola: Favori | Spacer | Paylaş)
+        navigationItem.rightBarButtonItems = [favorite, spacer, share]
     }
 
     private var favoriteImage: UIImage? {
         let current = detail?.item ?? item
-        return UIImage(systemName: model.activity.isFavorite(current) ? "checkmark.circle.fill" : "plus.circle")
+        let isFav = model.activity.isFavorite(current)
+        return UIImage(systemName: isFav ? "heart.fill" : "heart")
     }
 
     // MARK: - Düzen
@@ -601,10 +612,55 @@ final class DetailViewController: UIViewController {
     @objc private func toggleFavorite() {
         let current = detail?.item ?? item
         model.activity.toggleFavorite(current)
-        hero.favoriteButton.configuration?.image = UIImage(
-            systemName: model.activity.isFavorite(current) ? "checkmark" : "plus"
-        )
-        favoriteBarButton?.image = favoriteImage
+        let isFav = model.activity.isFavorite(current)
+
+        let impact = UIImpactFeedbackGenerator(style: .medium)
+        impact.prepare()
+        impact.impactOccurred()
+
+        // 1. Hero İzleme Listesi Butonu: Scale Spring & Symbol Replace Animasyonu
+        UIView.animate(withDuration: 0.10, delay: 0, options: [.curveEaseOut]) {
+            self.hero.favoriteButton.transform = CGAffineTransform(scaleX: 0.82, y: 0.82)
+        } completion: { _ in
+            let iconName = isFav ? "checkmark" : "plus"
+            let iconImage = UIImage(systemName: iconName)
+
+            #if os(iOS)
+            if #available(iOS 17.0, *) {
+                self.hero.favoriteButton.setSymbolImage(iconImage ?? UIImage(), with: .replace)
+            } else {
+                self.hero.favoriteButton.configuration?.image = iconImage
+            }
+            #else
+            self.hero.favoriteButton.configuration?.image = iconImage
+            #endif
+
+            UIView.animate(
+                withDuration: 0.38,
+                delay: 0,
+                usingSpringWithDamping: 0.52,
+                initialSpringVelocity: 0.8,
+                options: [.allowUserInteraction]
+            ) {
+                self.hero.favoriteButton.transform = .identity
+                self.hero.favoriteButton.configuration?.baseBackgroundColor = isFav
+                    ? UIColor(red: 0.16, green: 0.62, blue: 1.0, alpha: 0.28)
+                    : UIColor.white.withAlphaComponent(0.18)
+            }
+        }
+
+        // 2. Toolbar Butonu Animasyonlu Güncelleme
+        let barImage = favoriteImage
+        #if os(iOS)
+        if #available(iOS 17.0, *) {
+            self.favoriteBarButton?.setSymbolImage(barImage ?? UIImage(), with: .replace)
+        } else {
+            self.favoriteBarButton?.image = barImage
+        }
+        #else
+        self.favoriteBarButton?.image = barImage
+        #endif
+        self.favoriteBarButton?.tintColor = isFav ? .systemRed : .white
     }
 
     @objc private func shareItem() {

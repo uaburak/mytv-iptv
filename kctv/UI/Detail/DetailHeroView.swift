@@ -190,20 +190,32 @@ final class DetailHeroView: UIView {
 
         var playConfiguration = UIButton.Configuration.filled()
         playConfiguration.image = UIImage(systemName: "play.fill")
-        playConfiguration.imagePadding = 6
+        playConfiguration.imagePadding = 8
         playConfiguration.baseBackgroundColor = .white
         playConfiguration.baseForegroundColor = .black
         playConfiguration.cornerStyle = .capsule
+        playConfiguration.contentInsets = .init(top: 10, leading: 22, bottom: 10, trailing: 22)
         playButton.configuration = playConfiguration
+        playButton.layer.shadowColor = UIColor.black.cgColor
+        playButton.layer.shadowOpacity = 0.28
+        playButton.layer.shadowRadius = 8
+        playButton.layer.shadowOffset = CGSize(width: 0, height: 3)
 
-        var favoriteConfiguration = UIButton.Configuration.bordered()
+        var favoriteConfiguration = UIButton.Configuration.filled()
         favoriteConfiguration.cornerStyle = .capsule
         favoriteConfiguration.baseForegroundColor = .white
+        favoriteConfiguration.baseBackgroundColor = UIColor.white.withAlphaComponent(0.18)
+        favoriteConfiguration.contentInsets = .init(top: 10, leading: 16, bottom: 10, trailing: 16)
         favoriteButton.configuration = favoriteConfiguration
+        favoriteButton.layer.borderWidth = 0.8
+        favoriteButton.layer.borderColor = UIColor.white.withAlphaComponent(0.24).cgColor
+        favoriteButton.layer.cornerRadius = 22
+        favoriteButton.clipsToBounds = true
 
         let buttons = UIStackView(arrangedSubviews: [playButton, favoriteButton])
         buttons.axis = .horizontal
         buttons.spacing = 14
+        buttons.alignment = .center
 
         plotLabel.font = .systemFont(ofSize: 15)
         plotLabel.textColor = UIColor.white.withAlphaComponent(0.92)
