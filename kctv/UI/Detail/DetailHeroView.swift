@@ -17,10 +17,9 @@ private final class HeroGradientView: UIView {
 
 /// Apple Liquid Glass tasarım diline uygun, gerçek `UIVisualEffectView` tabanlı buton.
 /// Arka plandaki içeriği dinamik olarak bulanıklaştırır, yarı saydam cam efekti ve
-/// dokunulduğunda akıcı fiziksel yay (spring) tepkisi verir.
+/// Apple Liquid Glass tasarım diline uygun, saf şeffaf cam efektli buton.
 open class LiquidGlassButton: UIControl {
     public let effectView: UIVisualEffectView
-    public let highlightOverlay = UIView()
     public let contentStack = UIStackView()
     public let iconView = UIImageView()
     public let titleLabel = UILabel()
@@ -29,7 +28,6 @@ open class LiquidGlassButton: UIControl {
         didSet {
             layer.cornerRadius = cornerRadius
             effectView.layer.cornerRadius = cornerRadius
-            highlightOverlay.layer.cornerRadius = cornerRadius
         }
     }
 
@@ -50,24 +48,16 @@ open class LiquidGlassButton: UIControl {
     private func build() {
         clipsToBounds = false
 
-        // 1. Liquid Glass Arka Planı (UIVisualEffectView)
+        // 1. Saf Şeffaf Cam Arka Planı (UIVisualEffectView)
         effectView.isUserInteractionEnabled = false
         effectView.clipsToBounds = true
         effectView.layer.cornerRadius = cornerRadius
-        effectView.layer.borderWidth = 0.8
-        effectView.layer.borderColor = UIColor.white.withAlphaComponent(0.24).cgColor
+        effectView.layer.borderWidth = 0.6
+        effectView.layer.borderColor = UIColor.white.withAlphaComponent(0.25).cgColor
         effectView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(effectView)
 
-        // 2. Işık / Vurgu Katmanı
-        highlightOverlay.isUserInteractionEnabled = false
-        highlightOverlay.backgroundColor = UIColor.white.withAlphaComponent(0.08)
-        highlightOverlay.layer.cornerRadius = cornerRadius
-        highlightOverlay.clipsToBounds = true
-        highlightOverlay.translatesAutoresizingMaskIntoConstraints = false
-        effectView.contentView.addSubview(highlightOverlay)
-
-        // 3. İçerik (İkon + Başlık)
+        // 2. İçerik (İkon + Başlık)
         iconView.isUserInteractionEnabled = false
         iconView.tintColor = .white
         iconView.contentMode = .scaleAspectFit
@@ -93,11 +83,6 @@ open class LiquidGlassButton: UIControl {
             effectView.topAnchor.constraint(equalTo: topAnchor),
             effectView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            highlightOverlay.leadingAnchor.constraint(equalTo: effectView.leadingAnchor),
-            highlightOverlay.trailingAnchor.constraint(equalTo: effectView.trailingAnchor),
-            highlightOverlay.topAnchor.constraint(equalTo: effectView.topAnchor),
-            highlightOverlay.bottomAnchor.constraint(equalTo: effectView.bottomAnchor),
-
             contentStack.centerXAnchor.constraint(equalTo: effectView.contentView.centerXAnchor),
             contentStack.centerYAnchor.constraint(equalTo: effectView.contentView.centerYAnchor),
             contentStack.leadingAnchor.constraint(greaterThanOrEqualTo: effectView.contentView.leadingAnchor, constant: 18),
@@ -116,9 +101,6 @@ open class LiquidGlassButton: UIControl {
                 options: [.allowUserInteraction, .beginFromCurrentState]
             ) {
                 self.transform = self.isHighlighted ? CGAffineTransform(scaleX: 0.94, y: 0.94) : .identity
-                self.highlightOverlay.backgroundColor = self.isHighlighted
-                    ? UIColor.white.withAlphaComponent(0.20)
-                    : UIColor.white.withAlphaComponent(0.08)
             }
         }
     }
@@ -142,10 +124,9 @@ final class PlayLiquidGlassButton: LiquidGlassButton {
     }
 }
 
-/// Apple SF Symbol `.replace.downUp` geçişli, gerçek `UIVisualEffectView` Liquid Glass İzleme Listesi butonu.
+/// Apple SF Symbol `.replace.downUp` geçişli, saf şeffaf cam efektli İzleme Listesi butonu.
 final class WatchlistLiquidGlassButton: UIControl {
     let effectView: UIVisualEffectView
-    let highlightOverlay = UIView()
     let iconView = UIImageView()
 
     override init(frame: CGRect) {
@@ -166,21 +147,16 @@ final class WatchlistLiquidGlassButton: UIControl {
         clipsToBounds = false
         translatesAutoresizingMaskIntoConstraints = false
 
+        // 1. Saf Şeffaf Cam Arka Planı
         effectView.isUserInteractionEnabled = false
         effectView.clipsToBounds = true
         effectView.layer.cornerRadius = 22
-        effectView.layer.borderWidth = 0.8
-        effectView.layer.borderColor = UIColor.white.withAlphaComponent(0.24).cgColor
+        effectView.layer.borderWidth = 0.6
+        effectView.layer.borderColor = UIColor.white.withAlphaComponent(0.25).cgColor
         effectView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(effectView)
 
-        highlightOverlay.isUserInteractionEnabled = false
-        highlightOverlay.backgroundColor = UIColor.white.withAlphaComponent(0.08)
-        highlightOverlay.layer.cornerRadius = 22
-        highlightOverlay.clipsToBounds = true
-        highlightOverlay.translatesAutoresizingMaskIntoConstraints = false
-        effectView.contentView.addSubview(highlightOverlay)
-
+        // 2. SF Symbol İkonu
         iconView.isUserInteractionEnabled = false
         iconView.tintColor = .white
         iconView.contentMode = .scaleAspectFit
@@ -197,11 +173,6 @@ final class WatchlistLiquidGlassButton: UIControl {
             effectView.trailingAnchor.constraint(equalTo: trailingAnchor),
             effectView.topAnchor.constraint(equalTo: topAnchor),
             effectView.bottomAnchor.constraint(equalTo: bottomAnchor),
-
-            highlightOverlay.leadingAnchor.constraint(equalTo: effectView.leadingAnchor),
-            highlightOverlay.trailingAnchor.constraint(equalTo: effectView.trailingAnchor),
-            highlightOverlay.topAnchor.constraint(equalTo: effectView.topAnchor),
-            highlightOverlay.bottomAnchor.constraint(equalTo: effectView.bottomAnchor),
 
             iconView.centerXAnchor.constraint(equalTo: effectView.contentView.centerXAnchor),
             iconView.centerYAnchor.constraint(equalTo: effectView.contentView.centerYAnchor),
@@ -232,16 +203,10 @@ final class WatchlistLiquidGlassButton: UIControl {
             } completion: { _ in
                 UIView.animate(withDuration: 0.36, delay: 0, usingSpringWithDamping: 0.55, initialSpringVelocity: 0.8) {
                     self.transform = .identity
-                    self.highlightOverlay.backgroundColor = inWatchlist
-                        ? UIColor(red: 0.16, green: 0.62, blue: 1.0, alpha: 0.28)
-                        : UIColor.white.withAlphaComponent(0.08)
                 }
             }
         } else {
             iconView.image = newImage
-            highlightOverlay.backgroundColor = inWatchlist
-                ? UIColor(red: 0.16, green: 0.62, blue: 1.0, alpha: 0.28)
-                : UIColor.white.withAlphaComponent(0.08)
         }
     }
 
