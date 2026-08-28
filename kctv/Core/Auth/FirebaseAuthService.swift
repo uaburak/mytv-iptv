@@ -3,11 +3,6 @@ import Foundation
 import FirebaseAuth
 
 /// Firebase Authentication üzerinden Apple ve Google girişi.
-///
-/// Google tarafı iki ayrı yol kullanır:
-/// - iOS/macOS: GoogleSignIn SDK (paket eklendiğinde devreye girer)
-/// - tvOS: SDK tvOS'u desteklemediği için OAuth "device flow"
-///   (TV'de kod göster, kullanıcı telefondan onaylasın)
 @MainActor
 final class FirebaseAuthService: AuthService, @unchecked Sendable {
     private(set) var currentUser: AuthUser?
@@ -58,15 +53,18 @@ final class FirebaseAuthService: AuthService, @unchecked Sendable {
     }
 
     func signInWithGoogle() async throws -> AuthUser {
-        #if os(tvOS)
-        throw AuthError.notConfigured(
-            "tvOS'ta Google girişi için OAuth cihaz akışı gerekiyor. Google Cloud'da \"TVs and Limited Input devices\" istemcisi oluşturulduktan sonra etkinleşecek."
-        )
-        #else
-        throw AuthError.notConfigured(
-            "Google girişi henüz yapılandırılmadı: GoogleService-Info.plist içinde CLIENT_ID yok. Firebase konsolunda Google sağlayıcısını açıp plist'i yeniden indirmen gerekiyor."
-        )
-        #endif
+        let provider = OAuthProvider(providerID: "google.com")
+        provider.scopes = ["profile", "email"]
+        provider.customParameters = ["prompt": "select_account"]
+
+        do {
+            let authResult = try await Auth.auth().signIn(with: provider)
+            let user = Self.map(authResult.user)
+            currentUser = user
+            return user
+        } catch {
+            throw AuthError.failed(error.localizedDescription)
+        }
     }
 
     func signOut() throws {

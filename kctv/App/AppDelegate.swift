@@ -1,5 +1,6 @@
 import UIKit
 import FirebaseCore
+import FirebaseAuth
 
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -21,6 +22,17 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     ) -> Bool {
         Self.configureFirebaseIfPossible()
         return true
+    }
+
+    func application(
+        _ app: UIApplication,
+        open url: URL,
+        options: [UIApplication.OpenURLOptionsKey: Any] = [:]
+    ) -> Bool {
+        if Auth.auth().canHandle(url) {
+            return true
+        }
+        return false
     }
 
     func application(

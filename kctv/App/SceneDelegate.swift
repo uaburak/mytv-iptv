@@ -1,4 +1,5 @@
 import UIKit
+import FirebaseAuth
 
 final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
@@ -21,5 +22,15 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.overrideUserInterfaceStyle = .dark
         window.makeKeyAndVisible()
         self.window = window
+
+        if let urlContext = connectionOptions.urlContexts.first {
+            _ = Auth.auth().canHandle(urlContext.url)
+        }
+    }
+
+    func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+        for urlContext in URLContexts {
+            _ = Auth.auth().canHandle(urlContext.url)
+        }
     }
 }
