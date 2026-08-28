@@ -25,17 +25,6 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func application(
-        _ app: UIApplication,
-        open url: URL,
-        options: [UIApplication.OpenURLOptionsKey: Any] = [:]
-    ) -> Bool {
-        if Auth.auth().canHandle(url) {
-            return true
-        }
-        return false
-    }
-
-    func application(
         _ application: UIApplication,
         configurationForConnecting session: UISceneSession,
         options: UIScene.ConnectionOptions

@@ -618,22 +618,12 @@ final class DetailViewController: UIViewController {
         impact.prepare()
         impact.impactOccurred()
 
-        // 1. Hero İzleme Listesi Butonu: Scale Spring & Symbol Replace Animasyonu
+        // 1. Hero İzleme Listesi Butonu: Scale Spring Animasyonu
         UIView.animate(withDuration: 0.10, delay: 0, options: [.curveEaseOut]) {
             self.hero.favoriteButton.transform = CGAffineTransform(scaleX: 0.82, y: 0.82)
         } completion: { _ in
             let iconName = isFav ? "checkmark" : "plus"
-            let iconImage = UIImage(systemName: iconName)
-
-            #if os(iOS)
-            if #available(iOS 17.0, *) {
-                self.hero.favoriteButton.setSymbolImage(iconImage ?? UIImage(), with: .replace)
-            } else {
-                self.hero.favoriteButton.configuration?.image = iconImage
-            }
-            #else
-            self.hero.favoriteButton.configuration?.image = iconImage
-            #endif
+            self.hero.favoriteButton.configuration?.image = UIImage(systemName: iconName)
 
             UIView.animate(
                 withDuration: 0.38,
@@ -649,18 +639,9 @@ final class DetailViewController: UIViewController {
             }
         }
 
-        // 2. Toolbar Butonu Animasyonlu Güncelleme
-        let barImage = favoriteImage
-        #if os(iOS)
-        if #available(iOS 17.0, *) {
-            self.favoriteBarButton?.setSymbolImage(barImage ?? UIImage(), with: .replace)
-        } else {
-            self.favoriteBarButton?.image = barImage
-        }
-        #else
-        self.favoriteBarButton?.image = barImage
-        #endif
-        self.favoriteBarButton?.tintColor = isFav ? .systemRed : .white
+        // 2. Toolbar Butonu Güncellemesi
+        favoriteBarButton?.image = favoriteImage
+        favoriteBarButton?.tintColor = isFav ? .systemRed : .white
     }
 
     @objc private func shareItem() {

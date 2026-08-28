@@ -152,7 +152,6 @@ extension PlaylistsViewController: UITableViewDataSource, UITableViewDelegate {
     }
 
     private func promptForSecret(playlist: Playlist) {
-        let isTR = AppLanguage.current.effectiveLanguageCode == "tr"
         let alert = UIAlertController(
             title: L10n.enterPasswordTitle,
             message: "\(playlist.name)\n\(L10n.enterPasswordMessage)",
