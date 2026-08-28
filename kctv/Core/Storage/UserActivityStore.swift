@@ -7,10 +7,12 @@ import Observation
 @Observable
 final class UserActivityStore {
     private(set) var favorites: [MediaItem] = []
+    private(set) var watchlist: [MediaItem] = []
     private(set) var progress: [PlaybackProgress] = []
 
     private let store = LocalStore(folder: "activity")
     private let favoritesKey = "favorites"
+    private let watchlistKey = "watchlist"
     private let progressKey = "progress"
 
     /// Firestore'a yazma işini üstlenen kapan; oturum açılınca bağlanır.
@@ -18,6 +20,7 @@ final class UserActivityStore {
 
     init() {
         favorites = store.read([MediaItem].self, key: favoritesKey) ?? []
+        watchlist = store.read([MediaItem].self, key: watchlistKey) ?? []
         progress = store.read([PlaybackProgress].self, key: progressKey) ?? []
     }
 
@@ -32,6 +35,21 @@ final class UserActivityStore {
             favorites.removeAll { $0.id == item.id }
         } else {
             favorites.insert(item, at: 0)
+        }
+        persist()
+    }
+
+    // MARK: - İzleme Listesi (Watchlist)
+
+    func isInWatchlist(_ item: MediaItem) -> Bool {
+        watchlist.contains { $0.id == item.id }
+    }
+
+    func toggleWatchlist(_ item: MediaItem) {
+        if isInWatchlist(item) {
+            watchlist.removeAll { $0.id == item.id }
+        } else {
+            watchlist.insert(item, at: 0)
         }
         persist()
     }
@@ -93,12 +111,14 @@ final class UserActivityStore {
 
     func clearAll() {
         favorites.removeAll()
+        watchlist.removeAll()
         progress.removeAll()
         store.removeAll()
     }
 
     private func persist() {
         store.write(favorites, key: favoritesKey)
+        store.write(watchlist, key: watchlistKey)
         store.write(progress, key: progressKey)
         onChange?(favorites, progress)
     }

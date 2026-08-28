@@ -203,7 +203,7 @@ final class DetailViewController: UIViewController {
 
     private func wireActions() {
         hero.playButton.addTarget(self, action: #selector(playPrimary), for: .touchUpInside)
-        hero.favoriteButton.addTarget(self, action: #selector(toggleFavorite), for: .touchUpInside)
+        hero.watchlistButton.addTarget(self, action: #selector(toggleWatchlist), for: .touchUpInside)
         hero.moreButton.addTarget(self, action: #selector(togglePlot), for: .touchUpInside)
     }
 
@@ -235,9 +235,7 @@ final class DetailViewController: UIViewController {
         hero.genreLabel.text = genreParts.joined(separator: " · ")
 
         hero.playButton.configuration?.title = playTitle(for: current)
-        hero.favoriteButton.configuration?.image = UIImage(
-            systemName: model.activity.isFavorite(current) ? "checkmark" : "plus"
-        )
+        hero.watchlistButton.setInWatchlist(model.activity.isInWatchlist(current), animated: false)
 
         let plotText = current.plot ?? tmdbMetadata?.overview
         hero.plotLabel.text = plotText
@@ -609,6 +607,18 @@ final class DetailViewController: UIViewController {
         hero.moreButton.setTitle(isPlotExpanded ? L10n.less : L10n.more, for: .normal)
     }
 
+    @objc private func toggleWatchlist() {
+        let current = detail?.item ?? item
+        model.activity.toggleWatchlist(current)
+        let inWatchlist = model.activity.isInWatchlist(current)
+
+        let impact = UIImpactFeedbackGenerator(style: .medium)
+        impact.prepare()
+        impact.impactOccurred()
+
+        hero.watchlistButton.setInWatchlist(inWatchlist, animated: true)
+    }
+
     @objc private func toggleFavorite() {
         let current = detail?.item ?? item
         model.activity.toggleFavorite(current)
@@ -618,28 +628,6 @@ final class DetailViewController: UIViewController {
         impact.prepare()
         impact.impactOccurred()
 
-        // 1. Hero İzleme Listesi Butonu: Scale Spring Animasyonu
-        UIView.animate(withDuration: 0.10, delay: 0, options: [.curveEaseOut]) {
-            self.hero.favoriteButton.transform = CGAffineTransform(scaleX: 0.82, y: 0.82)
-        } completion: { _ in
-            let iconName = isFav ? "checkmark" : "plus"
-            self.hero.favoriteButton.configuration?.image = UIImage(systemName: iconName)
-
-            UIView.animate(
-                withDuration: 0.38,
-                delay: 0,
-                usingSpringWithDamping: 0.52,
-                initialSpringVelocity: 0.8,
-                options: [.allowUserInteraction]
-            ) {
-                self.hero.favoriteButton.transform = .identity
-                self.hero.favoriteButton.configuration?.baseBackgroundColor = isFav
-                    ? UIColor(red: 0.16, green: 0.62, blue: 1.0, alpha: 0.28)
-                    : UIColor.white.withAlphaComponent(0.18)
-            }
-        }
-
-        // 2. Toolbar Butonu Güncellemesi
         favoriteBarButton?.image = favoriteImage
         favoriteBarButton?.tintColor = isFav ? .systemRed : .white
     }

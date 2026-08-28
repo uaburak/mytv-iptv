@@ -15,6 +15,91 @@ private final class HeroGradientView: UIView {
     }
 }
 
+/// Apple `.buttonStyle(.glass)` standartlarında, SF Symbol replace geçişli İzleme Listesi butonu.
+final class WatchlistGlassButton: UIControl {
+    let iconView = UIImageView()
+    private let backgroundPill = UIView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        build()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func build() {
+        isUserInteractionEnabled = true
+        translatesAutoresizingMaskIntoConstraints = false
+
+        backgroundPill.isUserInteractionEnabled = false
+        backgroundPill.backgroundColor = UIColor.white.withAlphaComponent(0.18)
+        backgroundPill.layer.borderWidth = 0.8
+        backgroundPill.layer.borderColor = UIColor.white.withAlphaComponent(0.24).cgColor
+        backgroundPill.layer.cornerRadius = 22
+        backgroundPill.clipsToBounds = true
+        backgroundPill.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(backgroundPill)
+
+        iconView.isUserInteractionEnabled = false
+        iconView.tintColor = .white
+        iconView.contentMode = .scaleAspectFit
+        let config = UIImage.SymbolConfiguration(pointSize: 17, weight: .bold)
+        iconView.image = UIImage(systemName: "plus", withConfiguration: config)
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(iconView)
+
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: 44),
+            heightAnchor.constraint(equalToConstant: 44),
+
+            backgroundPill.leadingAnchor.constraint(equalTo: leadingAnchor),
+            backgroundPill.trailingAnchor.constraint(equalTo: trailingAnchor),
+            backgroundPill.topAnchor.constraint(equalTo: topAnchor),
+            backgroundPill.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 22),
+            iconView.heightAnchor.constraint(equalToConstant: 22),
+        ])
+    }
+
+    func setInWatchlist(_ inWatchlist: Bool, animated: Bool) {
+        let config = UIImage.SymbolConfiguration(pointSize: 17, weight: .bold)
+        let newImage = UIImage(systemName: inWatchlist ? "checkmark" : "plus", withConfiguration: config)
+
+        if animated {
+            #if os(iOS)
+            if #available(iOS 17.0, *) {
+                iconView.setSymbolImage(newImage ?? UIImage(), contentTransition: .replace.downUp)
+            } else {
+                UIView.transition(with: iconView, duration: 0.25, options: .transitionCrossDissolve) {
+                    self.iconView.image = newImage
+                }
+            }
+            #else
+            iconView.image = newImage
+            #endif
+
+            UIView.animate(withDuration: 0.10, delay: 0, options: [.curveEaseOut]) {
+                self.transform = CGAffineTransform(scaleX: 0.86, y: 0.86)
+            } completion: { _ in
+                UIView.animate(withDuration: 0.36, delay: 0, usingSpringWithDamping: 0.55, initialSpringVelocity: 0.8) {
+                    self.transform = .identity
+                    self.backgroundPill.backgroundColor = inWatchlist
+                        ? UIColor(red: 0.16, green: 0.62, blue: 1.0, alpha: 0.28)
+                        : UIColor.white.withAlphaComponent(0.18)
+                }
+            }
+        } else {
+            iconView.image = newImage
+            backgroundPill.backgroundColor = inWatchlist
+                ? UIColor(red: 0.16, green: 0.62, blue: 1.0, alpha: 0.28)
+                : UIColor.white.withAlphaComponent(0.18)
+        }
+    }
+}
+
 /// Detay ekranının üst bloğu: arka plan görseli, üzerindeki karartma/blur
 /// katmanı ve içerik (logo ya da başlık, butonlar, künye satırı).
 ///
@@ -38,7 +123,7 @@ final class DetailHeroView: UIView {
     let metaLabel = UILabel()
     let moreButton = UIButton(type: .system)
     let playButton = UIButton(configuration: .filled())
-    let favoriteButton = UIButton(configuration: .bordered())
+    let watchlistButton = WatchlistGlassButton()
 
     let contentStack = UIStackView()
 
@@ -191,30 +276,19 @@ final class DetailHeroView: UIView {
         var playConfiguration = UIButton.Configuration.filled()
         playConfiguration.image = UIImage(systemName: "play.fill")
         playConfiguration.imagePadding = 8
-        playConfiguration.baseBackgroundColor = .white
-        playConfiguration.baseForegroundColor = .black
+        playConfiguration.baseBackgroundColor = UIColor.white.withAlphaComponent(0.18)
+        playConfiguration.baseForegroundColor = .white
         playConfiguration.cornerStyle = .capsule
-        playConfiguration.contentInsets = .init(top: 10, leading: 22, bottom: 10, trailing: 22)
+        playConfiguration.contentInsets = .init(top: 11, leading: 24, bottom: 11, trailing: 24)
         playButton.configuration = playConfiguration
-        playButton.layer.shadowColor = UIColor.black.cgColor
-        playButton.layer.shadowOpacity = 0.28
-        playButton.layer.shadowRadius = 8
-        playButton.layer.shadowOffset = CGSize(width: 0, height: 3)
+        playButton.layer.borderWidth = 0.8
+        playButton.layer.borderColor = UIColor.white.withAlphaComponent(0.24).cgColor
+        playButton.layer.cornerRadius = 22
+        playButton.clipsToBounds = true
 
-        var favoriteConfiguration = UIButton.Configuration.filled()
-        favoriteConfiguration.cornerStyle = .capsule
-        favoriteConfiguration.baseForegroundColor = .white
-        favoriteConfiguration.baseBackgroundColor = UIColor.white.withAlphaComponent(0.18)
-        favoriteConfiguration.contentInsets = .init(top: 10, leading: 16, bottom: 10, trailing: 16)
-        favoriteButton.configuration = favoriteConfiguration
-        favoriteButton.layer.borderWidth = 0.8
-        favoriteButton.layer.borderColor = UIColor.white.withAlphaComponent(0.24).cgColor
-        favoriteButton.layer.cornerRadius = 22
-        favoriteButton.clipsToBounds = true
-
-        let buttons = UIStackView(arrangedSubviews: [playButton, favoriteButton])
+        let buttons = UIStackView(arrangedSubviews: [playButton, watchlistButton])
         buttons.axis = .horizontal
-        buttons.spacing = 14
+        buttons.spacing = 12
         buttons.alignment = .center
 
         plotLabel.font = .systemFont(ofSize: 15)
