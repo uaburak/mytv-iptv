@@ -68,6 +68,7 @@ final class SignInViewController: UIViewController {
         subtitle.numberOfLines = 0
 
         let appleButton = ASAuthorizationAppleIDButton(type: .signIn, style: .white)
+        appleButton.addTarget(self, action: #selector(startAppleSignIn), for: .touchUpInside)
         appleButton.addTarget(self, action: #selector(startAppleSignIn), for: .primaryActionTriggered)
         appleButton.heightAnchor.constraint(equalToConstant: 50).isActive = true
 

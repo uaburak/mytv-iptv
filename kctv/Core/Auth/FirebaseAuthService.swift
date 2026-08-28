@@ -57,9 +57,15 @@ final class FirebaseAuthService: AuthService, @unchecked Sendable {
         provider.scopes = ["profile", "email"]
         provider.customParameters = ["prompt": "select_account"]
 
+        guard let presentingVC = Self.topViewController() else {
+            throw AuthError.failed("Görünüm penceresi bulunamadı.")
+        }
+
+        let presenter = AuthPresenter(viewController: presentingVC)
+
         do {
-            let credential: AuthCredential = try await withCheckedThrowingContinuation { continuation in
-                provider.getCredentialWith(nil) { credential, error in
+            let credential = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AuthCredential, any Error>) in
+                provider.getCredentialWith(presenter) { credential, error in
                     if let error = error {
                         continuation.resume(throwing: error)
                     } else if let credential = credential {
@@ -74,9 +80,31 @@ final class FirebaseAuthService: AuthService, @unchecked Sendable {
             let user = Self.map(authResult.user)
             currentUser = user
             return user
-        } catch {
+        } catch let error as NSError {
+            if error.domain == AuthErrorDomain,
+               error.code == AuthErrorCode.webContextCancelled.rawValue ||
+               error.code == AuthErrorCode.webContextAlreadyPresented.rawValue {
+                throw AuthError.cancelled
+            }
+            if error.domain == "com.apple.AuthenticationServices.WebAuthenticationSession",
+               error.code == 1 { // ASWebAuthenticationSessionError.canceledLogin
+                throw AuthError.cancelled
+            }
             throw AuthError.failed(error.localizedDescription)
         }
+    }
+
+    private static func topViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let activeScene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
+        guard let window = activeScene?.windows.first(where: \.isKeyWindow) ?? activeScene?.windows.first else {
+            return nil
+        }
+        var topController = window.rootViewController
+        while let presented = topController?.presentedViewController {
+            topController = presented
+        }
+        return topController
     }
 
     func signOut() throws {
@@ -92,5 +120,22 @@ final class FirebaseAuthService: AuthService, @unchecked Sendable {
             photoURL: user.photoURL,
             providerID: user.providerData.first?.providerID
         )
+    }
+}
+
+/// Firebase OAuth için arayüz sunucu temsilcisi
+private final class AuthPresenter: NSObject, AuthUIDelegate {
+    private weak var viewController: UIViewController?
+
+    init(viewController: UIViewController) {
+        self.viewController = viewController
+    }
+
+    func present(_ viewControllerToPresent: UIViewController, animated flag: Bool, completion: (() -> Void)? = nil) {
+        viewController?.present(viewControllerToPresent, animated: flag, completion: completion)
+    }
+
+    func dismiss(animated flag: Bool, completion: (() -> Void)? = nil) {
+        viewController?.dismiss(animated: flag, completion: completion)
     }
 }
