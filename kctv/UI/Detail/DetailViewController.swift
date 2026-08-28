@@ -234,8 +234,10 @@ final class DetailViewController: UIViewController {
         genreParts.append(contentsOf: displayGenres.prefix(3))
         hero.genreLabel.text = genreParts.joined(separator: " · ")
 
-        hero.playButton.setTitle(playTitle(for: current))
-        hero.watchlistButton.setInWatchlist(model.activity.isInWatchlist(current), animated: false)
+        hero.playButton.configuration?.title = playTitle(for: current)
+        hero.watchlistButton.configuration?.image = UIImage(
+            systemName: model.activity.isInWatchlist(current) ? "checkmark" : "plus"
+        )
 
         let plotText = current.plot ?? tmdbMetadata?.overview
         hero.plotLabel.text = plotText
@@ -436,15 +438,20 @@ final class DetailViewController: UIViewController {
     }
 
     private func makeTrailerButton(url: URL) -> UIView {
-        let button = LiquidGlassButton()
-        let config = UIImage.SymbolConfiguration(pointSize: 16, weight: .bold)
-        button.iconView.image = UIImage(systemName: "play.rectangle.fill", withConfiguration: config)
-        button.titleLabel.text = L10n.watchTrailer
-        button.titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
-        button.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        var config = UIButton.Configuration.filled()
+        config.title = L10n.watchTrailer
+        config.image = UIImage(systemName: "play.rectangle.fill")
+        config.imagePadding = 8
+        config.cornerStyle = .capsule
+        config.baseForegroundColor = .white
+        config.baseBackgroundColor = UIColor.white.withAlphaComponent(0.18)
+        config.contentInsets = .init(top: 10, leading: 18, bottom: 10, trailing: 18)
+
+        let button = UIButton(configuration: config)
         button.addAction(UIAction { _ in
             UIApplication.shared.open(url)
         }, for: .touchUpInside)
+        button.heightAnchor.constraint(equalToConstant: 44).isActive = true
         return button
     }
 
@@ -612,7 +619,7 @@ final class DetailViewController: UIViewController {
         impact.prepare()
         impact.impactOccurred()
 
-        hero.watchlistButton.setInWatchlist(inWatchlist, animated: true)
+        hero.watchlistButton.configuration?.image = UIImage(systemName: inWatchlist ? "checkmark" : "plus")
     }
 
     @objc private func toggleFavorite() {
