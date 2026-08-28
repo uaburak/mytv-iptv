@@ -165,8 +165,14 @@ extension SignInViewController: ASAuthorizationControllerPresentationContextProv
         }
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         if let activeScene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first {
-            return activeScene.windows.first(where: \.isKeyWindow) ?? UIWindow(windowScene: activeScene)
+            if let keyWindow = activeScene.windows.first(where: \.isKeyWindow) {
+                return keyWindow
+            }
+            if let anyWindow = activeScene.windows.first {
+                return anyWindow
+            }
+            return UIWindow(windowScene: activeScene)
         }
-        return ASPresentationAnchor()
+        fatalError("No active window scene found for authentication presentation")
     }
 }

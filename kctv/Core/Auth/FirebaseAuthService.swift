@@ -58,7 +58,19 @@ final class FirebaseAuthService: AuthService, @unchecked Sendable {
         provider.customParameters = ["prompt": "select_account"]
 
         do {
-            let authResult = try await Auth.auth().signIn(with: provider)
+            let credential: AuthCredential = try await withCheckedThrowingContinuation { continuation in
+                provider.getCredentialWith(nil) { credential, error in
+                    if let error = error {
+                        continuation.resume(throwing: error)
+                    } else if let credential = credential {
+                        continuation.resume(returning: credential)
+                    } else {
+                        continuation.resume(throwing: AuthError.failed("Google kimlik bilgisi alınamadı."))
+                    }
+                }
+            }
+
+            let authResult = try await Auth.auth().signIn(with: credential)
             let user = Self.map(authResult.user)
             currentUser = user
             return user
