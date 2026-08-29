@@ -64,6 +64,18 @@ final class DetailHeroView: UIView {
     private var visualHeight: NSLayoutConstraint!
     private var ownHeight: NSLayoutConstraint!
 
+    /// İçerik kolonunun kenar payı. Alttaki bölümlerle (bölümler, fragman,
+    /// oyuncular, bilgi, benzerler) aynı hizada durması için `AppMetrics`
+    /// üzerinden sürülüyor; sabit bir değer ekran boyuna göre kayıyordu.
+    private var contentLeading: NSLayoutConstraint!
+    #if os(tvOS)
+    // tvOS'ta sağ kenarı kolon genişliği belirliyor; trailing kısıtı yok.
+    private var horizontalInset: CGFloat = AppMetrics.tv.screenPadding
+    #else
+    private var contentTrailing: NSLayoutConstraint!
+    private var horizontalInset: CGFloat = AppMetrics.regular.screenPadding
+    #endif
+
     private(set) var baseHeight: CGFloat = 660
 
     override init(frame: CGRect) {
@@ -118,6 +130,15 @@ final class DetailHeroView: UIView {
 
         buildContent()
 
+        contentLeading = contentStack.leadingAnchor.constraint(
+            equalTo: leadingAnchor, constant: horizontalInset
+        )
+        #if !os(tvOS)
+        contentTrailing = contentStack.trailingAnchor.constraint(
+            equalTo: trailingAnchor, constant: -horizontalInset
+        )
+        #endif
+
         visualTop = visualContainer.topAnchor.constraint(equalTo: topAnchor)
         visualHeight = visualContainer.heightAnchor.constraint(equalToConstant: baseHeight)
         ownHeight = heightAnchor.constraint(equalToConstant: baseHeight)
@@ -149,14 +170,14 @@ final class DetailHeroView: UIView {
             sideScrimView.bottomAnchor.constraint(equalTo: visualContainer.bottomAnchor),
 
             // İçerik solda, ekranın yarısından biraz dar bir kolonda.
-            contentStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 90),
+            contentLeading,
             contentStack.widthAnchor.constraint(equalTo: widthAnchor, multiplier: 0.44),
             contentStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -90),
         ])
         #else
         NSLayoutConstraint.activate([
-            contentStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
-            contentStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+            contentLeading,
+            contentTrailing,
             contentStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -24),
         ])
         #endif
@@ -210,15 +231,22 @@ final class DetailHeroView: UIView {
         episodesButton.isHidden = true
 
         #if os(tvOS)
-        let buttons = UIStackView(arrangedSubviews: [
-            playButton, episodesButton, watchlistButton, favoriteButton,
-        ])
+        let actionButtons = [playButton, episodesButton, watchlistButton, favoriteButton]
         #else
-        let buttons = UIStackView(arrangedSubviews: [playButton, watchlistButton])
+        let actionButtons = [playButton, watchlistButton]
         #endif
+
+        let buttons = UIStackView(arrangedSubviews: actionButtons)
         buttons.axis = .horizontal
         buttons.spacing = 10
         buttons.alignment = .center
+
+        // Aksiyon satırı tek bir boyu paylaşıyor. İkon-only butonlar simge
+        // ölçüsünden, sezon çipleri de kendi puntosundan daha kısa kalıyordu;
+        // ölçüyü Oynat butonu belirliyor.
+        for button in actionButtons.dropFirst() {
+            button.heightAnchor.constraint(equalTo: playButton.heightAnchor).isActive = true
+        }
 
         // İki cam buton ortak bir cam kapsayıcıda; birbirlerine yaklaştıklarında
         // malzeme akışkan biçimde birleşiyor.
@@ -277,6 +305,16 @@ final class DetailHeroView: UIView {
     }
 
     // MARK: - Kaydırma sürüşü
+
+    /// İçerik kolonunu alttaki bölümlerle aynı kenar payına çeker.
+    func updateHorizontalInset(_ inset: CGFloat) {
+        guard abs(inset - horizontalInset) > 0.5 else { return }
+        horizontalInset = inset
+        contentLeading.constant = inset
+        #if !os(tvOS)
+        contentTrailing.constant = -inset
+        #endif
+    }
 
     func updateBaseHeight(_ height: CGFloat) {
         guard height > 0, abs(height - baseHeight) > 0.5 else { return }

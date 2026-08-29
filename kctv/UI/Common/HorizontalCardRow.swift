@@ -50,6 +50,10 @@ final class HorizontalCardRow<Cell: UICollectionViewCell, Value>: UIView,
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.backgroundColor = .clear
         collectionView.showsHorizontalScrollIndicator = false
+        // Kenar payını yalnızca `sectionInset` versin. Varsayılan davranışta
+        // tvOS'un overscan güvenli alanı bunun üstüne ekleniyor ve ray, aynı
+        // ekrandaki başlıklardan/hero içeriğinden daha içeride başlıyordu.
+        collectionView.contentInsetAdjustmentBehavior = .never
         collectionView.applyNativeScrollEdges()
         collectionView.dataSource = self
         collectionView.delegate = self

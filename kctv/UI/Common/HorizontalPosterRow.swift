@@ -29,6 +29,9 @@ final class HorizontalPosterRow: UIView {
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.backgroundColor = .clear
         collectionView.showsHorizontalScrollIndicator = false
+        // Kenar payı yalnızca `sectionInset`'ten gelsin; güvenli alan üstüne
+        // eklenirse ray diğer bölümlerle aynı hizada başlamıyor.
+        collectionView.contentInsetAdjustmentBehavior = .never
         // Odaklanan kart kendi hücresinin dışına büyüyor; kırpma açık kalırsa
         // efektin üstü kesiliyor.
         #if os(tvOS)

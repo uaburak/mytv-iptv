@@ -13,6 +13,9 @@ final class RemoteImageView: UIView {
     /// Görselin ekranda kaplayacağı yaklaşık genişlik (punto).
     var displayWidth: CGFloat = 200
 
+    /// Odaktaki büyüme payı; kartların ölçek katsayısıyla aynı.
+    private static let focusHeadroom: CGFloat = 1.1
+
     /// Kartlarda başlığın baş harfleri yer tutucu olarak gösteriliyor.
     /// Detay hero'sunda kapalı: orada yalnızca bulanık bir zemin isteniyor.
     var showsInitials = true {
@@ -87,7 +90,9 @@ final class RemoteImageView: UIView {
         guard let url else { return }
         let scale = window?.windowScene?.screen.scale ?? traitCollection.displayScale
         let effectiveScale = scale > 0 ? scale : 3.0
-        let maxPixelSize = displayWidth * max(2, effectiveScale)
+        // Kart odakta büyüyor; görsel dinlenme boyutuna göre indirilirse
+        // büyürken yumuşuyor. Büyüme payı baştan hesaba katılıyor.
+        let maxPixelSize = displayWidth * max(2, effectiveScale) * Self.focusHeadroom
 
         loadTask = Task { [weak self] in
             // Önbellekte varsa ilk karede göster.

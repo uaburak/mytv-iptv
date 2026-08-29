@@ -118,6 +118,9 @@ enum L10n {
         isTurkish ? "Bu kategoride içerik yok" : "Nothing in this category"
     }
     static var clearRecentSearches: String { isTurkish ? "Temizle" : "Clear" }
+    /// Hazır arama kartlarının başlığı.
+    static var discover: String { isTurkish ? "Keşfet" : "Discover" }
+
 
     // MARK: - Favoriler (Favorites)
     static var favoritesEmptyTitle: String { isTurkish ? "Favori Listeniz Boş" : "No Favorites Yet" }

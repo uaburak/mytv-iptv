@@ -12,6 +12,16 @@ final class PosterCell: UICollectionViewCell {
 
     private let artwork = RemoteImageView()
     private let overlay = CardOverlayView()
+    /// Afişin üstündeki cam katman yalnızca tvOS'ta.
+    ///
+    /// 10 feet mesafede camın kenardaki kırılması ve parlaması kartı zeminden
+    /// ayırıyor, ekranın karanlığında kartın nerede bittiği ancak bundan belli
+    /// oluyor. Elde tutulan ekranda ise afiş zaten kol mesafesinde: aynı katman
+    /// orada görüntüyü yumuşatmaktan başka bir şey yapmıyordu, iOS'ta afiş
+    /// olduğu gibi gösteriliyor.
+    #if os(tvOS)
+    private let glass = UIView.glassOverlay(cornerRadius: 0, intensity: 0.55)
+    #endif
     private var artworkHeight: NSLayoutConstraint?
 
     private var title = ""
@@ -32,12 +42,22 @@ final class PosterCell: UICollectionViewCell {
         overlay.translatesAutoresizingMaskIntoConstraints = false
 
         contentView.addSubview(artwork)
-        // Bindirme afişin içinde: köşe yuvarlaması onu da kırpıyor.
+        // Sıra önemli: cam afişin üstünde (onu kırıyor), bilgi katmanı camın
+        // üstünde (metin kırılmasın diye). İkisi de afişin içinde, böylece
+        // köşe yuvarlaması ikisini de kırpıyor.
+        #if os(tvOS)
+        artwork.addSubview(glass)
+        #endif
         artwork.addSubview(overlay)
 
-        artwork.layer.borderColor = UIColor.white.cgColor
         #if os(tvOS)
         prepareFocusShadow()
+        NSLayoutConstraint.activate([
+            glass.leadingAnchor.constraint(equalTo: artwork.leadingAnchor),
+            glass.trailingAnchor.constraint(equalTo: artwork.trailingAnchor),
+            glass.topAnchor.constraint(equalTo: artwork.topAnchor),
+            glass.bottomAnchor.constraint(equalTo: artwork.bottomAnchor),
+        ])
         #endif
 
         NSLayoutConstraint.activate([
@@ -55,8 +75,6 @@ final class PosterCell: UICollectionViewCell {
         super.prepareForReuse()
         artwork.prepareForReuse()
         overlay.isHidden = true
-        // Odaktayken geri dönen hücrede kenarlık açık kalmasın.
-        artwork.layer.borderWidth = 0
     }
 
     /// Odakta kartın tamamı büyüyüp yükseliyor ve başlık şeridi beliriyor.
@@ -78,27 +96,33 @@ final class PosterCell: UICollectionViewCell {
         applyOverlay()
         layoutIfNeeded()
 
-        // Kenarlık animasyona girmiyor: düz açılıp kapanıyor. Kart ölçeğine
-        // bölünüyor ki büyürken kalınlaşmasın.
-        let focused = isFocused
-        artwork.layer.borderWidth = focused ? UIView.focusedBorderWidth / Self.focusScale : 0
-
-        updateFocusAppearance(isFocused: focused, using: coordinator, scale: Self.focusScale)
+        updateFocusAppearance(isFocused: isFocused, using: coordinator, scale: Self.focusScale)
     }
     #endif
 
-    func configure(item: MediaItem, metrics: AppMetrics, progress: PlaybackProgress?) {
+    /// - Parameter cardWidth: kartın ekranda kaplayacağı genişlik. Izgara
+    ///   düzenlerinde sütun genişliği ray ölçüsünden farklı oluyor; verilmezse
+    ///   ray ölçüsü kullanılıyor. Görselin indirme boyutu da bundan geliyor.
+    func configure(
+        item: MediaItem,
+        metrics: AppMetrics,
+        progress: PlaybackProgress?,
+        cardWidth: CGFloat? = nil
+    ) {
         self.title = item.title
         self.progress = progress?.fraction
         self.metrics = metrics
 
-        let width = metrics.cardWidth(for: item.kind)
+        let width = cardWidth ?? metrics.cardWidth(for: item.kind)
         artwork.layer.cornerRadius = metrics.cardCornerRadius
+        #if os(tvOS)
+        glass.cornerConfiguration = .uniformCorners(radius: .fixed(metrics.cardCornerRadius))
+        #endif
         artwork.configure(url: item.posterURL, title: item.title, displayWidth: width)
 
         artworkHeight?.isActive = false
         let height = artwork.heightAnchor.constraint(
-            equalToConstant: metrics.cardHeight(for: item.kind)
+            equalToConstant: width / item.kind.posterAspect
         )
         height.isActive = true
         artworkHeight = height
@@ -135,7 +159,8 @@ final class PosterCell: UICollectionViewCell {
 final class MainCardCell: UICollectionViewCell {
     static let reuseID = "MainCardCell"
 
-    private let gradientLayer = CAGradientLayer()
+    private var glassSurface: UIVisualEffectView!
+    private let content = UIView()
     private let symbolView = UIImageView()
     private let titleLabel = UILabel()
     private let countLabel = UILabel()
@@ -148,18 +173,16 @@ final class MainCardCell: UICollectionViewCell {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     private func build() {
+        // Ana kartlar cam: tür rengi camın tonu olarak veriliyor, böylece
+        // kimlik korunuyor ama malzeme diğer kartlarla aynı.
         #if os(tvOS)
-        contentView.layer.cornerRadius = 24
-        #else
-        contentView.layer.cornerRadius = 12
-        #endif
-        contentView.layer.cornerCurve = .continuous
-        contentView.clipsToBounds = true
-        contentView.layer.insertSublayer(gradientLayer, at: 0)
-        // Gölge `contentView` kırptığı için hücrenin kendisine kuruluyor.
-        #if os(tvOS)
+        let radius: CGFloat = 24
         prepareFocusShadow()
+        #else
+        let radius: CGFloat = 12
         #endif
+        glassSurface = UIView.glassSurface(wrapping: content, cornerRadius: radius)
+        contentView.addSubview(glassSurface)
 
         symbolView.tintColor = UIColor.white.withAlphaComponent(0.22)
         symbolView.contentMode = .scaleAspectFit
@@ -173,24 +196,24 @@ final class MainCardCell: UICollectionViewCell {
         stack.spacing = 2
         stack.translatesAutoresizingMaskIntoConstraints = false
         symbolView.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(symbolView)
-        contentView.addSubview(stack)
+        content.addSubview(symbolView)
+        content.addSubview(stack)
 
         NSLayoutConstraint.activate([
-            symbolView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            symbolView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
+            glassSurface.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            glassSurface.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            glassSurface.topAnchor.constraint(equalTo: contentView.topAnchor),
+            glassSurface.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+
+            symbolView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+            symbolView.topAnchor.constraint(equalTo: content.topAnchor, constant: 14),
             symbolView.widthAnchor.constraint(equalToConstant: 54),
             symbolView.heightAnchor.constraint(equalToConstant: 54),
 
-            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -14),
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            stack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: symbolView.leadingAnchor, constant: -8),
         ])
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        gradientLayer.frame = contentView.bounds
     }
 
     // tvOS'ta hücre odaklanınca büyüyüp yükseliyor; kullanıcı nerede olduğunu
@@ -214,10 +237,9 @@ final class MainCardCell: UICollectionViewCell {
         countLabel.text = count > 0 ? "\(count.formatted()) içerik" : nil
         symbolView.image = UIImage(systemName: kind.symbol)
 
-        let colors = AppPalette.mainCardColors(for: kind)
-        gradientLayer.colors = colors.map(\.cgColor)
-        gradientLayer.startPoint = CGPoint(x: 0, y: 0)
-        gradientLayer.endPoint = CGPoint(x: 1, y: 1)
+        // Tür rengi camın tonu; ton saydam veriliyor ki malzeme kaybolmasın.
+        let tint = AppPalette.mainCardColors(for: kind).first?.withAlphaComponent(0.55)
+        (glassSurface.effect as? UIGlassEffect)?.tintColor = tint
     }
 }
 

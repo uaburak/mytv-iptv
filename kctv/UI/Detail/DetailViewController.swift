@@ -84,6 +84,8 @@ final class DetailViewController: UIViewController {
         didApplyInitialLayout = true
 
         hero.updateBaseHeight(Self.heroHeight(forScreenHeight: view.bounds.height))
+        // Hero içeriği alttaki bölümlerle aynı kenar payını kullanıyor.
+        hero.updateHorizontalInset(metrics.screenPadding)
 
         // Sekme çubuğu içeriğin üstünde duruyor; son satır altında kalmasın.
         let tabBarHeight = tabBarController?.tabBar.bounds.height ?? 0
@@ -100,6 +102,7 @@ final class DetailViewController: UIViewController {
         // Yükseklik yalnızca ekran boyu gerçekten değiştiğinde güncelleniyor.
         coordinator.animate { _ in
             self.hero.updateBaseHeight(Self.heroHeight(forScreenHeight: size.height))
+            self.hero.updateHorizontalInset(AppMetrics.metrics(for: size.width).screenPadding)
         }
     }
 
@@ -186,6 +189,7 @@ final class DetailViewController: UIViewController {
         bodyStack.axis = .vertical
         bodyStack.spacing = metrics.detailSectionSpacing
         bodyStack.isLayoutMarginsRelativeArrangement = true
+        bodyStack.insetsLayoutMarginsFromSafeArea = false
         bodyStack.directionalLayoutMargins = .init(top: 28, leading: 0, bottom: 40, trailing: 0)
         // Geçiş rampası uzun olsun; siyah zemin yumuşak başlasın.
         bodyBackdrop.rampHeight = 260
@@ -319,24 +323,18 @@ final class DetailViewController: UIViewController {
 
         let season = detail.seasons.first { $0.number == selectedSeason } ?? detail.seasons[0]
 
-        let header = UILabel()
-        header.text = L10n.episodes
-        header.font = metrics.rowTitleFont
-        header.textColor = .white
-
-        let headerRow = UIStackView(arrangedSubviews: [header])
-        headerRow.axis = .horizontal
-        headerRow.alignment = .center
-        headerRow.isLayoutMarginsRelativeArrangement = true
-        headerRow.directionalLayoutMargins = .init(
-            top: 0, leading: metrics.screenPadding, bottom: 0, trailing: metrics.screenPadding
-        )
-        episodesSection.addArrangedSubview(headerRow)
-
+        // Ayrı bir "Bölümler" başlığı yok: sezon çipleri bölümün ne olduğunu
+        // zaten söylüyor, başlık aynı bilgiyi tekrar ediyordu.
+        //
         // Sezonlar yan yana çipler. Bağlam menüsü kumandayla iki adım
         // demekti ve seçili sezon menüyü açmadan görünmüyordu.
         if detail.seasons.count > 1 {
             episodesSection.addArrangedSubview(makeSeasonChips(detail.seasons, selected: season))
+            // Boy kısıtı ancak çipler hiyerarşiye girdikten sonra kurulabiliyor;
+            // öncesinde Oynat butonuyla ortak ataları yok.
+            for chip in seasonChipButtons.values {
+                chip.heightAnchor.constraint(equalTo: hero.playButton.heightAnchor).isActive = true
+            }
         }
         episodeRowView = makeEpisodeRow(for: season, series: detail.item)
         episodesSection.addArrangedSubview(episodeRowView!)
@@ -416,6 +414,7 @@ final class DetailViewController: UIViewController {
 
         let scroller = UIScrollView()
         scroller.showsHorizontalScrollIndicator = false
+        scroller.contentInsetAdjustmentBehavior = .never
         #if os(tvOS)
         scroller.clipsToBounds = false
         #endif
@@ -436,28 +435,12 @@ final class DetailViewController: UIViewController {
         return scroller
     }
 
-    /// Seçili çip düz beyaz zemin, siyah metin.
-    ///
-    /// Cam konfigürasyonda `baseBackgroundColor` camın **tonu** oluyor; beyaz
-    /// verilince saydam kalıyor ve zemin değişmiş gibi görünmüyordu. Seçili
-    /// çip bu yüzden cam değil dolu.
+    /// Sezon çipleri arama ekranındaki süzgeç düğmeleriyle aynı görünüyor;
+    /// stil `UIButton.Configuration.appChip` içinde, tek yerde.
     private func applySeasonChipStyle(to button: UIButton, isSelected: Bool) {
         let title = button.configuration?.title
-        if isSelected {
-            var configuration = UIButton.Configuration.filled()
-            configuration.cornerStyle = .capsule
-            configuration.baseBackgroundColor = .white
-            configuration.baseForegroundColor = .black
-            configuration.contentInsets = .init(top: 8, leading: 16, bottom: 8, trailing: 16)
-            configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
-                var outgoing = incoming
-                outgoing.font = .systemFont(ofSize: 14, weight: .semibold)
-                return outgoing
-            }
-            button.configuration = configuration
-        } else {
-            button.configuration = .appGlass(horizontalInset: 16, verticalInset: 8, fontSize: 14)
-        }
+        // Oynat butonuyla aynı ölçü; boyu da ona kısıtlanıyor.
+        button.configuration = .appChip(isSelected: isSelected)
         button.configuration?.title = title
     }
 
@@ -536,6 +519,9 @@ final class DetailViewController: UIViewController {
     private func inset(_ view: UIView) -> UIView {
         let row = UIStackView(arrangedSubviews: [view])
         row.isLayoutMarginsRelativeArrangement = true
+        // Kenar payı ekranın kenarından ölçülüyor; güvenli alan eklenirse
+        // bu blok raylardan ve hero içeriğinden daha içeride kalıyor.
+        row.insetsLayoutMarginsFromSafeArea = false
         row.directionalLayoutMargins = .init(
             top: 0, leading: metrics.screenPadding, bottom: 0, trailing: metrics.screenPadding
         )
@@ -656,6 +642,7 @@ final class DetailViewController: UIViewController {
 
         let headerRow = UIStackView(arrangedSubviews: [header])
         headerRow.isLayoutMarginsRelativeArrangement = true
+        headerRow.insetsLayoutMarginsFromSafeArea = false
         headerRow.directionalLayoutMargins = .init(
             top: 0, leading: metrics.screenPadding, bottom: 0, trailing: metrics.screenPadding
         )
@@ -788,11 +775,71 @@ final class DetailViewController: UIViewController {
 
     // MARK: - Aksiyonlar
 
-    /// Bölüm listesi hero'nun altında; buton oraya kaydırıyor.
     #if os(tvOS)
+    /// Odak isteği kaydırma bitene kadar bekliyor; `preferredFocusEnvironments`
+    /// yalnızca bu bayrak açıkken bölüm rayını gösteriyor.
+    private var episodeFocusRequested = false
+
+    override var preferredFocusEnvironments: [UIFocusEnvironment] {
+        if episodeFocusRequested, let episodeRowView {
+            return [episodeRowView]
+        }
+        return super.preferredFocusEnvironments
+    }
+
+    /// Bölüm listesi hero'nun altında; buton oraya kaydırıp ilk bölüm kartını
+    /// odağa alıyor — kumandayla ayrıca aşağı inmek gerekmiyor.
     @objc private func scrollToEpisodes() {
+        guard episodeRowView != nil else { return }
         let target = episodesSection.convert(episodesSection.bounds, to: scrollView).minY
-        scrollView.setContentOffset(CGPoint(x: 0, y: max(target - 40, 0)), animated: true)
+        // Hedefi kendimiz kırpıyoruz: kaydırma görünümü sınırı aşan bir offset'i
+        // sessizce sabitliyor, animasyon da olmayan bir yere doğru gidiyordu.
+        let maxOffsetY = max(
+            scrollView.contentSize.height + scrollView.adjustedContentInset.bottom
+                - scrollView.bounds.height,
+            0
+        )
+        let fullOffsetY = min(max(target - 40, 0), maxOffsetY)
+
+        // Tam hedef rayı ekranın tepesine çekiyor ve hero'yu tamamen
+        // götürüyordu. Yolun yarısı yeterli: kartlar görünür oluyor, hero da
+        // bağlam olarak ekranda kalıyor.
+        let currentY = scrollView.contentOffset.y
+        let offsetY = currentY + (fullOffsetY - currentY) / 2
+        episodeFocusRequested = true
+
+        // Zaten oradaysak animasyon yok; odağı hemen taşıyoruz.
+        guard abs(currentY - offsetY) > 1 else {
+            applyEpisodeFocus()
+            return
+        }
+
+        // `setContentOffset(animated:)` sabit süreli, sert bir eğri kullanıyor;
+        // kumandayla gezerken oluşan yumuşak yavaşlamaya benzemiyordu.
+        // `contentOffset` animatable olduğu için yayı kendimiz sürüyoruz.
+        //
+        // Hero parallax'ı senkron kalıyor: `contentOffset` atandığı anda
+        // `scrollViewDidScroll` bu blok içinde çağrılıyor, dolayısıyla hero'nun
+        // dönüşümü de aynı süre ve eğriyle animasyona giriyor.
+        UIView.animate(
+            withDuration: 0.5,
+            delay: 0,
+            usingSpringWithDamping: 0.9,
+            initialSpringVelocity: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.scrollView.contentOffset = CGPoint(x: 0, y: offsetY)
+        } completion: { _ in
+            self.applyEpisodeFocus()
+        }
+    }
+
+    /// Bekleyen odak isteğini uygular.
+    private func applyEpisodeFocus() {
+        guard episodeFocusRequested else { return }
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
+        episodeFocusRequested = false
     }
     #endif
 

@@ -7,6 +7,11 @@ final class CastMemberCell: UICollectionViewCell {
     private static let focusScale: CGFloat = 1.06
 
     private let photo = RemoteImageView()
+    /// Poster kartlarındaki cam katmanın aynısı; burada daire. Orada olduğu
+    /// gibi yalnızca tvOS'ta — iOS'ta fotoğraf olduğu gibi duruyor.
+    #if os(tvOS)
+    private let glass = UIView.glassOverlay(cornerRadius: 0, intensity: 0.55)
+    #endif
     private let nameLabel = UILabel()
     private let roleLabel = UILabel()
 
@@ -20,8 +25,13 @@ final class CastMemberCell: UICollectionViewCell {
     private func build() {
         photo.clipsToBounds = true
         photo.isCircular = true
-        photo.layer.borderColor = UIColor.white.cgColor
         photo.translatesAutoresizingMaskIntoConstraints = false
+        #if os(tvOS)
+        // Kapsül yapılandırması kare bir görünümde daireye denk geliyor;
+        // yarıçapı elle hesaplamaya gerek kalmıyor.
+        glass.cornerConfiguration = .capsule()
+        photo.addSubview(glass)
+        #endif
 
         nameLabel.textColor = AppPalette.primaryText
         nameLabel.textAlignment = .center
@@ -49,12 +59,20 @@ final class CastMemberCell: UICollectionViewCell {
             photo.widthAnchor.constraint(equalTo: contentView.widthAnchor),
             photo.heightAnchor.constraint(equalTo: photo.widthAnchor),
         ])
+
+        #if os(tvOS)
+        NSLayoutConstraint.activate([
+            glass.leadingAnchor.constraint(equalTo: photo.leadingAnchor),
+            glass.trailingAnchor.constraint(equalTo: photo.trailingAnchor),
+            glass.topAnchor.constraint(equalTo: photo.topAnchor),
+            glass.bottomAnchor.constraint(equalTo: photo.bottomAnchor),
+        ])
+        #endif
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
         photo.prepareForReuse()
-        photo.layer.borderWidth = 0
     }
 
     #if os(tvOS)
@@ -63,9 +81,7 @@ final class CastMemberCell: UICollectionViewCell {
         with coordinator: UIFocusAnimationCoordinator
     ) {
         super.didUpdateFocus(in: context, with: coordinator)
-        let focused = isFocused
-        photo.layer.borderWidth = focused ? UIView.focusedBorderWidth / Self.focusScale : 0
-        updateFocusAppearance(isFocused: focused, using: coordinator, scale: Self.focusScale)
+        updateFocusAppearance(isFocused: isFocused, using: coordinator, scale: Self.focusScale)
     }
     #endif
 
@@ -90,6 +106,10 @@ final class MediaClipCell: UICollectionViewCell {
 
     private let still = RemoteImageView()
     private let overlay = CardOverlayView()
+    /// Poster kartındaki cam katmanın aynısı, aynı gerekçeyle yalnızca tvOS'ta.
+    #if os(tvOS)
+    private let glass = UIView.glassOverlay(cornerRadius: 0, intensity: 0.55)
+    #endif
 
     private var title = ""
     private var durationText: String?
@@ -110,10 +130,12 @@ final class MediaClipCell: UICollectionViewCell {
         overlay.translatesAutoresizingMaskIntoConstraints = false
 
         contentView.addSubview(still)
-        // Bindirme görselin içinde: kartın köşe yuvarlaması onu da kırpıyor.
+        // Sıra: cam görselin üstünde, bilgi katmanı camın üstünde.
+        #if os(tvOS)
+        still.addSubview(glass)
+        #endif
         still.addSubview(overlay)
 
-        still.layer.borderColor = UIColor.white.cgColor
         #if os(tvOS)
         prepareFocusShadow()
         #endif
@@ -128,12 +150,20 @@ final class MediaClipCell: UICollectionViewCell {
             overlay.trailingAnchor.constraint(equalTo: still.trailingAnchor),
             overlay.bottomAnchor.constraint(equalTo: still.bottomAnchor),
         ])
+
+        #if os(tvOS)
+        NSLayoutConstraint.activate([
+            glass.leadingAnchor.constraint(equalTo: still.leadingAnchor),
+            glass.trailingAnchor.constraint(equalTo: still.trailingAnchor),
+            glass.topAnchor.constraint(equalTo: still.topAnchor),
+            glass.bottomAnchor.constraint(equalTo: still.bottomAnchor),
+        ])
+        #endif
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
         still.prepareForReuse()
-        still.layer.borderWidth = 0
     }
 
     #if os(tvOS)
@@ -149,11 +179,7 @@ final class MediaClipCell: UICollectionViewCell {
         applyOverlay()
         layoutIfNeeded()
 
-        // Kenarlık animasyona girmiyor: düz açılıp kapanıyor.
-        let focused = isFocused
-        still.layer.borderWidth = focused ? UIView.focusedBorderWidth / Self.focusScale : 0
-
-        updateFocusAppearance(isFocused: focused, using: coordinator, scale: Self.focusScale)
+        updateFocusAppearance(isFocused: isFocused, using: coordinator, scale: Self.focusScale)
     }
     #endif
 
@@ -171,6 +197,9 @@ final class MediaClipCell: UICollectionViewCell {
         self.metrics = metrics
 
         still.layer.cornerRadius = metrics.cardCornerRadius
+        #if os(tvOS)
+        glass.cornerConfiguration = .uniformCorners(radius: .fixed(metrics.cardCornerRadius))
+        #endif
         still.showsInitials = false
         still.configure(url: imageURL, title: title, displayWidth: width)
         applyOverlay()

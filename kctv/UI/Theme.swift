@@ -27,6 +27,47 @@ enum AppPalette {
     static let secondaryText = UIColor.white.withAlphaComponent(0.62)
     static let accent = UIColor(red: 0.16, green: 0.62, blue: 1.0, alpha: 1.0)
 
+    /// Hazır arama kartlarının zemin renkleri.
+    ///
+    /// Bu kartlarda afiş yok — kimliği renk veriyor. Her geçiş açık tondan koyu
+    /// tona iniyor: kartın alt ucu koyulaştığı için başlık bulanık bir şeride
+    /// gerek kalmadan okunuyor. Paletin bir bölümü tek rengin açık/koyu
+    /// tonundan, bir bölümü iki ayrı renkten oluşuyor; deste tekdüze görünmesin
+    /// diye ikisi dönüşümlü sıralanıyor.
+    ///
+    /// Renk kartın destedeki sırasından seçiliyor, adından değil: yan yana
+    /// duran iki kart hiçbir zaman aynı renge düşmüyor.
+    static func suggestionGradient(at index: Int) -> [UIColor] {
+        let palette: [(UIColor, UIColor)] = [
+            // kırmızı → koyu bordo
+            (UIColor(red: 0.96, green: 0.42, blue: 0.38, alpha: 1), UIColor(red: 0.34, green: 0.04, blue: 0.10, alpha: 1)),
+            // turuncu → mor
+            (UIColor(red: 0.99, green: 0.68, blue: 0.30, alpha: 1), UIColor(red: 0.26, green: 0.07, blue: 0.42, alpha: 1)),
+            // açık mavi → gece mavisi
+            (UIColor(red: 0.44, green: 0.72, blue: 0.99, alpha: 1), UIColor(red: 0.04, green: 0.10, blue: 0.36, alpha: 1)),
+            // pembe → mor
+            (UIColor(red: 0.99, green: 0.52, blue: 0.74, alpha: 1), UIColor(red: 0.24, green: 0.05, blue: 0.36, alpha: 1)),
+            // nane yeşili → koyu çam
+            (UIColor(red: 0.52, green: 0.90, blue: 0.62, alpha: 1), UIColor(red: 0.02, green: 0.20, blue: 0.14, alpha: 1)),
+            // sarı → kiremit kırmızısı
+            (UIColor(red: 0.99, green: 0.84, blue: 0.40, alpha: 1), UIColor(red: 0.40, green: 0.08, blue: 0.06, alpha: 1)),
+            // lila → koyu mor
+            (UIColor(red: 0.76, green: 0.66, blue: 0.99, alpha: 1), UIColor(red: 0.14, green: 0.06, blue: 0.32, alpha: 1)),
+            // turkuaz → lacivert
+            (UIColor(red: 0.42, green: 0.88, blue: 0.86, alpha: 1), UIColor(red: 0.04, green: 0.12, blue: 0.34, alpha: 1)),
+            // şeftali → koyu kahve
+            (UIColor(red: 0.99, green: 0.72, blue: 0.58, alpha: 1), UIColor(red: 0.28, green: 0.12, blue: 0.06, alpha: 1)),
+            // gök mavisi → koyu petrol
+            (UIColor(red: 0.60, green: 0.84, blue: 0.96, alpha: 1), UIColor(red: 0.02, green: 0.18, blue: 0.26, alpha: 1)),
+            // mercan → menekşe
+            (UIColor(red: 0.99, green: 0.56, blue: 0.48, alpha: 1), UIColor(red: 0.20, green: 0.06, blue: 0.34, alpha: 1)),
+            // fıstık yeşili → koyu turkuaz
+            (UIColor(red: 0.78, green: 0.92, blue: 0.50, alpha: 1), UIColor(red: 0.03, green: 0.19, blue: 0.24, alpha: 1)),
+        ]
+        let pair = palette[((index % palette.count) + palette.count) % palette.count]
+        return [pair.0, pair.1]
+    }
+
     static func mainCardColors(for kind: MediaKind) -> [UIColor] {
         switch kind {
         case .live:
@@ -71,6 +112,48 @@ extension UIButton.Configuration {
         }
         return config
     }
+
+    /// Seçilebilir çip: tür süzgeci, son aramalar, sezon seçici.
+    ///
+    /// Seçili çip düz beyaz zemin ve siyah metin, seçili olmayan cam. Cam
+    /// konfigürasyonda `baseBackgroundColor` camın **tonu** oluyor; beyaz
+    /// verilince saydam kalıyor ve zemin değişmiş gibi görünmüyordu — seçili
+    /// çip bu yüzden cam değil dolu.
+    ///
+    /// Odakta/hover'da beyaza dönmeyi sistem kendisi yapıyor; koşulu, düğmenin
+    /// odağı **kendisinin** alması. Bir koleksiyon hücresinin içindeyse hücre
+    /// odaklanabilir olmamalı, yoksa odak düğmeye hiç gelmiyor ve düğme
+    /// tepkisiz görünüyor.
+    static func appChip(
+        isSelected: Bool,
+        horizontalInset: CGFloat = 24,
+        verticalInset: CGFloat = 12,
+        fontSize: CGFloat = 16
+    ) -> UIButton.Configuration {
+        guard isSelected else {
+            return .appGlass(
+                horizontalInset: horizontalInset,
+                verticalInset: verticalInset,
+                fontSize: fontSize
+            )
+        }
+
+        var config = UIButton.Configuration.filled()
+        config.cornerStyle = .capsule
+        config.baseBackgroundColor = .white
+        config.baseForegroundColor = .black
+        config.imagePadding = 8
+        config.contentInsets = .init(
+            top: verticalInset, leading: horizontalInset,
+            bottom: verticalInset, trailing: horizontalInset
+        )
+        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var outgoing = incoming
+            outgoing.font = .systemFont(ofSize: fontSize, weight: .semibold)
+            return outgoing
+        }
+        return config
+    }
 }
 
 #if os(tvOS)
@@ -82,12 +165,6 @@ extension UIButton.Configuration {
 extension UIView {
     /// Odak gölgesini bir kez kuruyor. Görünürlüğü `updateFocusAppearance`
     /// yönetiyor; burada yalnızca değişmeyen ayarlar var.
-    /// Odaktaki kartın kenarlık kalınlığı.
-    ///
-    /// Kart odakta büyüdüğü için kenarlık da onunla birlikte kalınlaşıyor;
-    /// ekranda 1pt görünmesi için değer ölçeğe bölünüyor.
-    static let focusedBorderWidth: CGFloat = 0.5
-
     func prepareFocusShadow() {
         layer.shadowColor = UIColor.black.cgColor
         layer.shadowOffset = CGSize(width: 0, height: 12)
@@ -208,21 +285,71 @@ enum Haptics {
 extension UIView {
     /// Yan yana duran cam butonları tek bir cam yüzeyde toplar; öğeler
     /// birbirine yaklaştıkça Apple'ın birleşme/ayrılma geçişi devreye giriyor.
-    ///
-    /// `UIGlassContainerEffect` yalnızca iOS'ta var. tvOS'ta içerik
-    /// sarmalanmadan olduğu gibi dönüyor: butonlar yine cam, yalnızca
-    /// birleşme animasyonu olmuyor.
     static func glassContainer(wrapping content: UIView, spacing: CGFloat) -> UIView {
-        #if os(iOS)
         let effect = UIGlassContainerEffect()
         effect.spacing = spacing
-        let container = UIVisualEffectView(effect: effect)
+        return wrap(content, in: UIVisualEffectView(effect: effect))
+    }
+
+    /// İçeriği cam bir yüzeyin üstüne oturtur. Kartlarda kullanılıyor:
+    /// kenarda kırılma ve parlama halkası oluşuyor, içerik olduğu gibi kalıyor.
+    /// Görselin **üstüne** konan cam katman.
+    ///
+    /// `glassSurface` malzemeyi içeriğin arkasına koyuyor; afiş gibi opak bir
+    /// içerik onu tamamen örtüyor ve cam görünmüyor. Bu katman ise içeriğin
+    /// üstünde duruyor, dolayısıyla malzeme afişi kırıyor: kenarlarda lens
+    /// etkisi ve parlama, ortada berrak.
+    ///
+    /// Stil `.clear`: `.regular` buzlu bir malzeme ve afişin tamamını
+    /// kapladığında görüntüyü tanınmaz hâle getiriyor. `.clear` tam da
+    /// görselin üstüne konmak için var — kırılmayı ve parlamayı veriyor ama
+    /// altındakini bulanıklaştırmıyor.
+    /// `intensity` malzemenin baskınlığı. `.clear` bile afişin üstünde hafif
+    /// bir yumuşama bırakıyor; kartlarda kısık tutulunca kırılma ve parlama
+    /// duruyor ama görüntü net kalıyor.
+    static func glassOverlay(
+        cornerRadius: CGFloat,
+        intensity: CGFloat = 1,
+        interactive: Bool = false
+    ) -> UIVisualEffectView {
+        let effect = UIGlassEffect(style: .clear)
+        effect.isInteractive = interactive
+
+        let overlay = UIVisualEffectView(effect: effect)
+        overlay.cornerConfiguration = .uniformCorners(radius: .fixed(cornerRadius))
+        overlay.alpha = intensity
+        overlay.isUserInteractionEnabled = false
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        return overlay
+    }
+
+    /// İçeriği cam bir yüzeyin **üstüne** oturtur: malzeme arkada kalıyor.
+    /// Afiş gibi opak bir içerikte cam görünmez, orada `glassOverlay` gerekiyor;
+    /// bu yüzey simge ve yazı gibi zeminin göründüğü içerikler için.
+    static func glassSurface(
+        wrapping content: UIView,
+        cornerRadius: CGFloat,
+        tint: UIColor? = nil,
+        interactive: Bool = true
+    ) -> UIVisualEffectView {
+        let effect = UIGlassEffect(style: .regular)
+        // Dokunma/odak anında camın "sıvı" tepkisi.
+        effect.isInteractive = interactive
+        effect.tintColor = tint
+
+        let surface = UIVisualEffectView(effect: effect)
+        surface.cornerConfiguration = .uniformCorners(radius: .fixed(cornerRadius))
+        return wrap(content, in: surface)
+    }
+
+    /// Kısıtlar `contentView`'e değil efekt görünümüne bağlanıyor:
+    /// `contentView` autoresizing ile boyutlandığı için ona pinlemek boyutu
+    /// yukarı taşımıyor ve kapsayıcı sıfıra çöküyor.
+    @discardableResult
+    private static func wrap(_ content: UIView, in container: UIVisualEffectView) -> UIVisualEffectView {
         container.translatesAutoresizingMaskIntoConstraints = false
         content.translatesAutoresizingMaskIntoConstraints = false
         container.contentView.addSubview(content)
-        // Kısıtlar `contentView`'e değil efekt görünümüne bağlanıyor:
-        // `contentView` autoresizing ile boyutlandığı için ona pinlemek
-        // boyutu yukarı taşımıyor ve kapsayıcı sıfıra çöküyor.
         NSLayoutConstraint.activate([
             content.topAnchor.constraint(equalTo: container.topAnchor),
             content.bottomAnchor.constraint(equalTo: container.bottomAnchor),
@@ -230,9 +357,6 @@ extension UIView {
             content.trailingAnchor.constraint(equalTo: container.trailingAnchor),
         ])
         return container
-        #else
-        return content
-        #endif
     }
 }
 

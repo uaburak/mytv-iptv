@@ -11,10 +11,12 @@ import UIKit
 ///
 /// | durum | yerleşim |
 /// |---|---|
-/// | oynatılmış, odak yok | `▶ ▬▬ Başlık` — küçük |
+/// | oynatılmış, odak yok | `▶ ▬▬ Başlık` |
 /// | oynatılmış, odakta | başlık kendi satırında; altında `▶ ▬▬▬▬ süre` |
-/// | başlanmamış, odak yok | yalnızca başlık — küçük, oynat işareti yok |
-/// | başlanmamış, odakta | yalnızca başlık — büyük |
+/// | başlanmamış, odak yok | yalnızca başlık, oynat işareti yok |
+/// | başlanmamış, odakta | yalnızca başlık |
+///
+/// Punto durumlar arasında değişmiyor; büyüme kartın ölçeğinden geliyor.
 final class CardOverlayView: UIView {
     private let blur = UIVisualEffectView(effect: nil)
     private let blurMask = CAGradientLayer()
@@ -146,7 +148,10 @@ final class CardOverlayView: UIView {
         // İki satırlı yerleşim yalnızca başlanmış içerik odaktayken.
         let wide = progress != nil && focused
 
-        let size = metrics.cardOverlayFontSize + (focused ? 2 : 0)
+        // Punto odakta artırılmıyor: kartın ölçek dönüşümü zaten içindeki her
+        // şeyi büyütüyor. Ayrıca punto eklemek metni kartın iki katı oranında
+        // büyütüyordu.
+        let size = metrics.cardOverlayFontSize
         titleLabel.font = .systemFont(ofSize: size, weight: .semibold)
         durationLabel.font = .systemFont(ofSize: size - 1, weight: .semibold)
         titleLabel.text = title

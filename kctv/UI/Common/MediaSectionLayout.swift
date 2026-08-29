@@ -50,6 +50,96 @@ enum MediaSectionLayout {
         )
     }
 
+    /// Dikey kaydırılan afiş ızgarası: satıra sığdığı kadar kart, kalanı alt
+    /// satıra. Kartlar arasındaki boşluk yatayda ve dikeyde **aynı**.
+    static func posterGrid(
+        kind: MediaKind,
+        containerWidth: CGFloat,
+        metrics: AppMetrics,
+        showsHeader: Bool = false
+    ) -> NSCollectionLayoutSection {
+        let spacing = gridSpacing(metrics: metrics)
+        let columns = gridColumns(kind: kind, containerWidth: containerWidth, metrics: metrics)
+        let itemWidth = gridItemWidth(kind: kind, containerWidth: containerWidth, metrics: metrics)
+        let itemHeight = itemWidth / kind.posterAspect
+
+        let item = NSCollectionLayoutItem(
+            layoutSize: NSCollectionLayoutSize(
+                widthDimension: .absolute(itemWidth),
+                heightDimension: .absolute(itemHeight)
+            )
+        )
+        let group = NSCollectionLayoutGroup.horizontal(
+            layoutSize: NSCollectionLayoutSize(
+                widthDimension: .fractionalWidth(1),
+                heightDimension: .absolute(itemHeight)
+            ),
+            repeatingSubitem: item,
+            count: columns
+        )
+        group.interItemSpacing = .fixed(spacing)
+
+        let section = NSCollectionLayoutSection(group: group)
+        // Dikey boşluk yatayla aynı: kartların arası her yönde eşit.
+        section.interGroupSpacing = spacing
+        section.contentInsets = NSDirectionalEdgeInsets(
+            top: metrics.rowHeaderGap * 0.5,
+            leading: metrics.screenPadding,
+            bottom: metrics.rowSpacing * 0.5,
+            trailing: metrics.screenPadding
+        )
+        if showsHeader {
+            section.boundarySupplementaryItems = [rowHeader(metrics: metrics)]
+        }
+        return section
+    }
+
+    /// Kartlar arasındaki boşluk. tvOS'ta ray aralığından biraz daha geniş:
+    /// odaklanan kart büyüyor, komşusuna yapışmamalı.
+    static func gridSpacing(metrics: AppMetrics) -> CGFloat {
+        #if os(tvOS)
+        metrics.cardSpacing * 1.25
+        #else
+        metrics.cardSpacing
+        #endif
+    }
+
+    /// Izgaranın sütun sayısı.
+    ///
+    /// tvOS'ta sabit: 10 feet mesafede satırda yedi afiş hem okunur kalıyor hem
+    /// de ekranın tamamını kullanıyor. iOS'ta kart raylardaki ölçüsüne yakın
+    /// kalacak şekilde satıra kaç tane sığıyorsa o kadar — iPhone'da üç sütun.
+    static func gridColumns(
+        kind: MediaKind,
+        containerWidth: CGFloat,
+        metrics: AppMetrics
+    ) -> Int {
+        #if os(tvOS)
+        // Yatay (16:9) kartlar iki kat geniş; onlarda yedi sütun okunmuyor.
+        return kind == .live ? 4 : 7
+        #else
+        let available = max(containerWidth - metrics.screenPadding * 2, 1)
+        let target = max(metrics.cardWidth(for: kind) + metrics.cardSpacing, 1)
+        let fitting = Int((available + metrics.cardSpacing) / target)
+        return min(max(fitting, kind == .live ? 2 : 3), 10)
+        #endif
+    }
+
+    /// Bir sütunun genişliği. Artan yer sütunlara paylaştırılıyor.
+    ///
+    /// Hücreyi kuran taraf **aynı** genişliği kullanmak zorunda: düzen güvenli
+    /// alan düşülmüş genişlikten, hücre `view.bounds.width`'ten hesaplayınca
+    /// afiş hücresinden taşıyor ve alt satırdaki kartın üstüne biniyordu.
+    static func gridItemWidth(
+        kind: MediaKind,
+        containerWidth: CGFloat,
+        metrics: AppMetrics
+    ) -> CGFloat {
+        let available = max(containerWidth - metrics.screenPadding * 2, 1)
+        let columns = CGFloat(gridColumns(kind: kind, containerWidth: containerWidth, metrics: metrics))
+        return max((available - gridSpacing(metrics: metrics) * (columns - 1)) / columns, 1)
+    }
+
     private static func row(
         cardSize: CGSize,
         metrics: AppMetrics,

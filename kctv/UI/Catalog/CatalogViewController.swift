@@ -7,6 +7,10 @@ final class CatalogViewController: UIViewController {
     private let model: AppModel
     private let kind: MediaKind
     private let initialCategoryID: String?
+    /// Verilmişse liste katalogdan değil bu diziden geliyor: arama ekranındaki
+    /// hazır kartlar ("Aksiyon Filmleri") birden çok kategoriyi birleştirdiği
+    /// için tek bir kategori kimliğiyle ifade edilemiyor.
+    private let fixedItems: [MediaItem]?
 
     private var selectedCategoryID: String?
     private var items: [MediaItem] = []
@@ -18,9 +22,15 @@ final class CatalogViewController: UIViewController {
     private static let pageSize = 120
     private static let categoryBarTopSpacing: CGFloat = 8
     private static let categoryBarBottomSpacing: CGFloat = 4
-
-    private static let gridColumns = 3
-    private static let gridSpacing: CGFloat = 12
+    /// tvOS'ta odaklanan kart büyüyor; ilk satır navigasyon çubuğunun altında
+    /// kırpılmasın diye içerik biraz daha aşağıdan başlıyor.
+    #if os(tvOS)
+    private static let contentTopPadding: CGFloat = 40
+    private static let contentBottomPadding: CGFloat = 60
+    #else
+    private static let contentTopPadding: CGFloat = 0
+    private static let contentBottomPadding: CGFloat = 0
+    #endif
 
     private let categoryBar = UIScrollView()
     private let categoryStack = UIStackView()
@@ -31,23 +41,50 @@ final class CatalogViewController: UIViewController {
     private var displayMode: CatalogItemCell.DisplayMode = .grid
     private var displayModeBarButton: UIBarButtonItem?
 
-    init(kind: MediaKind, model: AppModel, categoryID: String? = nil, title: String? = nil) {
+    init(
+        kind: MediaKind,
+        model: AppModel,
+        categoryID: String? = nil,
+        items: [MediaItem]? = nil,
+        title: String? = nil
+    ) {
         self.kind = kind
         self.model = model
         self.initialCategoryID = categoryID
         self.selectedCategoryID = categoryID
+        self.fixedItems = items
         super.init(nibName: nil, bundle: nil)
         self.title = title ?? kind.title
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// tvOS'ta başlık navigasyon çubuğunda sabit durmuyor: içerikle birlikte
+    /// kayan bir hero alanında duruyor. Alanın zemini sayfayla aynı renk,
+    /// dolayısıyla ayrı bir kutu gibi görünmüyor.
+    ///
+    /// Kategori şeridiyle açılan ekranda hero yok: şerit zaten tepede yüzüyor
+    /// ve başlık onun altından geçerdi.
+    private var showsHeroTitle: Bool {
+        #if os(tvOS)
+        initialCategoryID != nil || fixedItems != nil
+        #else
+        false
+        #endif
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = AppPalette.background
-        navigationItem.setPrefersLargeTitle(initialCategoryID == nil)
+        navigationItem.setPrefersLargeTitle(initialCategoryID == nil && fixedItems == nil)
+        if showsHeroTitle {
+            // Başlık hero alanında; çubukta ikinci kez yazmıyor.
+            navigationItem.title = ""
+        }
         buildLayout()
+        #if os(iOS)
         setupDisplayModeButton()
+        #endif
         reloadCategories()
         reloadItems()
 
@@ -72,11 +109,20 @@ final class CatalogViewController: UIViewController {
     }
 
     /// Kategori şeridi listenin üstünde yüzdüğü için liste onun kapladığı
-    /// kadar aşağıdan başlıyor. Navigation bar payını kaydırma görünümü zaten
-    /// güvenli alandan alıyor; buraya yalnızca şeridin payı ekleniyor.
+    /// kadar aşağıdan başlıyor. iOS'ta navigation bar payını kaydırma görünümü
+    /// zaten güvenli alandan alıyor, buraya yalnızca şeridin payı ekleniyor;
+    /// tvOS'ta güvenli alan ayarı kapalı olduğu için o pay da burada.
     private func updateCategoryBarInset() {
-        let inset = categoryBar.isHidden ? 0 : Self.categoryBarTopSpacing
+        let barInset = categoryBar.isHidden ? 0 : Self.categoryBarTopSpacing
             + categoryBar.bounds.height + Self.categoryBarBottomSpacing
+        // tvOS'ta yatay payı elle verdiğimiz için (`.never`) dikey pay da
+        // buradan geliyor: navigasyon çubuğu ve güvenli alan dahil.
+        #if os(tvOS)
+        let inset = view.safeAreaInsets.top + barInset + Self.contentTopPadding
+        collectionView.contentInset.bottom = view.safeAreaInsets.bottom + Self.contentBottomPadding
+        #else
+        let inset = barInset + Self.contentTopPadding
+        #endif
         guard collectionView.contentInset.top != inset else { return }
         collectionView.contentInset.top = inset
         collectionView.verticalScrollIndicatorInsets.top = inset
@@ -95,8 +141,19 @@ final class CatalogViewController: UIViewController {
         )
     }
 
-    // MARK: - Görünüm modu
+    #if os(tvOS)
+    /// Ekran açılınca odak ilk karta gidiyor; kategori şeridine yukarı basarak
+    /// dönülüyor. Odak varsayılan olarak şeride düşünce kullanıcı her seferinde
+    /// bir kez aşağı basmak zorunda kalıyordu.
+    override var preferredFocusEnvironments: [UIFocusEnvironment] {
+        guard let collectionView else { return super.preferredFocusEnvironments }
+        return [collectionView]
+    }
+    #endif
 
+    // MARK: - Görünüm modu (yalnızca iOS)
+
+    #if os(iOS)
     private func setupDisplayModeButton() {
         let item = UIBarButtonItem(
             image: displayModeImage,
@@ -148,14 +205,23 @@ final class CatalogViewController: UIViewController {
             }
         }
     }
+    #endif
 
-    /// Kart düzenindeki bir sütunun genişliği. Görsellerin indirme boyutu da
-    /// buradan geliyor: iki modda da kart ölçüsünde indiriliyor, böylece
+    /// Kartın ekranda kaplayacağı genişlik; görsellerin indirme boyutu da
+    /// buradan geliyor. Satır düzeninde de kart ölçüsünde indiriliyor, böylece
     /// görünüm değişince bulanık bir görselle kalınmıyor.
-    private static func gridItemWidth(containerWidth: CGFloat, metrics: AppMetrics) -> CGFloat {
-        let spacing = gridSpacing * CGFloat(gridColumns - 1)
-        let available = containerWidth - metrics.screenPadding * 2 - spacing
-        return max(available / CGFloat(gridColumns), 1)
+    private func gridItemWidth(metrics: AppMetrics) -> CGFloat {
+        MediaSectionLayout.gridItemWidth(
+            kind: kind, containerWidth: gridContentWidth, metrics: metrics
+        )
+    }
+
+    /// Düzenin kullandığı genişlik. `view.bounds.width` değil: kaydırma
+    /// görünümü güvenli alan kadar içeriden başlıyorsa düzen daha dar bir
+    /// alanla çalışıyor ve iki hesap birbirini tutmuyordu.
+    private var gridContentWidth: CGFloat {
+        let insets = collectionView.adjustedContentInset
+        return max(collectionView.bounds.width - insets.left - insets.right, 1)
     }
 
     private func makeCollectionLayout() -> UICollectionViewCompositionalLayout {
@@ -163,45 +229,41 @@ final class CatalogViewController: UIViewController {
             guard let self else { return nil }
             let width = environment.container.effectiveContentSize.width
             let metrics = AppMetrics.metrics(for: width)
-            return displayMode == .grid
-                ? Self.gridSection(containerWidth: width, kind: kind, metrics: metrics)
-                : Self.listSection(metrics: metrics)
+            // Izgara anasayfa ve arama ekranıyla ortak: sütun sayısı ekrandan
+            // çıkıyor, sabit üç sütun tvOS'ta devasa kartlar üretiyordu.
+            let grid = MediaSectionLayout.posterGrid(
+                kind: kind, containerWidth: width, metrics: metrics
+            )
+            #if os(tvOS)
+            // tvOS'ta liste düzeni yok: kumandayla gezilen bir ekranda afiş
+            // ızgarası hem daha okunur hem de odak hareketi doğal.
+            if showsHeroTitle {
+                grid.boundarySupplementaryItems = [Self.heroHeader(metrics: metrics)]
+            }
+            return grid
+            #else
+            return displayMode == .grid ? grid : Self.listSection(metrics: metrics)
+            #endif
         }
     }
 
-    private static func gridSection(
-        containerWidth: CGFloat,
-        kind: MediaKind,
-        metrics: AppMetrics
-    ) -> NSCollectionLayoutSection {
-        let itemWidth = gridItemWidth(containerWidth: containerWidth, metrics: metrics)
-        // Kartta yalnızca afiş var; yükseklik tamamen afişin oranı.
-        let itemHeight = itemWidth / kind.posterAspect
-
-        let item = NSCollectionLayoutItem(
-            layoutSize: NSCollectionLayoutSize(
-                widthDimension: .absolute(itemWidth),
-                heightDimension: .absolute(itemHeight)
-            )
-        )
-        let group = NSCollectionLayoutGroup.horizontal(
+    /// Kayan başlık alanı. Bölümün kendi girintisini paylaştığı için başlık
+    /// ilk satırdaki kartla aynı hizada başlıyor.
+    private static func heroHeader(metrics: AppMetrics) -> NSCollectionLayoutBoundarySupplementaryItem {
+        let header = NSCollectionLayoutBoundarySupplementaryItem(
             layoutSize: NSCollectionLayoutSize(
                 widthDimension: .fractionalWidth(1),
-                heightDimension: .absolute(itemHeight)
+                heightDimension: .absolute(metrics.titleFont.lineHeight + 72)
             ),
-            repeatingSubitem: item,
-            count: gridColumns
+            elementKind: UICollectionView.elementKindSectionHeader,
+            alignment: .top
         )
-        group.interItemSpacing = .fixed(gridSpacing)
-
-        let section = NSCollectionLayoutSection(group: group)
-        section.interGroupSpacing = 18
-        section.contentInsets = NSDirectionalEdgeInsets(
-            top: 8, leading: metrics.screenPadding, bottom: 24, trailing: metrics.screenPadding
-        )
-        return section
+        header.contentInsets = .zero
+        return header
     }
 
+    /// Satır düzeni yalnızca iOS'ta; tvOS'ta ızgaradan başka görünüm yok.
+    #if os(iOS)
     private static func listSection(metrics: AppMetrics) -> NSCollectionLayoutSection {
         let itemHeight = metrics.posterWidth * 0.62 + 20
         let size = NSCollectionLayoutSize(
@@ -214,6 +276,7 @@ final class CatalogViewController: UIViewController {
         section.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: 24, trailing: 0)
         return section
     }
+    #endif
 
     private func buildLayout() {
         categoryStack.axis = .horizontal
@@ -230,7 +293,23 @@ final class CatalogViewController: UIViewController {
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.register(CatalogItemCell.self, forCellWithReuseIdentifier: CatalogItemCell.reuseID)
+        collectionView.register(PosterCell.self, forCellWithReuseIdentifier: PosterCell.reuseID)
         collectionView.applyNativeScrollEdges()
+        collectionView.register(
+            CatalogHeroHeaderView.self,
+            forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader,
+            withReuseIdentifier: CatalogHeroHeaderView.reuseID
+        )
+        #if os(tvOS)
+        // Detaydan dönünce odak bırakılan kartta kalıyor.
+        collectionView.remembersLastFocusedIndexPath = true
+        // Güvenli alan payı kendiliğinden eklenince ızgara detay ekranından
+        // daha içeriden başlıyordu: bölümün kendi girintisi (`screenPadding`)
+        // güvenli alanın üstüne biniyor ve yan boşluk iki katına çıkıyordu.
+        // Pay bu yüzden elle veriliyor; yatayda yalnızca `screenPadding` kalıyor
+        // ve ekran detayla aynı hizada başlıyor.
+        collectionView.contentInsetAdjustmentBehavior = .never
+        #endif
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(collectionView)
 
@@ -279,7 +358,7 @@ final class CatalogViewController: UIViewController {
     // MARK: - Veri
 
     @objc private func libraryDidChange() {
-        if initialCategoryID == nil {
+        if initialCategoryID == nil, fixedItems == nil {
             title = kind.title
         }
         reloadCategories()
@@ -289,8 +368,9 @@ final class CatalogViewController: UIViewController {
     private func reloadCategories() {
         categoryStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
-        // Belirli bir kategoriyle açıldıysa filtre şeridi anlamsız.
-        guard initialCategoryID == nil else {
+        // Belirli bir kategoriyle ya da hazır bir listeyle açıldıysa filtre
+        // şeridi anlamsız.
+        guard initialCategoryID == nil, fixedItems == nil else {
             categoryBar.isHidden = true
             return
         }
@@ -310,15 +390,22 @@ final class CatalogViewController: UIViewController {
     }
 
     private func makeChip(title: String, id: String?) -> UIButton {
-        // Çipler artık kayan içeriğin üstünde yüzüyor; cam malzeme hem
-        // altındakini okunur bırakıyor hem de listeden ayrışmasını sağlıyor.
-        var configuration = UIButton.Configuration.appGlass(
+        // Çipler kayan içeriğin üstünde yüzüyor; cam malzeme hem altındakini
+        // okunur bırakıyor hem de listeden ayrışmasını sağlıyor. Stil arama
+        // ekranındaki süzgeç ve detaydaki sezon çipleriyle ortak: seçili olan
+        // beyaz zemin + siyah metin.
+        #if os(tvOS)
+        var configuration = UIButton.Configuration.appChip(
+            isSelected: selectedCategoryID == id,
+            horizontalInset: 34, verticalInset: 18, fontSize: 26
+        )
+        #else
+        var configuration = UIButton.Configuration.appChip(
+            isSelected: selectedCategoryID == id,
             horizontalInset: 16, verticalInset: 8, fontSize: 14
         )
+        #endif
         configuration.title = title
-        if selectedCategoryID == id {
-            configuration.baseBackgroundColor = AppPalette.accent
-        }
 
         let button = UIButton(configuration: configuration)
         button.addSpringPressFeedback(scale: 0.93)
@@ -333,7 +420,7 @@ final class CatalogViewController: UIViewController {
     }
 
     private func reloadItems() {
-        items = model.library.items(kind: kind, categoryID: selectedCategoryID)
+        items = fixedItems ?? model.library.items(kind: kind, categoryID: selectedCategoryID)
         collectionView.reloadData()
         // Kategoride içerik yoksa ekran tamamen boş kalmasın.
         emptyLabel.isHidden = !items.isEmpty
@@ -353,21 +440,54 @@ extension CatalogViewController: UICollectionViewDataSource, UICollectionViewDel
         _ collectionView: UICollectionView,
         cellForItemAt indexPath: IndexPath
     ) -> UICollectionViewCell {
+        let item = items[indexPath.item]
+        let metrics = AppMetrics.metrics(for: view.bounds.width)
+
+        #if os(tvOS)
+        // Anasayfa ve gezinme ekranlarındaki kartın aynısı: odaklanınca büyüyor
+        // ve başlık şeridi açılıyor. Kumandayla gezerken hangi içeriğin üstünde
+        // olduğunu ancak bu şerit gösteriyor — afişin tek başına yeterli
+        // olmadığı en çok bu ekranda görülüyor.
+        let cell = collectionView.dequeueReusableCell(
+            withReuseIdentifier: PosterCell.reuseID, for: indexPath
+        ) as! PosterCell
+        cell.configure(
+            item: item,
+            metrics: metrics,
+            progress: model.activity.progress(for: item.id),
+            cardWidth: gridItemWidth(metrics: metrics)
+        )
+        return cell
+        #else
         let cell = collectionView.dequeueReusableCell(
             withReuseIdentifier: CatalogItemCell.reuseID, for: indexPath
         ) as! CatalogItemCell
-        let item = items[indexPath.item]
-        let metrics = AppMetrics.metrics(for: view.bounds.width)
         cell.configure(
             item: item,
             metrics: metrics,
             mode: displayMode,
-            imageWidth: Self.gridItemWidth(containerWidth: view.bounds.width, metrics: metrics),
+            imageWidth: gridItemWidth(metrics: metrics),
             isFavorite: model.activity.isFavorite(item)
         )
         cell.onPlay = { [weak self] in Task { await self?.model.play(item) } }
         cell.onToggleFavorite = { [weak self] in self?.model.activity.toggleFavorite(item) }
         return cell
+        #endif
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        viewForSupplementaryElementOfKind kind: String,
+        at indexPath: IndexPath
+    ) -> UICollectionReusableView {
+        let header = collectionView.dequeueReusableSupplementaryView(
+            ofKind: kind, withReuseIdentifier: CatalogHeroHeaderView.reuseID, for: indexPath
+        ) as! CatalogHeroHeaderView
+        header.configure(
+            title: title ?? "",
+            font: AppMetrics.metrics(for: view.bounds.width).titleFont
+        )
+        return header
     }
 
     /// Sona yaklaşınca bir sayfa daha açar.
@@ -403,12 +523,51 @@ extension CatalogViewController: UICollectionViewDataSource, UICollectionViewDel
             Task { await model.play(item) }
             return
         }
+        let controller = DetailViewController(item: item, model: model)
+        #if os(iOS)
         // Satır düzeninde afiş gizli ve çerçevesi yok; geçiş hücrenin
         // kendisinden başlıyor.
         let cell = collectionView.cellForItem(at: indexPath) as? CatalogItemCell
-        let sourceView = displayMode == .grid ? cell?.artworkView : cell
-        let controller = DetailViewController(item: item, model: model)
-        controller.applyZoomTransition(from: sourceView)
+        controller.applyZoomTransition(from: displayMode == .grid ? cell?.artworkView : cell)
+        #endif
         navigationController?.pushViewController(controller, animated: true)
+    }
+}
+
+/// Liste ekranının kayan başlığı.
+///
+/// tvOS'ta başlık navigasyon çubuğunda sabit durmuyor: 10 feet mesafede ince
+/// bir çubuk yazısı hem okunmuyor hem de ekranın üstünü sürekli işgal ediyor.
+/// Başlık bunun yerine içerikle birlikte kayan bu alanda; zemini sayfanınkiyle
+/// aynı olduğu için ayrı bir kutu gibi durmuyor, yalnızca yazı görünüyor.
+final class CatalogHeroHeaderView: UICollectionReusableView {
+    static let reuseID = "CatalogHeroHeaderView"
+
+    private let titleLabel = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+
+        titleLabel.textColor = AppPalette.primaryText
+        titleLabel.numberOfLines = 2
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(titleLabel)
+
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
+            // Yazı alta yaslı: üstte navigasyon çubuğuyla arayı açan bir boşluk
+            // kalıyor, altta da ilk kart satırıyla ölçülü bir aralık.
+            titleLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -28),
+            titleLabel.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(title: String, font: UIFont) {
+        titleLabel.text = title
+        titleLabel.font = font
     }
 }
