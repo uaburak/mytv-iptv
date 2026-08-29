@@ -124,8 +124,7 @@ extension FavoritesViewController: UITableViewDataSource, UITableViewDelegate {
         trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath
     ) -> UISwipeActionsConfiguration? {
         let item = items[indexPath.row]
-        let removeTitle = AppLanguage.current.effectiveLanguageCode == "tr" ? "Çıkar" : "Remove"
-        let remove = UIContextualAction(style: .destructive, title: removeTitle) { [weak self] _, _, done in
+        let remove = UIContextualAction(style: .destructive, title: L10n.remove) { [weak self] _, _, done in
             self?.model.activity.toggleFavorite(item)
             done(true)
         }

@@ -73,13 +73,13 @@ final class KindBrowseViewController: UIViewController {
             target: nil,
             action: nil
         )
-        item.accessibilityLabel = AppLanguage.current.effectiveLanguageCode == "tr" ? "Kategori filtresi" : "Category filter"
+        item.accessibilityLabel = L10n.categoryFilter
         item.menu = makeFilterMenu()
         navigationItem.rightBarButtonItem = item
     }
 
     private func makeFilterMenu() -> UIMenu {
-        let allTitle = AppLanguage.current.effectiveLanguageCode == "tr" ? "Tümü" : "All"
+        let allTitle = L10n.allKinds
         var actions: [UIAction] = [
             UIAction(title: allTitle, state: filterCategoryID == nil ? .on : .off) { [weak self] _ in
                 self?.applyFilter(nil)

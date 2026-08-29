@@ -382,7 +382,7 @@ final class CatalogViewController: UIViewController {
         }
         categoryBar.isHidden = false
 
-        let allTitle = AppLanguage.current.effectiveLanguageCode == "tr" ? "Tümü" : "All"
+        let allTitle = L10n.allKinds
         categoryStack.addArrangedSubview(makeChip(title: allTitle, id: nil))
         for category in categories {
             categoryStack.addArrangedSubview(makeChip(title: category.name, id: category.id))

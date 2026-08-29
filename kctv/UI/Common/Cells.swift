@@ -127,6 +127,13 @@ final class PosterCell: UICollectionViewCell {
         height.isActive = true
         artworkHeight = height
 
+        // Kart tek bir erişilebilirlik öğesi: içinde okunacak bir alt görünüm
+        // yok, başlık yalnızca kaplamada ve o da her zaman görünmüyor.
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+        accessibilityLabel = item.accessibilityDescription
+        accessibilityValue = progress.map { L10n.watchedPercent(Int(($0.fraction * 100).rounded())) }
+
         applyOverlay()
     }
 
@@ -234,8 +241,14 @@ final class MainCardCell: UICollectionViewCell {
         titleLabel.font = metrics.mainCardTitleFont
         countLabel.font = metrics.mainCardCountFont
         titleLabel.text = kind.title
-        countLabel.text = count > 0 ? "\(count.formatted()) içerik" : nil
+        countLabel.text = count > 0 ? L10n.itemCount(count) : nil
         symbolView.image = UIImage(systemName: kind.symbol)
+
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+        accessibilityLabel = [titleLabel.text, countLabel.text]
+            .compactMap { $0 }
+            .joined(separator: ", ")
 
         // Tür rengi camın tonu; ton saydam veriliyor ki malzeme kaybolmasın.
         let tint = AppPalette.mainCardColors(for: kind).first?.withAlphaComponent(0.55)

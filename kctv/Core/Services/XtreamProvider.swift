@@ -33,7 +33,7 @@ actor XtreamProvider: ContentProvider {
 
     init(host: String, username: String, password: String, sourceID: String) throws {
         guard let baseURL = Self.normalizedBaseURL(from: host) else {
-            throw ContentError.network("Sunucu adresi geçersiz: \(host)")
+            throw ContentError.network(L10n.errorInvalidHost(host))
         }
         self.baseURL = baseURL
         self.username = username
@@ -77,7 +77,7 @@ actor XtreamProvider: ContentProvider {
 
     private func apiURL(action: String?, extra: [String: String] = [:]) throws -> URL {
         guard var components = URLComponents(url: baseURL.appendingPathComponent("player_api.php"), resolvingAgainstBaseURL: false) else {
-            throw ContentError.network("İstek adresi oluşturulamadı.")
+            throw ContentError.network(L10n.errorBadRequestURL)
         }
         var items = [
             URLQueryItem(name: "username", value: username),
@@ -86,7 +86,7 @@ actor XtreamProvider: ContentProvider {
         if let action { items.append(URLQueryItem(name: "action", value: action)) }
         items.append(contentsOf: extra.map { URLQueryItem(name: $0.key, value: $0.value) })
         components.queryItems = items
-        guard let url = components.url else { throw ContentError.network("İstek adresi oluşturulamadı.") }
+        guard let url = components.url else { throw ContentError.network(L10n.errorBadRequestURL) }
         return url
     }
 
@@ -269,7 +269,7 @@ actor XtreamProvider: ContentProvider {
             plot: dto.plot,
             durationSeconds: dto.episodeRunTime.map { $0 * 60 },
             addedAt: LooseParse.date(dto.added ?? dto.lastModified),
-            isAdult: Self.looksAdult(name),
+            isAdult: AdultContentFilter.looksAdult(name),
             streamReference: reference,
             containerExtension: dto.containerExtension,
             channelNumber: kind == .live ? dto.num : nil,
@@ -415,7 +415,7 @@ actor XtreamProvider: ContentProvider {
     /// Sağlayıcılar bölüm adını "Dizi Adı - S01E01 - 1. Bölüm" gibi gönderiyor.
     /// Sezon/bölüm bilgisi arayüzde ayrıca gösterildiği için öneki atıyoruz.
     nonisolated static func cleanEpisodeTitle(_ raw: String?, episodeNumber: Int) -> String {
-        let fallback = "\(episodeNumber). Bölüm"
+        let fallback = L10n.episodeName(episodeNumber)
         guard var text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
             return fallback
         }
@@ -445,11 +445,6 @@ actor XtreamProvider: ContentProvider {
         guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
         if raw.lowercased().hasPrefix("http") { return URL(string: raw) }
         return URL(string: "https://www.youtube.com/watch?v=\(raw)")
-    }
-
-    private nonisolated static func looksAdult(_ name: String) -> Bool {
-        let lowered = name.lowercased()
-        return ["xxx", "adult", "+18", "18+", "erotik"].contains { lowered.contains($0) }
     }
 
     private nonisolated static let epgFormatter: DateFormatter = {

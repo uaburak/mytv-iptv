@@ -118,7 +118,7 @@ final class HomeViewController: UIViewController {
             target: self,
             action: #selector(openSettings)
         )
-        item.accessibilityLabel = "Hesap ve ayarlar"
+        item.accessibilityLabel = L10n.accountAndSettings
         navigationItem.rightBarButtonItem = item
     }
     #endif

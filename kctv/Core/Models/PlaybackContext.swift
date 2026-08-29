@@ -55,9 +55,7 @@ struct PlaybackProgress: Identifiable, Hashable, Codable, Sendable {
     var isFinished: Bool { fraction >= 0.95 }
 
     var remainingText: String {
-        let remaining = max(0, durationSeconds - positionSeconds)
-        let hours = Int(remaining) / 3600
-        let minutes = (Int(remaining) % 3600) / 60
-        return hours > 0 ? "\(hours) sa. \(minutes) dk." : "\(minutes) dk."
+        let remaining = Int(max(0, durationSeconds - positionSeconds))
+        return L10n.duration(hours: remaining / 3600, minutes: (remaining % 3600) / 60)
     }
 }

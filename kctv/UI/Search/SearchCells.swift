@@ -197,6 +197,10 @@ final class SearchSuggestionCell: UICollectionViewCell {
             titleLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -padding),
         ]
         NSLayoutConstraint.activate(titleConstraints)
+
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+        accessibilityLabel = suggestion.title
     }
 }
 

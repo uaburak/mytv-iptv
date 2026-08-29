@@ -17,11 +17,11 @@ final class AddPlaylistViewController: UIViewController {
     private let stack = UIStackView()
     private let modePicker = UISegmentedControl(items: ["Xtream Codes", "M3U / M3U8"])
 
-    private let nameField = LabeledTextField(label: L10n.playlistName, placeholder: AppLanguage.current.effectiveLanguageCode == "tr" ? "Örn. Ev Listesi" : "e.g. Home Playlist")
+    private let nameField = LabeledTextField(label: L10n.playlistName, placeholder: L10n.playlistNamePlaceholder)
     private let hostField = LabeledTextField(label: L10n.serverURL, placeholder: "http://example.com:8080", isURL: true)
-    private let usernameField = LabeledTextField(label: L10n.username, placeholder: AppLanguage.current.effectiveLanguageCode == "tr" ? "kullanıcı" : "username")
+    private let usernameField = LabeledTextField(label: L10n.username, placeholder: L10n.usernamePlaceholder)
     private let passwordField = LabeledTextField(label: L10n.password, placeholder: "", isSecure: true)
-    private let urlField = LabeledTextField(label: AppLanguage.current.effectiveLanguageCode == "tr" ? "M3U Bağlantısı" : "M3U URL", placeholder: "http://.../get.php?...", isURL: true)
+    private let urlField = LabeledTextField(label: L10n.m3uURLLabel, placeholder: "http://.../get.php?...", isURL: true)
 
     private let statusLabel = UILabel()
     private let connectButton = UIButton(configuration: .filled())
@@ -38,8 +38,7 @@ final class AddPlaylistViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = AppPalette.background
-        let isTR = AppLanguage.current.effectiveLanguageCode == "tr"
-        title = editingPlaylist == nil ? (isTR ? "Liste Ekle" : "Add Playlist") : (isTR ? "Listeyi Düzenle" : "Edit Playlist")
+        title = editingPlaylist == nil ? L10n.addPlaylistTitle : L10n.editPlaylistTitle
         // `.close` sistem öğesi tvOS'ta yok; orada Menu tuşu kapatıyor.
         #if os(iOS)
         navigationItem.rightBarButtonItem = UIBarButtonItem(
@@ -84,17 +83,14 @@ final class AddPlaylistViewController: UIViewController {
         statusLabel.isHidden = true
 
         var configuration = UIButton.Configuration.filled()
-        let isTR = AppLanguage.current.effectiveLanguageCode == "tr"
-        configuration.title = editingPlaylist == nil ? (isTR ? "Bağlan ve Kaydet" : "Connect & Save") : L10n.save
+        configuration.title = editingPlaylist == nil ? L10n.connectAndSave : L10n.save
         configuration.cornerStyle = .capsule
         connectButton.configuration = configuration
         connectButton.addTarget(self, action: #selector(validateAndSave), for: .primaryActionTriggered)
         connectButton.heightAnchor.constraint(equalToConstant: 50).isActive = true
 
         let note = UILabel()
-        note.text = isTR
-            ? "Şifren yalnızca bu cihazın Keychain'inde saklanır, buluta gönderilmez. Liste adı ve sunucu bilgisi hesabına senkronlanır."
-            : "Your password is only stored in device Keychain and never sent to cloud. Playlist name and server are synced to your account."
+        note.text = L10n.keychainNote
         note.font = .systemFont(ofSize: 13)
         note.textColor = AppPalette.secondaryText
         note.numberOfLines = 0
@@ -206,8 +202,7 @@ final class AddPlaylistViewController: UIViewController {
     }
 
     private func setBusy(_ isBusy: Bool) {
-        let isTR = AppLanguage.current.effectiveLanguageCode == "tr"
-        let idleTitle = editingPlaylist == nil ? (isTR ? "Bağlan ve Kaydet" : "Connect & Save") : L10n.save
+        let idleTitle = editingPlaylist == nil ? L10n.connectAndSave : L10n.save
         connectButton.configuration?.title = isBusy ? "" : idleTitle
         connectButton.isEnabled = !isBusy
         isBusy ? spinner.startAnimating() : spinner.stopAnimating()

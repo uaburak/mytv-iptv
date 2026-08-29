@@ -115,14 +115,13 @@ final class PlaylistsViewController: UIViewController {
         else { return }
 
         let playlist = model.playlists.playlists[indexPath.row]
-        let isTR = AppLanguage.current.effectiveLanguageCode == "tr"
 
         let sheet = UIAlertController(title: playlist.name, message: nil, preferredStyle: .actionSheet)
-        sheet.addAction(UIAlertAction(title: isTR ? "Düzenle" : "Edit", style: .default) { [weak self] _ in
+        sheet.addAction(UIAlertAction(title: L10n.edit, style: .default) { [weak self] _ in
             guard let self else { return }
             edit(playlist)
         })
-        sheet.addAction(UIAlertAction(title: isTR ? "Sil" : "Delete", style: .destructive) { [weak self] _ in
+        sheet.addAction(UIAlertAction(title: L10n.delete, style: .destructive) { [weak self] _ in
             guard let self else { return }
             Task {
                 await self.model.removePlaylist(playlist)
@@ -235,9 +234,8 @@ extension PlaylistsViewController: UITableViewDataSource, UITableViewDelegate {
         trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath
     ) -> UISwipeActionsConfiguration? {
         let playlist = model.playlists.playlists[indexPath.row]
-        let isTR = AppLanguage.current.effectiveLanguageCode == "tr"
 
-        let delete = UIContextualAction(style: .destructive, title: isTR ? "Sil" : "Delete") { [weak self] _, _, done in
+        let delete = UIContextualAction(style: .destructive, title: L10n.delete) { [weak self] _, _, done in
             guard let self else { return done(false) }
             Task {
                 await self.model.removePlaylist(playlist)
@@ -245,7 +243,7 @@ extension PlaylistsViewController: UITableViewDataSource, UITableViewDelegate {
             }
             done(true)
         }
-        let edit = UIContextualAction(style: .normal, title: isTR ? "Düzenle" : "Edit") { [weak self] _, _, done in
+        let edit = UIContextualAction(style: .normal, title: L10n.edit) { [weak self] _, _, done in
             self?.edit(playlist)
             done(true)
         }

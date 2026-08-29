@@ -8,22 +8,33 @@ enum AppLanguage: String, CaseIterable, Sendable {
 
     private static let userDefaultsKey = "app_language_preference"
 
+    /// Çözülmüş tercih. `L10n`'deki her metin bunu okuyor ve bazıları hücre
+    /// döngüsünün içinde çağrılıyor; her seferinde `UserDefaults`'a gitmemek
+    /// için bir kez çözülüp saklanıyor. Yalnızca ayarlardan değişebildiği
+    /// için geçersiz kılma noktası tek: aşağıdaki `set`.
+    nonisolated(unsafe) private static var cachedCurrent: AppLanguage?
+
     /// Kullanıcının seçtiği ya da varsayılan dil tercihi.
     static var current: AppLanguage {
         get {
-            guard let raw = UserDefaults.standard.string(forKey: userDefaultsKey),
-                  let lang = AppLanguage(rawValue: raw) else {
-                return .system
-            }
-            return lang
+            if let cachedCurrent { return cachedCurrent }
+            let resolved = UserDefaults.standard.string(forKey: userDefaultsKey)
+                .flatMap(AppLanguage.init(rawValue:)) ?? .system
+            cachedCurrent = resolved
+            return resolved
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: userDefaultsKey)
+            cachedCurrent = newValue
             NotificationCenter.default.post(name: .appLanguageDidChange, object: nil)
         }
     }
 
     /// Cihaz diline veya seçime göre aktif olan dil kodu ("tr" veya "en").
+    ///
+    /// Türkçe dışındaki her cihaz dili İngilizce'ye düşüyor: uygulamanın iki
+    /// dili var ve bir Alman kullanıcıya Türkçe göstermek, İngilizce
+    /// göstermekten kötü.
     var effectiveLanguageCode: String {
         switch self {
         case .turkish:
@@ -31,8 +42,8 @@ enum AppLanguage: String, CaseIterable, Sendable {
         case .english:
             return "en"
         case .system:
-            let preferred = Locale.preferredLanguages.first?.lowercased() ?? "tr"
-            return preferred.starts(with: "en") ? "en" : "tr"
+            let preferred = Locale.preferredLanguages.first?.lowercased() ?? "en"
+            return preferred.hasPrefix("tr") ? "tr" : "en"
         }
     }
 
@@ -188,4 +199,109 @@ enum L10n {
     static func seasonName(_ number: Int) -> String {
         isTurkish ? "\(number). Sezon" : "Season \(number)"
     }
+
+    static func episodeName(_ number: Int) -> String {
+        isTurkish ? "\(number). Bölüm" : "Episode \(number)"
+    }
+
+    /// Kart ve oynatıcı üstündeki kısa sezon/bölüm rozeti.
+    static func episodeBadge(season: Int, episode: Int) -> String {
+        isTurkish ? "S\(season):B\(episode)" : "S\(season):E\(episode)"
+    }
+
+    /// Süre etiketi. Türkçe "1sa 40d", İngilizce "1h 40m".
+    static func duration(hours: Int, minutes: Int) -> String {
+        if hours > 0 {
+            return isTurkish ? "\(hours)sa \(minutes)d" : "\(hours)h \(minutes)m"
+        }
+        return isTurkish ? "\(minutes)d" : "\(minutes)m"
+    }
+
+    // MARK: - Sağlayıcı hataları
+
+    static var errorInvalidCredentials: String {
+        isTurkish ? "Kullanıcı adı veya şifre hatalı." : "Incorrect username or password."
+    }
+    static var errorAccountExpired: String {
+        isTurkish ? "Hesabın süresi dolmuş." : "This account has expired."
+    }
+    static func errorBadResponse(status: Int) -> String {
+        isTurkish ? "Sunucu \(status) döndürdü." : "Server returned \(status)."
+    }
+    static var errorEmptyPlaylist: String {
+        isTurkish ? "Listede oynatılabilir içerik bulunamadı." : "No playable content in this playlist."
+    }
+    static func errorUnsupported(_ what: String) -> String {
+        isTurkish ? "Desteklenmeyen içerik: \(what)" : "Unsupported content: \(what)"
+    }
+    static func errorInvalidHost(_ host: String) -> String {
+        isTurkish ? "Sunucu adresi geçersiz: \(host)" : "Invalid server address: \(host)"
+    }
+    static var errorBadRequestURL: String {
+        isTurkish ? "İstek adresi oluşturulamadı." : "Couldn't build the request URL."
+    }
+    static var errorPlaylistUnreadable: String {
+        isTurkish ? "Playlist okunamadı." : "Couldn't read the playlist."
+    }
+    static var errorNoWindow: String {
+        isTurkish ? "Görünüm penceresi bulunamadı." : "No presenting window found."
+    }
+    static var errorGoogleCredential: String {
+        isTurkish ? "Google kimlik bilgisi alınamadı." : "Couldn't obtain Google credentials."
+    }
+    static var errorAppleResponse: String {
+        isTurkish ? "Apple kimlik doğrulama yanıtı okunamadı." : "Couldn't read the Apple sign-in response."
+    }
+
+    // MARK: - Anasayfa rayları & kategoriler
+
+    static func itemCount(_ count: Int) -> String {
+        isTurkish ? "\(count.formatted()) içerik" : "\(count.formatted()) items"
+    }
+    static var newMovies: String { isTurkish ? "Yeni Eklenen Filmler" : "Recently Added Movies" }
+    static var newSeries: String { isTurkish ? "Yeni Diziler" : "New Series" }
+    static var otherCategory: String { isTurkish ? "Diğer" : "Other" }
+
+    // MARK: - Oynatıcı
+
+    static var liveBadge: String { isTurkish ? "CANLI" : "LIVE" }
+    static var aspectStretch: String { isTurkish ? "Tam Ekran (Uzat)" : "Stretch (16:9)" }
+
+    // MARK: - Listeler & form
+
+    static var addPlaylistTitle: String { isTurkish ? "Liste Ekle" : "Add Playlist" }
+    static var editPlaylistTitle: String { isTurkish ? "Listeyi Düzenle" : "Edit Playlist" }
+    static var connectAndSave: String { isTurkish ? "Bağlan ve Kaydet" : "Connect & Save" }
+    static var edit: String { isTurkish ? "Düzenle" : "Edit" }
+    static var delete: String { isTurkish ? "Sil" : "Delete" }
+    static var remove: String { isTurkish ? "Çıkar" : "Remove" }
+    static var playlistNamePlaceholder: String { isTurkish ? "Örn. Ev Listesi" : "e.g. Home Playlist" }
+    static var usernamePlaceholder: String { isTurkish ? "kullanıcı" : "username" }
+    static var m3uURLLabel: String { isTurkish ? "M3U Bağlantısı" : "M3U URL" }
+    static var keychainNote: String {
+        isTurkish
+            ? "Şifren yalnızca bu cihazın Keychain'inde saklanır, buluta gönderilmez. Liste adı ve sunucu bilgisi hesabına senkronlanır."
+            : "Your password is only stored in this device's Keychain and never sent to the cloud. Playlist name and server are synced to your account."
+    }
+
+    // MARK: - İçerik süzgeci
+
+    static var hideAdultContent: String { isTurkish ? "Yetişkin İçeriği Gizle" : "Hide Adult Content" }
+    static var hideAdultContentNote: String {
+        isTurkish
+            ? "Adında ya da kategorisinde yetişkin içerik işareti olan yayınlar listelerde, aramada ve anasayfada gösterilmez."
+            : "Streams flagged as adult by name or category are hidden from lists, search and the home screen."
+    }
+
+    // MARK: - Erişilebilirlik
+
+    /// Kartın `accessibilityValue`'su: afişte görünen ilerleme çubuğunun
+    /// VoiceOver karşılığı.
+    static func watchedPercent(_ percent: Int) -> String {
+        isTurkish ? "%\(percent) izlendi" : "\(percent)% watched"
+    }
+
+    static var accountAndSettings: String { isTurkish ? "Hesap ve ayarlar" : "Account and settings" }
+    static var categoryFilter: String { isTurkish ? "Kategori filtresi" : "Category filter" }
+    static var favoriteAction: String { isTurkish ? "Favori" : "Favorite" }
 }

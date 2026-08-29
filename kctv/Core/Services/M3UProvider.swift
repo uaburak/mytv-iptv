@@ -25,6 +25,16 @@ actor M3UProvider: ContentProvider {
         self.session = URLSession(configuration: configuration)
     }
 
+    /// Bir sonraki istekte liste yeniden indirilsin. Bu olmadan `isLoaded`
+    /// hiçbir zaman düşmüyor ve "yenile" aynı anlık görüntüyü diske geri
+    /// yazmaktan ibaret kalıyor.
+    func invalidate() async {
+        isLoaded = false
+        itemsByKind = [:]
+        categoriesByKind = [:]
+        episodesBySeries = [:]
+    }
+
     func validate() async throws -> ProviderAccount {
         try await load()
         guard itemsByKind.values.contains(where: { !$0.isEmpty }) else { throw ContentError.emptyPlaylist }
@@ -92,7 +102,7 @@ actor M3UProvider: ContentProvider {
             }
             // Bazı sağlayıcılar Latin-1 döndürüyor; UTF-8 çözülemezse ona düşüyoruz.
             guard let decoded = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
-                throw ContentError.network("Playlist okunamadı.")
+                throw ContentError.network(L10n.errorPlaylistUnreadable)
             }
             text = decoded
         } catch let error as ContentError {
@@ -114,7 +124,7 @@ actor M3UProvider: ContentProvider {
         for entry in entries {
             let group = entry.group?.trimmingCharacters(in: .whitespaces)
             let categoryID = group.map(Self.categoryID)
-            groups[entry.kind, default: [:]][group ?? "Diğer", default: 0] += 1
+            groups[entry.kind, default: [:]][group ?? L10n.otherCategory, default: 0] += 1
 
             switch entry.kind {
             case .live, .movie:

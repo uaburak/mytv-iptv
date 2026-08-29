@@ -63,11 +63,20 @@ final class SettingsViewController: UITableViewController {
         }
     }
 
+    /// İçerik bölümünün açıklaması. Süzgecin ne yaptığını satırın altında
+    /// anlatmak, ikinci bir satır eklemekten hem daha okunur hem sistemin
+    /// kendi ayarlar deseni.
+    override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
+        Section(rawValue: section) == .content ? L10n.hideAdultContentNote : nil
+    }
+
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch Section(rawValue: section) {
         case .account: 2
         case .language: 1
-        case .content: 1 + (model.library.account != nil ? 2 : 0)
+        // Yetişkin içerik süzgeci + listeyi yenile; hesap bilgisi varsa
+        // abonelik ve bağlantı satırları da ekleniyor.
+        case .content: 2 + (model.library.account != nil ? 2 : 0)
         case .developer: 1
         case nil: 0
         }
@@ -103,9 +112,28 @@ final class SettingsViewController: UITableViewController {
         case .content:
             switch indexPath.row {
             case 0:
+                configuration.text = L10n.hideAdultContent
+                // `UISwitch` tvOS'ta yok; durum orada onay imiyle gösteriliyor
+                // ve satırın kendisi seçilerek değiştiriliyor.
+                #if os(iOS)
+                let toggle = UISwitch()
+                toggle.isOn = AppSettings.hidesAdultContent
+                toggle.onTintColor = AppPalette.accent
+                toggle.addAction(
+                    UIAction { [weak self] action in
+                        guard let toggle = action.sender as? UISwitch else { return }
+                        self?.setHidesAdultContent(toggle.isOn)
+                    },
+                    for: .valueChanged
+                )
+                cell.accessoryView = toggle
+                #else
+                cell.accessoryType = AppSettings.hidesAdultContent ? .checkmark : .none
+                #endif
+            case 1:
                 configuration.text = L10n.reloadPlaylist
                 configuration.textProperties.color = AppPalette.accent
-            case 1:
+            case 2:
                 configuration.text = L10n.subscriptionExpires
                 configuration.secondaryText = model.library.account?.expiresAt
                     .map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—"
@@ -166,6 +194,9 @@ final class SettingsViewController: UITableViewController {
             present(alert, animated: true)
 
         case .content where indexPath.row == 0:
+            setHidesAdultContent(!AppSettings.hidesAdultContent)
+
+        case .content where indexPath.row == 1:
             Task { await model.library.reload(force: true) }
 
         case .developer:
@@ -174,6 +205,18 @@ final class SettingsViewController: UITableViewController {
         default:
             break
         }
+    }
+
+    /// Süzgeç tercihini uygular. Katalog yeniden indirilmiyor: ham anlık
+    /// görüntü bellekte duruyor ve görünen listeler ondan yeniden türetiliyor.
+    private func setHidesAdultContent(_ hides: Bool) {
+        guard hides != AppSettings.hidesAdultContent else { return }
+        AppSettings.hidesAdultContent = hides
+        model.library.applyContentFilter()
+        tableView.reloadRows(
+            at: [IndexPath(row: 0, section: Section.content.rawValue)],
+            with: .none
+        )
     }
 
     private func confirmClearAllLocalData(sourceCell: UITableViewCell?) {

@@ -202,6 +202,12 @@ final class MediaClipCell: UICollectionViewCell {
         #endif
         still.showsInitials = false
         still.configure(url: imageURL, title: title, displayWidth: width)
+
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+        accessibilityLabel = [title, durationText].compactMap { $0 }.joined(separator: ", ")
+        accessibilityValue = playedFraction.map { L10n.watchedPercent(Int(($0 * 100).rounded())) }
+
         applyOverlay()
     }
 

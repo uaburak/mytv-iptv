@@ -190,5 +190,9 @@ final class CatalogItemCell: UICollectionViewCell {
             },
         ])
         menuButton.menu = menu
+
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+        accessibilityLabel = item.accessibilityDescription
     }
 }

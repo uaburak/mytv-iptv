@@ -11,6 +11,17 @@ struct ContentRow: Identifiable, Hashable, Sendable {
     var items: [MediaItem]
 }
 
+/// Tür başına çekim sonucu.
+///
+/// Dosya düzeyinde duruyor, `ContentLibrary` içinde değil: `@MainActor` bir
+/// sınıfın içine yazılan tip izolasyonu miras alır ve görev grubunun
+/// yalıtımsız kapanından kurulamazdı.
+private struct KindPayload: Sendable {
+    var kind: MediaKind
+    var categories: [MediaCategory]
+    var items: [MediaItem]
+}
+
 /// Arayüzün gördüğü tek veri kapısı.
 /// Seçili listeye göre doğru `ContentProvider`'ı kurar, sonuçları diske
 /// önbelleğe alır ve anasayfa raylarını üretir.
@@ -35,8 +46,13 @@ final class ContentLibrary {
     private(set) var rows: [ContentRow] = []
     private(set) var categories: [MediaKind: [MediaCategory]] = [:]
 
-    /// Aramanın tarayacağı düzleştirilmiş katalog.
+    /// Aramanın tarayacağı düzleştirilmiş katalog. Süzgeç uygulanmış hâli;
+    /// süzülmemiş kaynak `rawSnapshot`'ta duruyor.
     private(set) var catalog: [MediaKind: [MediaItem]] = [:]
+
+    /// Sağlayıcıdan geldiği hâliyle katalog. İçerik süzgeci tercihi
+    /// değiştiğinde yeniden indirmek yerine bundan türetiyoruz.
+    private var rawSnapshot = CatalogSnapshot()
 
     /// Anasayfanın öne çıkan içerikleri. Hesaplanmış özellik DEĞİL: katalog
     /// 14 binden fazla kayıt tutuyor ve her `body` değerlendirmesinde yeniden
@@ -101,12 +117,17 @@ final class ContentLibrary {
         isReloading = true
         defer { isReloading = false }
 
+        // Zorlanmış yenilemede sağlayıcının bellek içi anlık görüntüsü de
+        // atılıyor; M3U sağlayıcısı listeyi bir kez indirip sakladığı için
+        // bu olmadan "yenile" ağa hiç çıkmıyordu.
+        if force { await provider.invalidate() }
+
         // Sürüm eki: MediaItem alanları değiştiğinde eski anlık görüntüler
         // çözümlenemez, boşuna denenmesin.
         let cacheKey = (currentPlaylistID ?? provider.sourceID) + ".v3"
         let isCacheFresh = !force && (cache.age(key: cacheKey).map { $0 < cacheLifetime } ?? false)
 
-        if !force, let snapshot = cachedSnapshot(key: cacheKey) {
+        if !force, let snapshot = await cachedSnapshot(key: cacheKey) {
             apply(snapshot)
             state = .ready
             // Önbellek tazeyse tek bir istek bile atmıyoruz. Yayın biçimi
@@ -120,7 +141,7 @@ final class ContentLibrary {
             // Abonelik durumu ve sunucunun izin verdiği yayın biçimi burada.
             account = try await provider.validate()
             let snapshot = try await fetchSnapshot(from: provider)
-            cache.write(snapshot, key: cacheKey)
+            writeSnapshot(snapshot, key: cacheKey)
             apply(snapshot)
             state = .ready
         } catch {
@@ -131,37 +152,112 @@ final class ContentLibrary {
         }
     }
 
+    /// Üç türü paralel çeker.
+    ///
+    /// Bir tür başarısız olduğunda diğerleri korunuyor: bazı paneller
+    /// `get_series`'te 404 dönüyor ve bu, gelmiş olan film ve canlı listesini
+    /// de çöpe atmak için sebep değil. Yalnızca **hiçbiri** gelmediğinde hata
+    /// fırlatılıyor; orada sorun ağ ya da kimlik doğrulamadır ve önbellekteki
+    /// eski katalog korunmalı.
     private func fetchSnapshot(from provider: any ContentProvider) async throws -> CatalogSnapshot {
         var snapshot = CatalogSnapshot()
+        var failures = 0
 
-        // Üç türü paralel çekiyoruz; canlı liste genelde en büyüğü.
-        try await withThrowingTaskGroup(of: (MediaKind, [MediaCategory], [MediaItem]).self) { group in
+        await withTaskGroup(of: KindPayload?.self) { group in
             for kind in MediaKind.allCases {
                 group.addTask {
-                    async let categories = provider.categories(for: kind)
-                    async let items = provider.items(kind: kind, categoryID: nil)
-                    return try await (kind, categories, items)
+                    do {
+                        async let categories = provider.categories(for: kind)
+                        async let items = provider.items(kind: kind, categoryID: nil)
+                        return try await KindPayload(kind: kind, categories: categories, items: items)
+                    } catch {
+                        return nil
+                    }
                 }
             }
-            for try await (kind, categories, items) in group {
-                snapshot.categories[kind] = categories
-                snapshot.items[kind] = items
+            for await payload in group {
+                guard let payload else {
+                    failures += 1
+                    continue
+                }
+                snapshot.categories[payload.kind] = payload.categories
+                snapshot.items[payload.kind] = payload.items
             }
         }
+
+        guard failures < MediaKind.allCases.count else { throw ContentError.emptyPlaylist }
         return snapshot
     }
 
-    private func cachedSnapshot(key: String) -> CatalogSnapshot? {
-        cache.read(CatalogSnapshot.self, key: key)
+    /// Anlık görüntü on binlerce kayıt; çözümlemesi de yazımı da ana
+    /// aktörde yapılınca açılışta ve her yenilemede gözle görülür bir
+    /// takılma oluyordu.
+    private func cachedSnapshot(key: String) async -> CatalogSnapshot? {
+        let cache = self.cache
+        return await Task.detached(priority: .userInitiated) {
+            cache.read(CatalogSnapshot.self, key: key)
+        }.value
+    }
+
+    private func writeSnapshot(_ snapshot: CatalogSnapshot, key: String) {
+        let cache = self.cache
+        Task.detached(priority: .utility) {
+            cache.write(snapshot, key: key)
+        }
     }
 
     private func apply(_ snapshot: CatalogSnapshot) {
-        categories = snapshot.categories
-        catalog = snapshot.items
+        rawSnapshot = snapshot
+        applyContentFilter()
+    }
+
+    /// Süzgeci ham anlık görüntüye uygulayıp türetilen her şeyi yeniden kurar.
+    /// Ayarlardaki tercih değiştiğinde de buraya geliniyor — yeniden indirme
+    /// gerekmiyor.
+    func applyContentFilter() {
+        let visible = Self.filtered(rawSnapshot)
+        categories = visible.categories
+        catalog = visible.items
         buildIndexes()
-        rows = buildRows(from: snapshot)
+        rows = buildRows(from: visible)
         spotlight = buildSpotlight()
         notifyChange()
+    }
+
+    /// Yetişkin içeriği ayıklar.
+    ///
+    /// Kategori sinyali addan güvenilir: IPTV listelerinde yetişkin yayınlar
+    /// neredeyse her zaman kendi kategorisinde toplanıyor. Önce yetişkin
+    /// kategoriler bulunuyor, sonra o kategorideki **bütün** yayınlar ile
+    /// adından işaretlenmiş tekil yayınlar düşülüyor. Kategorinin kendisi de
+    /// listeden çıkıyor ki gezinme ekranında boş bir başlık kalmasın.
+    private nonisolated static func filtered(_ snapshot: CatalogSnapshot) -> CatalogSnapshot {
+        guard AppSettings.hidesAdultContent else { return snapshot }
+
+        var result = CatalogSnapshot()
+        for kind in MediaKind.allCases {
+            let categories = snapshot.categories[kind] ?? []
+            let items = snapshot.items[kind] ?? []
+            let adultCategoryIDs = Set(
+                categories.lazy.filter { AdultContentFilter.looksAdult($0.name) }.map(\.id)
+            )
+
+            result.categories[kind] = adultCategoryIDs.isEmpty
+                ? categories
+                : categories.filter { !adultCategoryIDs.contains($0.id) }
+
+            // Süzülecek bir şey yoksa dizi olduğu gibi geçiyor: on binlerce
+            // kaydı boşuna kopyalamanın anlamı yok.
+            let needsItemFilter = !adultCategoryIDs.isEmpty || items.contains(where: \.isAdult)
+            result.items[kind] = needsItemFilter
+                ? items.filter { item in
+                    guard !item.isAdult else { return false }
+                    guard let categoryID = item.categoryID else { return true }
+                    return !adultCategoryIDs.contains(categoryID)
+                }
+                : items
+        }
+        return result
     }
 
     private func buildIndexes() {
@@ -200,7 +296,7 @@ final class ContentLibrary {
         if recentMovies.count >= 4 {
             rows.append(ContentRow(
                 id: "recent-movies",
-                title: "Yeni Eklenen Filmler",
+                title: L10n.newMovies,
                 subtitle: nil,
                 kind: .movie,
                 categoryID: nil,
@@ -214,7 +310,7 @@ final class ContentLibrary {
         if recentSeries.count >= 4 {
             rows.append(ContentRow(
                 id: "recent-series",
-                title: "Yeni Diziler",
+                title: L10n.newSeries,
                 subtitle: nil,
                 kind: .series,
                 categoryID: nil,
@@ -343,7 +439,7 @@ final class ContentLibrary {
         epgCache[item.id] = (entries, Date())
         // Önbellek sınırsız büyümesin; canlı listeler on binlerce kanal olabiliyor.
         if epgCache.count > 400 {
-            for key in epgCache.keys.prefix(200) { epgCache.removeValue(forKey: key) }
+            for key in Array(epgCache.keys.prefix(200)) { epgCache.removeValue(forKey: key) }
         }
         return entries
     }
@@ -378,28 +474,61 @@ final class ContentLibrary {
 
     // MARK: - Arama
 
-    func search(_ query: String, kinds: Set<MediaKind> = Set(MediaKind.allCases), limit: Int = 60) -> [MediaItem] {
+    /// Katalogda başlığa göre arama.
+    ///
+    /// Tarama ana aktörde **değil**: 50 bin kanallık bir listede
+    /// `localizedCaseInsensitiveContains` ile doğrusal tarama her tuş
+    /// vuruşunda arayüzü kilitliyordu. Katalog `Sendable` bir değer olduğu
+    /// için kopyası ucuza arka plana geçiyor.
+    func search(
+        _ query: String,
+        kinds: Set<MediaKind> = Set(MediaKind.allCases),
+        limit: Int = 60
+    ) async -> [MediaItem] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 2 else { return [] }
 
+        let catalog = self.catalog
+        return await Task.detached(priority: .userInitiated) {
+            Self.search(trimmed, in: catalog, kinds: kinds, limit: limit)
+        }.value
+    }
+
+    private nonisolated static func search(
+        _ trimmed: String,
+        in catalog: [MediaKind: [MediaItem]],
+        kinds: Set<MediaKind>,
+        limit: Int
+    ) -> [MediaItem] {
+        // Eşleşmeler tür başına `limit`'te kesiliyor: önce hepsini toplayıp
+        // sonra kırpmak, on binlerce kaydı boşuna kopyalamak demekti.
         var results: [MediaItem] = []
         for kind in MediaKind.allCases where kinds.contains(kind) {
-            let matches = (catalog[kind] ?? []).filter {
-                $0.title.localizedCaseInsensitiveContains(trimmed)
+            var matched = 0
+            for item in catalog[kind] ?? []
+            where item.title.localizedCaseInsensitiveContains(trimmed) {
+                results.append(item)
+                matched += 1
+                if matched == limit { break }
             }
-            results.append(contentsOf: matches.prefix(limit))
         }
-        // Baştan eşleşenler daha alakalı.
-        return results.sorted { lhs, rhs in
-            let lhsPrefix = lhs.title.lowercased().hasPrefix(trimmed.lowercased())
-            let rhsPrefix = rhs.title.lowercased().hasPrefix(trimmed.lowercased())
-            if lhsPrefix != rhsPrefix { return lhsPrefix }
-            return lhs.title.count < rhs.title.count
-        }
+
+        // Baştan eşleşenler daha alakalı. Kıyaslama içinde `lowercased()`
+        // çağırmak aynı dizgeyi her karşılaştırmada yeniden üretiyordu;
+        // bayrak sıralamadan önce bir kez hesaplanıyor.
+        let needle = trimmed.lowercased()
+        return results
+            .map { (item: $0, matchesPrefix: $0.title.lowercased().hasPrefix(needle)) }
+            .sorted { lhs, rhs in
+                if lhs.matchesPrefix != rhs.matchesPrefix { return lhs.matchesPrefix }
+                return lhs.item.title.count < rhs.item.title.count
+            }
+            .map { $0.item }
     }
 
     func reset() {
         provider = nil
+        rawSnapshot = CatalogSnapshot()
         currentPlaylistID = nil
         account = nil
         rows = []

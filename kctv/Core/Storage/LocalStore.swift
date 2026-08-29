@@ -3,10 +3,11 @@ import Foundation
 /// Codable değerleri Application Support altında JSON olarak saklar.
 /// Liste anlık görüntüleri on binlerce kayıt olabildiği için UserDefaults yerine
 /// dosya kullanıyoruz; UserDefaults bu boyutta belleği kalıcı şişirir.
+/// Kodlayıcılar saklanmıyor, çağrı başına üretiliyor: `JSONEncoder` Sendable
+/// değil ve bu tip artık arka plan görevlerine geçiriliyor. Kodlayıcı üretmenin
+/// bedeli, on binlerce kaydı kodlamanın yanında ölçülemeyecek kadar küçük.
 struct LocalStore: Sendable {
     private let directory: URL
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
 
     init(folder: String) {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -16,13 +17,13 @@ struct LocalStore: Sendable {
     }
 
     func write<T: Encodable>(_ value: T, key: String) {
-        guard let data = try? encoder.encode(value) else { return }
+        guard let data = try? JSONEncoder().encode(value) else { return }
         try? data.write(to: url(for: key), options: .atomic)
     }
 
     func read<T: Decodable>(_ type: T.Type, key: String) -> T? {
         guard let data = try? Data(contentsOf: url(for: key)) else { return nil }
-        return try? decoder.decode(type, from: data)
+        return try? JSONDecoder().decode(type, from: data)
     }
 
     func remove(key: String) {

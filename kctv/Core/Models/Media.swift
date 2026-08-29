@@ -85,9 +85,21 @@ struct MediaItem: Identifiable, Hashable, Codable, Sendable {
 
     var durationText: String? {
         guard let durationSeconds, durationSeconds > 0 else { return nil }
-        let hours = durationSeconds / 3600
-        let minutes = (durationSeconds % 3600) / 60
-        return hours > 0 ? "\(hours)sa \(minutes)d" : "\(minutes)d"
+        return L10n.duration(
+            hours: durationSeconds / 3600,
+            minutes: (durationSeconds % 3600) / 60
+        )
+    }
+
+    /// VoiceOver'ın kart yerine okuyacağı metin.
+    ///
+    /// Afiş kartlarında görünür bir etiket yok — başlık yalnızca ilerleme
+    /// varken ya da tvOS'ta odakta beliren şeritte duruyor. Bu olmadan
+    /// VoiceOver kartı yalnızca "düğme" diye okuyordu.
+    var accessibilityDescription: String {
+        [title, kind.title, yearText]
+            .compactMap { $0 }
+            .joined(separator: ", ")
     }
 
     var ratingPercent: Int? {
@@ -117,12 +129,12 @@ struct Episode: Identifiable, Hashable, Codable, Sendable {
     var streamReference: String
     var containerExtension: String?
 
-    var numberText: String { "S\(seasonNumber):B\(episodeNumber)" }
+    var numberText: String { L10n.episodeBadge(season: seasonNumber, episode: episodeNumber) }
 
     var durationText: String? {
         guard let durationSeconds, durationSeconds > 0 else { return nil }
         let minutes = max(1, durationSeconds / 60)
-        return minutes >= 60 ? "\(minutes / 60)sa \(minutes % 60)d" : "\(minutes)d"
+        return L10n.duration(hours: minutes / 60, minutes: minutes % 60)
     }
 }
 

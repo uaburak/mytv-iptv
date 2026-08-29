@@ -26,15 +26,24 @@ actor ImageLoader {
 
     private let cache: NSCache<NSString, PlatformImage> = {
         let cache = NSCache<NSString, PlatformImage>()
+        // tvOS'ta uygulama bellek bütçesi iOS'takinden belirgin biçimde dar
+        // ve katalog, FFmpeg çözücüsü ve Firebase aynı bütçeyi paylaşıyor;
+        // görsel önbelleğine orada daha az yer ayrılıyor.
+        #if os(tvOS)
+        cache.countLimit = 250
+        cache.totalCostLimit = 48 * 1024 * 1024
+        #else
         cache.countLimit = 400
         // Yaklaşık 96 MB; poster ağırlıklı bir katalog için rahat bir tavan.
         cache.totalCostLimit = 96 * 1024 * 1024
+        #endif
         return cache
     }()
 
     private var inFlight: [String: Task<PlatformImage?, Never>] = [:]
     /// Çözülemeyen bağlantılar. Tekrar tekrar denenmesini engelliyor.
     private var failed: Set<String> = []
+    private static let failedLimit = 2_000
 
     private let session: URLSession = {
         let configuration = URLSessionConfiguration.default
@@ -55,7 +64,12 @@ actor ImageLoader {
         if failed.contains(url.absoluteString) { return nil }
         if let existing = inFlight[key] { return await existing.value }
 
-        let task = Task<PlatformImage?, Never> { [session] in
+        // `Task` yerine `Task.detached`: aktörün içinde açılan bir görev
+        // aktörün yalıtımını miras alıyor ve çözümlemeler tek tek sıraya
+        // giriyordu. Kaydırma sırasında onlarca görsel bekliyor; ağ beklemesi
+        // zaten askıya alıyor ama ImageIO çözümlemesi işlemciyi tutuyor ve
+        // seri çalışınca kartlar gecikmeli doluyordu.
+        let task = Task<PlatformImage?, Never>.detached(priority: .utility) { [session] in
             do {
                 let (data, response) = try await session.data(from: url)
                 if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
@@ -73,6 +87,11 @@ actor ImageLoader {
         if let image {
             cache.setObject(image, forKey: key as NSString, cost: Self.cost(of: image))
         } else {
+            // Ölü bağlantılar sınırsız birikmesin: on binlerce kanallık bir
+            // listede logoların çoğu ölü olabiliyor ve bu küme kalıcı olarak
+            // büyüyordu. Tavana gelince baştan başlıyor; en kötü ihtimalle
+            // birkaç istek tekrarlanır.
+            if failed.count >= Self.failedLimit { failed.removeAll(keepingCapacity: true) }
             failed.insert(url.absoluteString)
         }
         return image

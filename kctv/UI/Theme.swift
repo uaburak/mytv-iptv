@@ -535,15 +535,87 @@ struct AppMetrics {
         cornerRadius: 8
     )
 
+    /// iPad ölçüleri.
+    ///
+    /// Bu kademe olmadan 13" bir iPad yatayda (1366pt) iPhone ile **aynı**
+    /// 152pt afişi alıyordu: satırda sekiz kart, minik yazı, her yanda boşluk.
+    /// Ölçüler tv ile regular arasında duruyor — kullanıcı ekrana kucağından
+    /// bakıyor, kanepeden değil.
+    static let large = AppMetrics(
+        posterWidth: 200,
+        rowSpacing: 48,
+        cardSpacing: 22,
+        screenPadding: 44,
+        heroHeight: 660,
+        heroImageWidth: 1600,
+        mainCardWidth: 340,
+        titleFont: .systemFont(ofSize: 40, weight: .bold),
+        rowTitleFont: .systemFont(ofSize: 22, weight: .semibold),
+        cardTitleFont: .systemFont(ofSize: 17, weight: .medium),
+        listTitleFont: .systemFont(ofSize: 19),
+        listSubtitleFont: .systemFont(ofSize: 16),
+        mainCardTitleFont: .systemFont(ofSize: 26, weight: .semibold),
+        mainCardCountFont: .systemFont(ofSize: 16),
+        cardCornerRadius: 12,
+        rowHeaderGap: 18,
+        rowHeaderHeight: 34,
+        clipCardWidth: 340,
+        clipCardTextHeight: 0,
+        castPhotoWidth: 160,
+        detailSectionSpacing: 52,
+        cardOverlayPadding: 16,
+        cardOverlayFontSize: 14,
+        cornerRadius: 12
+    )
+
+    /// Genişlik + metin boyutu kombinasyonu başına çözülmüş ölçüler.
+    ///
+    /// `metrics(for:)` hücre döngüsünün içinden çağrılıyor ve her çağrıda on
+    /// küsur `UIFont` içeren bir yapı kuruyordu. Sonuç yalnızca bu iki girdiye
+    /// bağlı olduğu için saklanabiliyor.
+    private struct MetricsKey: Hashable {
+        var widthBucket: Int
+        var contentSize: String
+    }
+
+    nonisolated(unsafe) private static var cache: [MetricsKey: AppMetrics] = [:]
+
     /// Görünümün kendi genişliğine göre doğru ölçü setini seçer.
     ///
     /// iOS/iPadOS'ta ana kategori kartlarının genişliği sabit değil, ekrandan
     /// hesaplanıyor: üçü birden ekrana sığmalı, kaydırmaya gerek kalmamalı.
+    @MainActor
     static func metrics(for width: CGFloat) -> AppMetrics {
+        // Genişlik kaydırma sırasında piksel piksel oynayabiliyor; kovaya
+        // yuvarlanınca önbellek gerçekten tutuyor.
+        let key = MetricsKey(
+            widthBucket: Int((width / 8).rounded()),
+            contentSize: UIApplication.shared.preferredContentSizeCategory.rawValue
+        )
+        if let cached = cache[key] { return cached }
+
+        let resolved = resolve(for: width)
+        // Sınırsız büyümesin: dönme ve metin boyutu birkaç kombinasyon üretir,
+        // beklenmedik bir dağılımda önbellek baştan kurulur.
+        if cache.count > 32 { cache.removeAll(keepingCapacity: true) }
+        cache[key] = resolved
+        return resolved
+    }
+
+    private static func resolve(for width: CGFloat) -> AppMetrics {
         #if os(tvOS)
         var metrics = AppMetrics.tv
         #else
-        var metrics = width < 500 ? AppMetrics.compact : .regular
+        // iPhone / bölünmüş iPad penceresi / iPad tam ekran.
+        var metrics: AppMetrics
+        if width < 500 {
+            metrics = .compact
+        } else if width < 1000 {
+            metrics = .regular
+        } else {
+            metrics = .large
+        }
+        metrics.scaleFontsForContentSize()
         #endif
 
         // Ana kategori kartlarının genişliği sabit değil, ekrandan
@@ -555,6 +627,28 @@ struct AppMetrics {
         metrics.mainCardWidth = max(available / cardCount, 1)
         return metrics
     }
+
+    #if os(iOS)
+    /// Yazıları kullanıcının metin boyutu tercihine göre ölçekler.
+    ///
+    /// Kart ve ray yükseklikleri sabit puntoya göre hesaplandığı için ölçek
+    /// serbest bırakılmıyor: erişilebilirlik boyutlarında yazı kartın dışına
+    /// taşıyor ve satırlar üst üste biniyordu. Üst sınır, düzeni bozmadan
+    /// anlamlı bir büyüme bırakıyor.
+    private mutating func scaleFontsForContentSize() {
+        func scaled(_ font: UIFont, _ style: UIFont.TextStyle, max maximum: CGFloat) -> UIFont {
+            UIFontMetrics(forTextStyle: style).scaledFont(for: font, maximumPointSize: maximum)
+        }
+
+        titleFont = scaled(titleFont, .largeTitle, max: titleFont.pointSize * 1.3)
+        rowTitleFont = scaled(rowTitleFont, .headline, max: rowTitleFont.pointSize * 1.4)
+        cardTitleFont = scaled(cardTitleFont, .subheadline, max: cardTitleFont.pointSize * 1.3)
+        listTitleFont = scaled(listTitleFont, .body, max: listTitleFont.pointSize * 1.6)
+        listSubtitleFont = scaled(listSubtitleFont, .subheadline, max: listSubtitleFont.pointSize * 1.6)
+        mainCardTitleFont = scaled(mainCardTitleFont, .title3, max: mainCardTitleFont.pointSize * 1.3)
+        mainCardCountFont = scaled(mainCardCountFont, .footnote, max: mainCardCountFont.pointSize * 1.4)
+    }
+    #endif
 
     func cardWidth(for kind: MediaKind) -> CGFloat {
         kind == .live ? posterWidth * 1.35 : posterWidth

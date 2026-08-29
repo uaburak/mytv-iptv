@@ -60,6 +60,8 @@ final class AppModel {
 
     private let auth: any AuthService
     private var sync: UserDataSync?
+    /// Bekleyen bulut yazması; yeni bir değişiklik gelince iptal ediliyor.
+    private var activityPushTask: Task<Void, Never>?
 
     init(auth: any AuthService) {
         self.auth = auth
@@ -170,7 +172,22 @@ final class AppModel {
         phase = .signedOut
     }
 
+    private static let lastAccountKey = "kctv.lastSignedInUID"
+
     private func handleSignedIn(_ user: AuthUser) async {
+        // Cihazda **başka** bir hesabın verisi duruyorsa devralınmıyor.
+        // `pullRemoteData` yereli uzaktakiyle birleştiriyor ve birleşme
+        // sonucunu geri yazıyor; bu yüzden A'nın favorileri B'nin hesabına
+        // sızıyordu. Misafirden girişte kayıtlı hesap olmadığı için birleşme
+        // korunuyor — oradaki amaç zaten devretmek.
+        let previousUID = UserDefaults.standard.string(forKey: Self.lastAccountKey)
+        if let previousUID, previousUID != user.uid {
+            activity.clearAll()
+            playlists.clearAll()
+            library.reset()
+        }
+        UserDefaults.standard.set(user.uid, forKey: Self.lastAccountKey)
+
         self.user = user
         isGuest = false
         self.sync = UserDataSync(uid: user.uid)
@@ -202,13 +219,27 @@ final class AppModel {
         )
     }
 
+    /// Buluta yazmayı geciktirir.
+    ///
+    /// Her favori dokunuşu üç koleksiyonu birden yazıyordu; kullanıcı listede
+    /// gezinirken art arda gelen dokunuşlar hem kotayı harcıyor hem de
+    /// birbirini geçen yazmalarla yarışıyordu. Durumun tamamı her seferinde
+    /// gönderildiği için ara adımları atlamanın kaybı yok: yalnızca son hâl
+    /// yazılıyor.
+    ///
+    /// Bekleme dolmadan uygulama kapanırsa yazma kaybediliyor ama veri
+    /// cihazda duruyor ve bir sonraki değişiklik bulutu yine tam hâliyle
+    /// düzeltiyor.
     private func pushActivity(
         favorites: [MediaID],
         watchlist: [MediaID],
         progress: [PlaybackProgress]
     ) {
-        guard let sync else { return }
-        Task {
+        guard sync != nil else { return }
+        activityPushTask?.cancel()
+        activityPushTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled, let self, let sync else { return }
             try? await sync.saveFavorites(favorites)
             try? await sync.saveWatchlist(watchlist)
             try? await sync.saveProgress(progress)
@@ -298,9 +329,14 @@ final class AppModel {
     }
 
     /// Context kimliği "source|kind|raw#episodeID" biçiminde.
-    private static func decode(contextID: String) -> (MediaID, String?)? {
+    ///
+    /// Oynatıcı da aynı çözümlemeyi yapıyor; kopyalanan iki gerçeklik yerine
+    /// tek yerden okunuyor.
+    static func decode(contextID: String) -> (mediaID: MediaID, episodeID: String?)? {
         let parts = contextID.split(separator: "#", maxSplits: 1).map(String.init)
-        let mediaParts = parts[0].split(separator: "|", maxSplits: 2).map(String.init)
+        // Boş kimlikte `parts` de boş kalıyor; indekslemeden önce bakılıyor.
+        guard let mediaPart = parts.first else { return nil }
+        let mediaParts = mediaPart.split(separator: "|", maxSplits: 2).map(String.init)
         guard mediaParts.count == 3, let kind = MediaKind(rawValue: mediaParts[1]) else { return nil }
         return (MediaID(source: mediaParts[0], kind: kind, raw: mediaParts[2]), parts.count > 1 ? parts[1] : nil)
     }

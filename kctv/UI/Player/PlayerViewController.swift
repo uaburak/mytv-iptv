@@ -96,6 +96,18 @@ final class PlayerViewController: UIViewController {
     private var selectedAudioTrackID: Int32?
     private var selectedSubtitleID: Int32?
 
+    /// Hata uyarısı bir kez gösteriliyor. `.error` durumu ile `finish(error:)`
+    /// arka arkaya gelebiliyor ve ikinci `present` çağrısı, ilki hâlâ
+    /// ekrandayken sessizce düşüp kullanıcıyı kapatılamayan bir uyarıda
+    /// bırakıyordu.
+    private var didShowFailure = false
+
+    /// İlerlemenin son kaydedildiği an. Kayıt yalnızca ekran kapanırken
+    /// yapılınca, uygulama izlerken sonlandırıldığında kaldığı yer
+    /// kayboluyordu.
+    private var lastProgressSave = Date.distantPast
+    private static let progressSaveInterval: TimeInterval = 30
+
     /// Sıradaki bölüm; yoksa buton gizli ve bitince otomatik geçiş olmuyor.
     private var nextEpisode: (episode: Episode, series: MediaItem)?
 
@@ -174,6 +186,8 @@ final class PlayerViewController: UIViewController {
         currentTime = 0
         duration = 0
         isPlaying = true
+        didShowFailure = false
+        lastProgressSave = .distantPast
         playPauseButton.setImage(UIImage(systemName: "pause.fill"), for: .normal)
         titleLabel.text = newContext.title
         subtitleLabel.text = newContext.subtitle
@@ -238,8 +252,17 @@ final class PlayerViewController: UIViewController {
     }
     #endif
 
+    /// Video oynarken ekran kararmamalı. tvOS'ta boşta kalma zamanlayıcısı
+    /// zaten oynatma sırasında sistem tarafından yönetiliyor ama çağrı orada
+    /// da geçerli ve zararsız.
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        UIApplication.shared.isIdleTimerDisabled = true
+    }
+
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        UIApplication.shared.isIdleTimerDisabled = false
         saveProgress()
         playerLayer?.pause()
         playerLayer?.stop()
@@ -251,8 +274,13 @@ final class PlayerViewController: UIViewController {
     private func startPlayback() {
         Task.detached(priority: .userInitiated) { KSOptions.setAudioSession() }
 
-        KSOptions.firstPlayerType = KSMEPlayer.self
-        KSOptions.secondPlayerType = nil
+        // KSPlayer'ın kendi varsayılanı: önce AVPlayer, olmazsa FFmpeg.
+        // Buradaki eski ayar ikisini de kapatıyordu — her yayın FFmpeg'e
+        // gidiyor, dolayısıyla PiP, AirPlay ve kilit ekranı denetimleri
+        // hiç çalışmıyor, üstelik AVPlayer başarısız olduğunda geri düşecek
+        // bir oynatıcı da kalmıyordu.
+        KSOptions.firstPlayerType = KSAVPlayer.self
+        KSOptions.secondPlayerType = KSMEPlayer.self
 
         let options = KSOptions()
         options.userAgent = context.headers["User-Agent"] ?? "VLC/3.0.20 LibVLC/3.0.20"
@@ -283,12 +311,9 @@ final class PlayerViewController: UIViewController {
 
     private func loadLiveEPG() {
         // Canlı yayınlarda anlık program bilgisini alt başlık olarak göster
-        let parts = context.id.split(separator: "#", maxSplits: 1).map(String.init)
-        let mediaParts = parts[0].split(separator: "|", maxSplits: 2).map(String.init)
-        guard mediaParts.count == 3, let kind = MediaKind(rawValue: mediaParts[1]) else { return }
-        let mediaID = MediaID(source: mediaParts[0], kind: kind, raw: mediaParts[2])
+        guard let decoded = AppModel.decode(contextID: context.id) else { return }
 
-        if let item = model.library.item(for: mediaID) {
+        if let item = model.library.item(for: decoded.mediaID) {
             Task {
                 let epgEntries = await model.library.epg(for: item)
                 let now = Date()
@@ -383,7 +408,7 @@ final class PlayerViewController: UIViewController {
         dot.widthAnchor.constraint(equalToConstant: 8).isActive = true
         dot.heightAnchor.constraint(equalToConstant: 8).isActive = true
         let liveLabel = UILabel()
-        liveLabel.text = AppLanguage.current.effectiveLanguageCode == "tr" ? "CANLI" : "LIVE"
+        liveLabel.text = L10n.liveBadge
         liveLabel.font = .systemFont(ofSize: 12, weight: .bold)
         liveLabel.textColor = .white
         liveBadge.addArrangedSubview(dot)
@@ -479,7 +504,6 @@ final class PlayerViewController: UIViewController {
     }
 
     private func makeAspectMenu() -> UIMenu {
-        let isTR = AppLanguage.current.effectiveLanguageCode == "tr"
         let fit = UIAction(title: L10n.aspectFit, image: UIImage(systemName: "arrow.down.right.and.arrow.up.left")) { [weak self] _ in
             self?.videoView?.contentMode = .scaleAspectFit
             self?.playerLayer?.player.view?.contentMode = .scaleAspectFit
@@ -488,7 +512,7 @@ final class PlayerViewController: UIViewController {
             self?.videoView?.contentMode = .scaleAspectFill
             self?.playerLayer?.player.view?.contentMode = .scaleAspectFill
         }
-        let stretch = UIAction(title: isTR ? "Tam Ekran (Uzat)" : "Stretch (16:9)", image: UIImage(systemName: "rectangle.arrowtriangle.2.outward")) { [weak self] _ in
+        let stretch = UIAction(title: L10n.aspectStretch, image: UIImage(systemName: "rectangle.arrowtriangle.2.outward")) { [weak self] _ in
             self?.videoView?.contentMode = .scaleToFill
             self?.playerLayer?.player.view?.contentMode = .scaleToFill
         }
@@ -600,8 +624,18 @@ final class PlayerViewController: UIViewController {
     private var isControlsVisible: Bool { controlsView.alpha > 0 }
 
     private func showControls() {
+        // Kontroller gizliyken etiketler güncellenmiyor; görünür olurken
+        // son duruma bir kez getiriliyor.
+        refreshTimeLabels()
         setControlsVisible(true, duration: 0.2)
         scheduleControlsHide()
+    }
+
+    private func refreshTimeLabels() {
+        currentTimeLabel.text = Self.timeText(currentTime)
+        durationLabel.text = Self.timeText(duration)
+        guard duration > 0 else { return }
+        slider.value = Float(currentTime / duration)
     }
 
     private func hideControls() {
@@ -677,10 +711,16 @@ extension PlayerViewController: KSPlayerLayerDelegate {
         self.currentTime = currentTime
         duration = totalTime.isFinite && totalTime > 0 ? totalTime : 0
 
-        currentTimeLabel.text = Self.timeText(currentTime)
-        durationLabel.text = Self.timeText(duration)
-        guard duration > 0 else { return }
-        slider.value = Float(currentTime / duration)
+        // Uygulama sonlandırılırsa kaldığı yer kaybolmasın.
+        if Date().timeIntervalSince(lastProgressSave) >= Self.progressSaveInterval {
+            lastProgressSave = Date()
+            saveProgress()
+        }
+
+        // Geri çağrı saniyede birkaç kez geliyor; kontroller gizliyken
+        // görünmeyen etiketleri yeniden çizmenin anlamı yok.
+        guard isControlsVisible else { return }
+        refreshTimeLabels()
     }
 
     func player(layer: KSPlayerLayer, finish error: (any Error)?) {
@@ -697,6 +737,9 @@ extension PlayerViewController: KSPlayerLayerDelegate {
     func player(layer: KSPlayerLayer, bufferedCount: Int, consumeTime: TimeInterval) {}
 
     private func showFailure(_ message: String) {
+        guard !didShowFailure else { return }
+        didShowFailure = true
+
         let alert = UIAlertController(title: context.title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: L10n.close, style: .default) { [weak self] _ in
             self?.dismiss(animated: true)

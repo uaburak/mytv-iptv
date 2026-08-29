@@ -140,8 +140,11 @@ enum SearchGenre: String, CaseIterable, Sendable {
     /// ortasında aramak ise yanlış eşleşme üretiyordu — "WARNER" içinde "war",
     /// "MASKELİ" içinde "aşk". Kısa anahtarlarda (5 harften az) kelimenin
     /// tamamı aranıyor, uzunlarda başlangıcı yetiyor.
-    func matches(_ categoryName: String) -> Bool {
-        let haystack = " " + Self.folded(categoryName) + " "
+    /// Girdi **önceden katlanmış** olmalı (`SearchGenre.folded`). Katlamayı
+    /// burada yapmak, aynı kategori adını on beş türün her biri için yeniden
+    /// üretmek demekti; birkaç yüz kategoride bu binlerce gereksiz dönüşüm.
+    func matches(folded categoryName: String) -> Bool {
+        let haystack = " " + categoryName + " "
         return keywords.contains { keyword in
             keyword.count >= 5
                 ? haystack.contains(" " + keyword)
@@ -151,7 +154,7 @@ enum SearchGenre: String, CaseIterable, Sendable {
 
     /// Büyük/küçük harf ve aksan farkını siler, ayırıcıları boşluğa çevirir:
     /// "🎬 4K | BİLİM-KURGU" → "4k bilim kurgu".
-    private static func folded(_ text: String) -> String {
+    static func folded(_ text: String) -> String {
         let lowered = text.folding(
             options: [.caseInsensitive, .diacriticInsensitive],
             locale: Locale(identifier: "en_US_POSIX")
@@ -203,11 +206,14 @@ enum SearchSuggestionBuilder {
         var cards: [SearchSuggestion] = []
         var claimed = Set<String>()
 
+        // Kategori adları bir kez katlanıyor; her tür aynı listeyi tarıyor.
+        let folded = categories.map { (category: $0, name: SearchGenre.folded($0.name)) }
+
         for genre in SearchGenre.allCases {
-            let matching = categories.filter { genre.matches($0.name) }
+            let matching = folded.filter { genre.matches(folded: $0.name) }
             guard !matching.isEmpty else { continue }
 
-            let ids = matching.map(\.id)
+            let ids = matching.map { $0.category.id }
             let count = ids.reduce(0) { $0 + library.items(kind: kind, categoryID: $1).count }
             guard count >= minimumItemCount else { continue }
 

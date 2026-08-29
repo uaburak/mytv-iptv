@@ -60,6 +60,11 @@ final class SearchViewController: UIViewController {
 
     /// Her tuş vuruşunda katalogun tamamını taramamak için gecikme.
     private var searchWork: DispatchWorkItem?
+    /// Uçuştaki tarama. Yeni bir arama başlarken iptal ediliyor.
+    private var searchTask: Task<Void, Never>?
+    /// Klavye yalnızca sekmeye ilk gelişte açılıyor; detaydan geri dönerken
+    /// kendiliğinden açılması kullanıcının okuduğu listeyi kapatıyordu.
+    private var didFocusSearchBar = false
 
     private let recentSearches = RecentSearchStore()
 
@@ -152,13 +157,18 @@ final class SearchViewController: UIViewController {
         )
     }
 
-    /// Sekmeye her geçişte klavye açık ve yazmaya hazır geliyor.
+    /// Sekmeye **ilk** gelişte klavye açık ve yazmaya hazır geliyor. Sonraki
+    /// gelişlerde açılmıyor: detaydan geri dönen kullanıcı listeye bakmak
+    /// istiyor, klavye onun yarısını kapatıyordu.
+    ///
     /// tvOS'ta arama çubuğunun odağını `UISearchContainerViewController`
     /// kendisi veriyor; oraya elle dokunulmuyor.
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         applySnapshot(animated: false)
         #if os(iOS)
+        guard !didFocusSearchBar else { return }
+        didFocusSearchBar = true
         // Görünüm hiyerarşisi tam oturmadan ilk yanıtlayıcı olmak sessizce
         // başarısız olabiliyor; bir tur sonraya bırakılıyor.
         DispatchQueue.main.async { [weak self] in
@@ -469,22 +479,35 @@ final class SearchViewController: UIViewController {
         suggestions = SearchSuggestionBuilder.suggestions(for: kinds, in: model.library)
     }
 
+    /// Tarama artık arka planda; sonuç geldiğinde sorgu değişmiş olabilir.
+    /// Geciken bir yanıtın daha yeni bir aramanın sonucunu ezmemesi için hem
+    /// görev iptal ediliyor hem de sorgu tekrar karşılaştırılıyor.
     private func runSearch() {
+        searchTask?.cancel()
+
         guard isSearching else {
             results = [:]
             applySnapshot(animated: true)
             return
         }
 
-        var grouped: [MediaKind: [MediaItem]] = [:]
-        // Katalogda aynı yayın birden çok kez bulunabiliyor; tekrarlar hem
-        // yanlış görünüyor hem de diffable veri kaynağını çökertiyor.
-        var seen = Set<MediaID>()
-        for item in model.library.search(query, kinds: kinds) where seen.insert(item.id).inserted {
-            grouped[item.kind, default: []].append(item)
+        let query = self.query
+        let kinds = self.kinds
+        searchTask = Task { [weak self] in
+            guard let self else { return }
+            let matches = await model.library.search(query, kinds: kinds)
+            guard !Task.isCancelled, query == self.query else { return }
+
+            var grouped: [MediaKind: [MediaItem]] = [:]
+            // Katalogda aynı yayın birden çok kez bulunabiliyor; tekrarlar hem
+            // yanlış görünüyor hem de diffable veri kaynağını çökertiyor.
+            var seen = Set<MediaID>()
+            for item in matches where seen.insert(item.id).inserted {
+                grouped[item.kind, default: []].append(item)
+            }
+            results = grouped
+            applySnapshot(animated: true)
         }
-        results = grouped
-        applySnapshot(animated: true)
     }
 
     @objc private func libraryDidChange() {

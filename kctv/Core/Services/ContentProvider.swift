@@ -10,11 +10,11 @@ enum ContentError: LocalizedError, Sendable {
 
     var errorDescription: String? {
         switch self {
-        case .invalidCredentials: "Kullanıcı adı veya şifre hatalı."
-        case .accountExpired: "Hesabın süresi dolmuş."
-        case let .badResponse(status): "Sunucu \(status) döndürdü."
-        case .emptyPlaylist: "Listede oynatılabilir içerik bulunamadı."
-        case let .unsupported(what): "Desteklenmeyen içerik: \(what)"
+        case .invalidCredentials: L10n.errorInvalidCredentials
+        case .accountExpired: L10n.errorAccountExpired
+        case let .badResponse(status): L10n.errorBadResponse(status: status)
+        case .emptyPlaylist: L10n.errorEmptyPlaylist
+        case let .unsupported(what): L10n.errorUnsupported(what)
         case let .network(message): message
         }
     }
@@ -36,8 +36,16 @@ protocol ContentProvider: Sendable {
     /// için bu iki çağrı da async: sağlayıcı durumunu okumaları gerekiyor.
     func playbackURL(for item: MediaItem) async throws -> URL
     func playbackURL(for episode: Episode) async throws -> URL
+
+    /// Sağlayıcının bellekte tuttuğu her şeyi atar; bir sonraki istek yeniden
+    /// ağa gider. Zorlanmış yenilemede (`ContentLibrary.reload(force:)`)
+    /// çağrılıyor. Xtream her isteği zaten ağa attığı için orada işlevsiz;
+    /// M3U'da ise listenin tamamı tek seferde indirilip bellekte tutulduğundan
+    /// bu olmadan "yenile" hiçbir şey yapmıyor.
+    func invalidate() async
 }
 
 extension ContentProvider {
     func shortEPG(for item: MediaItem) async throws -> [EPGEntry] { [] }
+    func invalidate() async {}
 }

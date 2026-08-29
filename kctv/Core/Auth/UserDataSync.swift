@@ -19,6 +19,18 @@ actor UserDataSync {
     private let database = Firestore.firestore()
     private let uid: String
 
+    /// Buluta en son yazılmış belge kimlikleri, koleksiyon adına göre.
+    ///
+    /// Bu olmadan her kayıt koleksiyonun tamamını okuyup tamamını yeniden
+    /// yazıyordu: 200 favorili bir kullanıcıda tek kalp dokunuşu 200'den
+    /// fazla belge yazması demekti. Girişte `loadIDs` bu haritayı zaten
+    /// dolduruyor, dolayısıyla çoğu oturumda ek okuma da yok.
+    private var syncedIDs: [String: Set<String>] = [:]
+
+    /// Buluta en son yazılmış ilerleme kayıtları; değişmeyen kayıt yeniden
+    /// yazılmıyor.
+    private var syncedProgress: [String: PlaybackProgress] = [:]
+
     init(uid: String) {
         self.uid = uid
     }
@@ -81,22 +93,47 @@ actor UserDataSync {
     /// künye içeriğin kendi verisi; katalogdan çözülüyor.
     private func saveIDs(_ ids: [MediaID], in collectionName: String) async throws {
         let collection = userDocument.collection(collectionName)
-        let existing = try await collection.getDocuments()
-        let keep = Set(ids.map { Self.documentID(for: $0) })
+        let desired = Dictionary(
+            ids.map { (Self.documentID(for: $0), $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        // Bilinen durum yoksa (bu oturumda hiç okunmadıysa) bir kez okunuyor.
+        let known: Set<String>
+        if let cached = syncedIDs[collectionName] {
+            known = cached
+        } else {
+            known = Set(try await collection.getDocuments().documents.map(\.documentID))
+        }
+
+        let target = Set(desired.keys)
+        let removed = known.subtracting(target)
+        let added = target.subtracting(known)
+
+        guard !removed.isEmpty || !added.isEmpty else {
+            syncedIDs[collectionName] = target
+            return
+        }
 
         let batch = database.batch()
-        for document in existing.documents where !keep.contains(document.documentID) {
-            batch.deleteDocument(document.reference)
+        for documentID in removed {
+            batch.deleteDocument(collection.document(documentID))
         }
-        for id in ids {
+        for documentID in added {
+            guard let id = desired[documentID] else { continue }
             let data = try Firestore.Encoder().encode(id)
-            batch.setData(data, forDocument: collection.document(Self.documentID(for: id)), merge: false)
+            batch.setData(data, forDocument: collection.document(documentID), merge: false)
         }
         try await batch.commit()
+        // Yalnızca yazma başarılıysa güncelleniyor; hata durumunda bir
+        // sonraki denemede fark yeniden hesaplanıyor.
+        syncedIDs[collectionName] = target
     }
 
     private func loadIDs(in collectionName: String) async throws -> [MediaID] {
         let snapshot = try await userDocument.collection(collectionName).getDocuments()
+        // Fark hesabının başlangıç noktası; ilk yazmada ek okuma gerekmiyor.
+        syncedIDs[collectionName] = Set(snapshot.documents.map(\.documentID))
         return snapshot.documents.compactMap { document in
             if let id = try? document.data(as: MediaID.self) { return id }
             // Eski kayıtlar içeriğin tamamını tutuyordu; kimliği içinden alıp
@@ -106,19 +143,27 @@ actor UserDataSync {
     }
 
     func saveProgress(_ entries: [PlaybackProgress]) async throws {
+        // Yalnızca en son 50 kayıt senkronlanıyor; gerisi cihazda kalır.
+        // Bunların da yalnızca değişmiş olanları yazılıyor: favori dokunuşu
+        // da bu yolu tetikliyor ve ilerleme çoğu zaman aynı kalıyor.
+        let changed = entries.prefix(50).filter { syncedProgress[$0.id] != $0 }
+        guard !changed.isEmpty else { return }
+
         let collection = userDocument.collection("progress")
         let batch = database.batch()
-        // Yalnızca en son 50 kayıt senkronlanıyor; gerisi cihazda kalır.
-        for entry in entries.prefix(50) {
+        for entry in changed {
             let data = try Firestore.Encoder().encode(entry)
             batch.setData(data, forDocument: collection.document(Self.safeID(entry.id)), merge: true)
         }
         try await batch.commit()
+        for entry in changed { syncedProgress[entry.id] = entry }
     }
 
     func loadProgress() async throws -> [PlaybackProgress] {
         let snapshot = try await userDocument.collection("progress").getDocuments()
-        return snapshot.documents.compactMap { try? $0.data(as: PlaybackProgress.self) }
+        let entries = snapshot.documents.compactMap { try? $0.data(as: PlaybackProgress.self) }
+        syncedProgress = Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return entries
     }
 
     // MARK: - Yardımcılar
