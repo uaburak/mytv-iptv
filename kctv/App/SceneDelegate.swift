@@ -23,14 +23,19 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.makeKeyAndVisible()
         self.window = window
 
+        // `canHandle` OAuth yönlendirme akışının parçası; o akış tvOS'ta yok.
+        #if os(iOS)
         if let urlContext = connectionOptions.urlContexts.first {
             _ = Auth.auth().canHandle(urlContext.url)
         }
+        #endif
     }
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+        #if os(iOS)
         for urlContext in URLContexts {
             _ = Auth.auth().canHandle(urlContext.url)
         }
+        #endif
     }
 }

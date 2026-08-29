@@ -40,11 +40,14 @@ final class AddPlaylistViewController: UIViewController {
         view.backgroundColor = AppPalette.background
         let isTR = AppLanguage.current.effectiveLanguageCode == "tr"
         title = editingPlaylist == nil ? (isTR ? "Liste Ekle" : "Add Playlist") : (isTR ? "Listeyi Düzenle" : "Edit Playlist")
+        // `.close` sistem öğesi tvOS'ta yok; orada Menu tuşu kapatıyor.
+        #if os(iOS)
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .close,
             target: self,
             action: #selector(close)
         )
+        #endif
         buildLayout()
         prefillIfEditing()
         updateFieldVisibility()
@@ -85,7 +88,7 @@ final class AddPlaylistViewController: UIViewController {
         configuration.title = editingPlaylist == nil ? (isTR ? "Bağlan ve Kaydet" : "Connect & Save") : L10n.save
         configuration.cornerStyle = .capsule
         connectButton.configuration = configuration
-        connectButton.addTarget(self, action: #selector(validateAndSave), for: .touchUpInside)
+        connectButton.addTarget(self, action: #selector(validateAndSave), for: .primaryActionTriggered)
         connectButton.heightAnchor.constraint(equalToConstant: 50).isActive = true
 
         let note = UILabel()
@@ -112,7 +115,11 @@ final class AddPlaylistViewController: UIViewController {
         view.addSubview(spinner)
 
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            // Güvenli alana değil ekranın tepesine: form navigation bar'ın
+            // ardından geçip bulanıklaşıyor, sert bir çizgide kesilmiyor.
+            // Dinlenme konumundaki boşluğu `contentInsetAdjustmentBehavior`
+            // varsayılanı veriyor.
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),

@@ -1,6 +1,15 @@
 import Foundation
 
 /// TMDB'den alınan görsel ve künye zenginleştirmesi.
+/// Künyedeki tek oyuncu. Ad tek başına yetmiyordu: detay ekranında Apple TV'deki
+/// gibi fotoğraf ve canlandırdığı karakter gösteriliyor.
+struct TMDBCastMember: Codable, Sendable, Hashable, Identifiable {
+    var id: String { name }
+    var name: String
+    var character: String?
+    var profileURL: URL?
+}
+
 struct TMDBMetadata: Codable, Sendable {
     /// Şeffaf beyaz logo (PNG). Varsa başlık yerine bu gösteriliyor.
     var logoURL: URL?
@@ -22,6 +31,8 @@ struct TMDBMetadata: Codable, Sendable {
     var country: String?
     var director: String?
     var cast: [String] = []
+    /// Fotoğraflı künye. `cast` geriye dönük uyumluluk için duruyor.
+    var castMembers: [TMDBCastMember] = []
     var trailerURL: URL?
 }
 
@@ -127,10 +138,17 @@ actor TMDBService {
             return String(str.prefix(4))
         }
 
-        let castList = details?.credits?.cast?
+        let castItems = details?.credits?.cast?
             .sorted(by: { ($0.order ?? 99) < ($1.order ?? 99) })
-            .prefix(12)
-            .map(\.name) ?? []
+            .prefix(16) ?? []
+        let castMembers = castItems.map { item in
+            TMDBCastMember(
+                name: item.name,
+                character: item.character?.nilIfEmpty,
+                profileURL: Self.imageURL(item.profilePath, size: "w185")
+            )
+        }
+        let castList = castMembers.map(\.name)
 
         let director = details?.credits?.crew?
             .first(where: { $0.job == "Director" })?.name
@@ -156,7 +174,8 @@ actor TMDBService {
             originalLanguage: details?.originalLanguage?.uppercased(),
             country: details?.productionCountries?.compactMap(\.name).first,
             director: director,
-            cast: Array(castList),
+            cast: castList,
+            castMembers: castMembers,
             trailerURL: trailerURL
         )
     }
@@ -498,6 +517,13 @@ struct TMDBDetailResponse: Decodable {
             var name: String
             var character: String?
             var order: Int?
+            var profilePath: String?
+
+            // Decoder snake_case dönüşümü yapmıyor; eşleme elle veriliyor.
+            enum CodingKeys: String, CodingKey {
+                case name, character, order
+                case profilePath = "profile_path"
+            }
         }
 
         struct CrewItem: Decodable {

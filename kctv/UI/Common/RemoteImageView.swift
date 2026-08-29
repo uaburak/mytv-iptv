@@ -19,8 +19,16 @@ final class RemoteImageView: UIView {
         didSet { initialsLabel.isHidden = !showsInitials }
     }
 
+    /// Görünüm daireye yuvarlanıyor. Yarıçapı çağıranın hesaplaması güvenilir
+    /// değildi: hücrenin düzen turunda görünümün son boyutu henüz oturmamış
+    /// olabiliyor ve daire kare kalıyordu.
+    var isCircular = false {
+        didSet { setNeedsLayout() }
+    }
+
     private var currentURL: URL?
     private var loadTask: Task<Void, Never>?
+
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -61,6 +69,9 @@ final class RemoteImageView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         gradientLayer.frame = bounds
+        if isCircular {
+            layer.cornerRadius = min(bounds.width, bounds.height) / 2
+        }
     }
 
     func configure(url: URL?, title: String, displayWidth: CGFloat) {

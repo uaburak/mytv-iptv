@@ -68,7 +68,6 @@ final class SignInViewController: UIViewController {
         subtitle.numberOfLines = 0
 
         let appleButton = ASAuthorizationAppleIDButton(type: .signIn, style: .white)
-        appleButton.addTarget(self, action: #selector(startAppleSignIn), for: .touchUpInside)
         appleButton.addTarget(self, action: #selector(startAppleSignIn), for: .primaryActionTriggered)
         appleButton.heightAnchor.constraint(equalToConstant: 50).isActive = true
 
@@ -79,8 +78,13 @@ final class SignInViewController: UIViewController {
         googleConfiguration.baseForegroundColor = .white
         googleConfiguration.cornerStyle = .capsule
         googleButton.configuration = googleConfiguration
-        googleButton.addTarget(self, action: #selector(startGoogleSignIn), for: .touchUpInside)
+        googleButton.addTarget(self, action: #selector(startGoogleSignIn), for: .primaryActionTriggered)
         googleButton.heightAnchor.constraint(equalToConstant: 50).isActive = true
+        // Google girişi web yönlendirmesine dayanıyor; tvOS'ta o akış yok.
+        // Çalışmayacak bir buton göstermek yerine gizleniyor.
+        #if os(tvOS)
+        googleButton.isHidden = true
+        #endif
 
         errorLabel.font = .systemFont(ofSize: 13)
         errorLabel.textColor = .systemOrange
@@ -98,7 +102,7 @@ final class SignInViewController: UIViewController {
 
         guestButton.setTitle(L10n.continueAsGuest, for: .normal)
         guestButton.setTitleColor(AppPalette.secondaryText, for: .normal)
-        guestButton.addTarget(self, action: #selector(continueAsGuest), for: .touchUpInside)
+        guestButton.addTarget(self, action: #selector(continueAsGuest), for: .primaryActionTriggered)
         guestButton.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(guestButton)
 

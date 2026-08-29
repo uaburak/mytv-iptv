@@ -21,7 +21,10 @@ final class FavoritesViewController: UIViewController {
         updateLocalizedTexts()
 
         tableView.backgroundColor = .clear
+        // Ayırıcı stili tvOS'ta yok.
+        #if os(iOS)
         tableView.separatorStyle = .none
+        #endif
         tableView.dataSource = self
         tableView.delegate = self
         tableView.rowHeight = UITableView.automaticDimension
@@ -39,7 +42,11 @@ final class FavoritesViewController: UIViewController {
         view.addSubview(emptyLabel)
 
         NSLayoutConstraint.activate([
-            tableView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            // Güvenli alana değil ekranın tepesine: içerik navigation bar'ın
+            // ardından geçip bulanıklaşıyor, sert bir çizgide kesilmiyor.
+            // Dinlenme konumundaki boşluğu `contentInsetAdjustmentBehavior`
+            // varsayılanı veriyor.
+            tableView.topAnchor.constraint(equalTo: view.topAnchor),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -73,7 +80,11 @@ final class FavoritesViewController: UIViewController {
     }
 
     @objc private func reload() {
-        items = model.activity.favorites
+        // Favoriler yalnızca kimlik olarak saklanıyor; içerik katalogdan
+        // çözülüyor. Katalogda karşılığı olmayan kimlikler (liste değişmiş,
+        // sağlayıcı içeriği kaldırmış) listelenmiyor ama kaydı silinmiyor —
+        // içerik geri gelirse favori de geri geliyor.
+        items = model.activity.favoriteIDs.compactMap { model.library.item(for: $0) }
         emptyLabel.isHidden = !items.isEmpty
         tableView.reloadData()
     }
@@ -106,6 +117,8 @@ extension FavoritesViewController: UITableViewDataSource, UITableViewDelegate {
         navigationController?.pushViewController(controller, animated: true)
     }
 
+    /// Kaydırmalı satır eylemleri tvOS'ta yok.
+    #if os(iOS)
     func tableView(
         _ tableView: UITableView,
         trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath
@@ -118,4 +131,5 @@ extension FavoritesViewController: UITableViewDataSource, UITableViewDelegate {
         }
         return UISwipeActionsConfiguration(actions: [remove])
     }
+    #endif
 }

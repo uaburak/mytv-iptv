@@ -75,6 +75,7 @@ enum L10n {
     static var play: String { isTurkish ? "Oynat" : "Play" }
     static var resume: String { isTurkish ? "Sürdür" : "Resume" }
     static var playFirstEpisode: String { isTurkish ? "İlk Bölümü Oynat" : "Play Episode 1" }
+    static var nextEpisode: String { isTurkish ? "Sıradaki Bölüm" : "Next Episode" }
     static var episodes: String { isTurkish ? "Bölümler" : "Episodes" }
     static var season: String { isTurkish ? "Sezon" : "Season" }
     static var more: String { isTurkish ? "DAHA FAZLASI" : "MORE" }
@@ -89,11 +90,18 @@ enum L10n {
     static var status: String { isTurkish ? "Durum" : "Status" }
     static var country: String { isTurkish ? "Ülke" : "Country" }
     static var runtime: String { isTurkish ? "Süre" : "Runtime" }
+    static var info: String { isTurkish ? "Bilgi" : "Info" }
     static var watchTrailer: String { isTurkish ? "Fragman" : "Trailer" }
 
     // MARK: - Ana Sayfa (Home) & Katalog
+    static var moreInfo: String { isTurkish ? "Daha Fazla Bilgi" : "More Info" }
     static var continueWatching: String { isTurkish ? "İzlemeye Devam Et" : "Continue Watching" }
+    static var myWatchlist: String { isTurkish ? "İzleme Listem" : "My Watchlist" }
     static var liveTV: String { isTurkish ? "Canlı Yayın" : "Live TV" }
+    static var guide: String { isTurkish ? "Rehber" : "Guide" }
+    static var nextUp: String { isTurkish ? "Sonra" : "Next" }
+    static var noProgramInfo: String { isTurkish ? "Program bilgisi yok" : "No programme info" }
+    static var noChannels: String { isTurkish ? "Kanal bulunamadı" : "No channels found" }
     static var movies: String { isTurkish ? "Filmler" : "Movies" }
     static var series: String { isTurkish ? "Diziler" : "Series" }
     static var recentlyAdded: String { isTurkish ? "Son Eklenenler" : "Recently Added" }
@@ -104,6 +112,12 @@ enum L10n {
     static var searchPlaceholder: String { isTurkish ? "Film, dizi veya kanal ara..." : "Search movies, series or channels..." }
     static var noSearchResults: String { isTurkish ? "Sonuç bulunamadı" : "No results found" }
     static var searchPrompt: String { isTurkish ? "Aramak istediğiniz başlığı yazın" : "Type a title to start searching" }
+    static var recentSearches: String { isTurkish ? "Son Aramalar" : "Recent Searches" }
+    static var allKinds: String { isTurkish ? "Tümü" : "All" }
+    static var categoryEmpty: String {
+        isTurkish ? "Bu kategoride içerik yok" : "Nothing in this category"
+    }
+    static var clearRecentSearches: String { isTurkish ? "Temizle" : "Clear" }
 
     // MARK: - Favoriler (Favorites)
     static var favoritesEmptyTitle: String { isTurkish ? "Favori Listeniz Boş" : "No Favorites Yet" }
@@ -132,6 +146,11 @@ enum L10n {
     static var appTagline: String { isTurkish ? "Kendi listeni ekle, bütün cihazlarında aynı yerden izle." : "Add your playlist, watch everywhere seamlessly." }
     static var signInWithApple: String { isTurkish ? "Apple ile Giriş Yap" : "Sign in with Apple" }
     static var signInWithGoogle: String { isTurkish ? "Google ile Giriş Yap" : "Sign in with Google" }
+    static var googleSignInUnavailable: String {
+        isTurkish
+            ? "Google ile giriş bu cihazda desteklenmiyor. Apple ile giriş yapabilirsin."
+            : "Google sign-in isn't supported on this device. You can sign in with Apple."
+    }
     static var continueAsGuest: String { isTurkish ? "Misafir Olarak Devam Et" : "Continue as Guest" }
     static var addPlaylist: String { isTurkish ? "Çalma Listesi Ekle" : "Add Playlist" }
     static var noPlaylistsTitle: String { isTurkish ? "Henüz bir listen yok" : "No playlists yet" }
@@ -152,6 +171,10 @@ enum L10n {
     static var addToFavorites: String { isTurkish ? "Favorilere Ekle" : "Add to Favorites" }
     static var removeFromFavorites: String { isTurkish ? "Favorilerden Çıkar" : "Remove from Favorites" }
     static var streamFailed: String { isTurkish ? "Yayın açılamadı." : "Playback failed." }
+    static var libraryLoadFailed: String {
+        isTurkish ? "İçerikler yüklenemedi" : "Couldn't load content"
+    }
+    static var retry: String { isTurkish ? "Tekrar Dene" : "Try Again" }
     static var audioTracks: String { isTurkish ? "Ses Parçası" : "Audio Track" }
     static var subtitles: String { isTurkish ? "Altyazı" : "Subtitles" }
     static var subtitlesOff: String { isTurkish ? "Altyazı Kapalı" : "Subtitles Off" }

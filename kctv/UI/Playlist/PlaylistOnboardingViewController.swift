@@ -37,7 +37,7 @@ final class PlaylistOnboardingViewController: UIViewController {
         addConfiguration.imagePadding = 6
         addConfiguration.cornerStyle = .capsule
         addButton.configuration = addConfiguration
-        addButton.addTarget(self, action: #selector(addPlaylist), for: .touchUpInside)
+        addButton.addTarget(self, action: #selector(addPlaylist), for: .primaryActionTriggered)
         addButton.heightAnchor.constraint(equalToConstant: 48).isActive = true
 
         updateLocalizedTexts()

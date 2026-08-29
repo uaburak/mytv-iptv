@@ -21,6 +21,12 @@ final class DetailViewController: UIViewController {
     private let creditsSection = UIStackView()
     private let relatedSection = UIStackView()
 
+    /// Sezon çipleri ve bölüm rayı ayrı tutuluyor: sezon değişince yalnızca
+    /// ray yenileniyor. Çipler yeniden kurulsaydı odaktaki buton yok olur ve
+    /// odak listenin başına düşerdi.
+    private var seasonChipButtons: [Int: UIButton] = [:]
+    private var episodeRowView: UIView?
+
     private var isPlotExpanded = false
     private var favoriteBarButton: UIBarButtonItem?
     private var didApplyInitialLayout = false
@@ -44,7 +50,7 @@ final class DetailViewController: UIViewController {
         view.backgroundColor = AppPalette.background
         // Başlık hero'da duruyor; navigasyonda tekrar etmiyor.
         title = nil
-        navigationItem.largeTitleDisplayMode = .never
+        navigationItem.setPrefersLargeTitle(false)
         setupToolbarItems()
         buildLayout()
         wireActions()
@@ -100,12 +106,24 @@ final class DetailViewController: UIViewController {
     /// Hero yüksekliği. Backdrop 16:9 olduğu için ekranın yaklaşık %74'ü
     /// ideal dengeyi sağlıyor (~642pt @ iPhone 17 Pro).
     private static func heroHeight(forScreenHeight height: CGFloat) -> CGFloat {
-        max(560, height * 0.74)
+        #if os(tvOS)
+        // Apple TV düzeni: ilk görünümde arka plan görseli tüm ekranı kaplıyor,
+        // içerik onun üzerinde solda duruyor. Bölümler ve künye aşağıda.
+        return height
+        #else
+        return max(560, height * 0.74)
+        #endif
     }
 
     // MARK: - Toolbar
 
+    /// tvOS'ta navigasyon çubuğuna buton konmuyor: sağ üst köşe kumandayla
+    /// ulaşması zahmetli bir yer ve paylaşım sayfası zaten o platformda yok.
+    /// Favori, hero'daki aksiyon satırında Oynat'ın yanında duruyor.
     private func setupToolbarItems() {
+        #if os(tvOS)
+        updateFavoriteButton()
+        #else
         let current = detail?.item ?? item
         let isFav = model.activity.isFavorite(current)
 
@@ -130,6 +148,14 @@ final class DetailViewController: UIViewController {
 
         // İki buton arasında spacer ile ayrı ayrı konumlandırma (Sağdan sola: Favori | Spacer | Paylaş)
         navigationItem.rightBarButtonItems = [favorite, spacer, share]
+        #endif
+    }
+
+    /// tvOS'taki hero favori butonunun simgesini duruma göre günceller.
+    private func updateFavoriteButton() {
+        let isFav = model.activity.isFavorite(detail?.item ?? item)
+        hero.favoriteButton.configuration?.image = UIImage(systemName: isFav ? "heart.fill" : "heart")
+        hero.favoriteButton.configuration?.baseForegroundColor = isFav ? .systemRed : .white
     }
 
     private var favoriteImage: UIImage? {
@@ -158,7 +184,7 @@ final class DetailViewController: UIViewController {
 
         // Gövde: şeffaftan siyaha geçen zemin, üzerinde bölümler.
         bodyStack.axis = .vertical
-        bodyStack.spacing = 28
+        bodyStack.spacing = metrics.detailSectionSpacing
         bodyStack.isLayoutMarginsRelativeArrangement = true
         bodyStack.directionalLayoutMargins = .init(top: 28, leading: 0, bottom: 40, trailing: 0)
         // Geçiş rampası uzun olsun; siyah zemin yumuşak başlasın.
@@ -174,7 +200,7 @@ final class DetailViewController: UIViewController {
 
         for section in [episodesSection, creditsSection, relatedSection] {
             section.axis = .vertical
-            section.spacing = 12
+            section.spacing = metrics.rowHeaderGap
             section.isHidden = true
         }
 
@@ -202,9 +228,13 @@ final class DetailViewController: UIViewController {
     }
 
     private func wireActions() {
-        hero.playButton.addTarget(self, action: #selector(playPrimary), for: .touchUpInside)
-        hero.watchlistButton.addTarget(self, action: #selector(toggleWatchlist), for: .touchUpInside)
-        hero.moreButton.addTarget(self, action: #selector(togglePlot), for: .touchUpInside)
+        hero.playButton.addTarget(self, action: #selector(playPrimary), for: .primaryActionTriggered)
+        hero.watchlistButton.addTarget(self, action: #selector(toggleWatchlist), for: .primaryActionTriggered)
+        hero.moreButton.addTarget(self, action: #selector(togglePlot), for: .primaryActionTriggered)
+        #if os(tvOS)
+        hero.favoriteButton.addTarget(self, action: #selector(toggleFavorite), for: .primaryActionTriggered)
+        hero.episodesButton.addTarget(self, action: #selector(scrollToEpisodes), for: .primaryActionTriggered)
+        #endif
     }
 
     // MARK: - İçerik
@@ -263,6 +293,10 @@ final class DetailViewController: UIViewController {
         if let country = detail?.country ?? tmdbMetadata?.country { metaParts.append(country) }
         hero.metaLabel.text = metaParts.joined(separator: "   ")
 
+        #if os(tvOS)
+        hero.episodesButton.isHidden = !(detail?.hasEpisodes ?? false)
+        #endif
+
         renderEpisodes()
         renderCredits()
         renderRelated()
@@ -292,101 +326,147 @@ final class DetailViewController: UIViewController {
 
         let headerRow = UIStackView(arrangedSubviews: [header])
         headerRow.axis = .horizontal
-        if detail.seasons.count > 1 {
-            let seasonButton = UIButton(type: .system)
-            seasonButton.setTitle(season.name, for: .normal)
-            seasonButton.showsMenuAsPrimaryAction = true
-            seasonButton.menu = UIMenu(children: detail.seasons.map { candidate in
-                UIAction(title: candidate.name, state: candidate.number == season.number ? .on : .off) { [weak self] _ in
-                    self?.selectedSeason = candidate.number
-                    self?.renderEpisodes()
-                }
-            })
-            headerRow.addArrangedSubview(UIView())
-            headerRow.addArrangedSubview(seasonButton)
-        }
+        headerRow.alignment = .center
         headerRow.isLayoutMarginsRelativeArrangement = true
         headerRow.directionalLayoutMargins = .init(
             top: 0, leading: metrics.screenPadding, bottom: 0, trailing: metrics.screenPadding
         )
         episodesSection.addArrangedSubview(headerRow)
 
-        for episode in season.episodes {
-            episodesSection.addArrangedSubview(makeEpisodeRow(episode))
+        // Sezonlar yan yana çipler. Bağlam menüsü kumandayla iki adım
+        // demekti ve seçili sezon menüyü açmadan görünmüyordu.
+        if detail.seasons.count > 1 {
+            episodesSection.addArrangedSubview(makeSeasonChips(detail.seasons, selected: season))
         }
+        episodeRowView = makeEpisodeRow(for: season, series: detail.item)
+        episodesSection.addArrangedSubview(episodeRowView!)
     }
 
-    private func makeEpisodeRow(_ episode: Episode) -> UIView {
-        let still = RemoteImageView()
-        let width = metrics.posterWidth * 0.85
-        still.configure(url: episode.stillURL, title: episode.title, displayWidth: width)
-        still.layer.cornerRadius = 8
-        still.clipsToBounds = true
-        still.translatesAutoresizingMaskIntoConstraints = false
-        still.widthAnchor.constraint(equalToConstant: width).isActive = true
-        still.heightAnchor.constraint(equalToConstant: width * 9 / 16).isActive = true
+    /// Sezon değiştiğinde yalnızca bölüm rayı yenileniyor; çipler yerinde
+    /// kalıyor, dolayısıyla odak seçilen sezonun üstünde kalıyor.
+    private func selectSeason(_ number: Int) {
+        guard selectedSeason != number, let detail else { return }
+        selectedSeason = number
 
-        let number = UILabel()
-        number.text = episode.numberText
-        number.font = .systemFont(ofSize: 15)
-        number.textColor = AppPalette.secondaryText
+        for (seasonNumber, button) in seasonChipButtons {
+            applySeasonChipStyle(to: button, isSelected: seasonNumber == number)
+        }
 
-        let name = UILabel()
-        name.text = episode.title
-        name.font = .systemFont(ofSize: 15)
-        name.textColor = .white
+        guard let season = detail.seasons.first(where: { $0.number == number }) else { return }
+        let newRow = makeEpisodeRow(for: season, series: detail.item)
+        if let old = episodeRowView, let index = episodesSection.arrangedSubviews.firstIndex(of: old) {
+            old.removeFromSuperview()
+            episodesSection.insertArrangedSubview(newRow, at: index)
+        } else {
+            episodesSection.addArrangedSubview(newRow)
+        }
+        episodeRowView = newRow
+    }
 
-        let duration = UILabel()
-        duration.text = episode.durationText
-        duration.font = .systemFont(ofSize: 15)
-        duration.textColor = AppPalette.secondaryText
+    private func makeEpisodeRow(for season: Season, series: MediaItem) -> UIView {
 
-        let topRow = UIStackView(arrangedSubviews: [number, name, UIView(), duration])
-        topRow.axis = .horizontal
-        topRow.spacing = 8
-
-        let plot = UILabel()
-        plot.text = episode.plot
-        plot.font = .systemFont(ofSize: 13)
-        plot.textColor = AppPalette.secondaryText
-        plot.numberOfLines = 3
-        plot.isHidden = episode.plot?.isEmpty != false
-
-        let textStack = UIStackView(arrangedSubviews: [topRow, plot])
-        textStack.axis = .vertical
-        textStack.spacing = 4
-
-        let row = UIStackView(arrangedSubviews: [still, textStack])
-        row.axis = .horizontal
-        row.spacing = 14
-        row.alignment = .top
-        row.isLayoutMarginsRelativeArrangement = true
-        row.directionalLayoutMargins = .init(
-            top: 10, leading: metrics.screenPadding, bottom: 10, trailing: metrics.screenPadding
+        // Apple TV'de bölümler dikey liste değil yatay bir rayda, yatay
+        // görsellerle yan yana duruyor.
+        let width = metrics.clipCardWidth
+        let cardSize = CGSize(width: width, height: width * 9 / 16 + metrics.clipCardTextHeight)
+        return HorizontalCardRow<MediaClipCell, Episode>(
+            values: season.episodes,
+            cardSize: cardSize,
+            spacing: metrics.cardSpacing,
+            contentInset: metrics.screenPadding,
+            reuseID: MediaClipCell.reuseID,
+            configureCell: { [weak self] cell, episode in
+                guard let self else { return }
+                let progress = model.activity.progress(for: series.id, episodeID: episode.id)
+                cell.configure(
+                    title: [episode.numberText, episode.title].compactMap { $0 }.joined(separator: " · "),
+                    durationText: episode.durationText,
+                    imageURL: episode.stillURL,
+                    metrics: metrics,
+                    width: width,
+                    playedFraction: progress?.fraction
+                )
+            },
+            onSelect: { [weak self] episode, _ in
+                guard let self else { return }
+                Task { await self.model.play(episode, in: series) }
+            }
         )
+    }
 
-        let container = UIControl()
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.isUserInteractionEnabled = false
-        container.addSubview(row)
+    /// Sezon çipleri: seçili olan accent renginde, hepsi yan yana.
+    private func makeSeasonChips(_ seasons: [Season], selected: Season) -> UIView {
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        seasonChipButtons = [:]
+        for candidate in seasons {
+            let button = UIButton(type: .system)
+            applySeasonChipStyle(to: button, isSelected: candidate.number == selected.number)
+            button.configuration?.title = candidate.name
+            button.addSpringPressFeedback(scale: 0.93)
+            button.addAction(UIAction { [weak self] _ in
+                self?.selectSeason(candidate.number)
+            }, for: .primaryActionTriggered)
+            seasonChipButtons[candidate.number] = button
+            stack.addArrangedSubview(button)
+        }
+
+        let scroller = UIScrollView()
+        scroller.showsHorizontalScrollIndicator = false
+        #if os(tvOS)
+        scroller.clipsToBounds = false
+        #endif
+        scroller.translatesAutoresizingMaskIntoConstraints = false
+        scroller.addSubview(stack)
+
         NSLayoutConstraint.activate([
-            row.topAnchor.constraint(equalTo: container.topAnchor),
-            row.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            row.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            row.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: scroller.contentLayoutGuide.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: scroller.contentLayoutGuide.bottomAnchor),
+            stack.leadingAnchor.constraint(
+                equalTo: scroller.contentLayoutGuide.leadingAnchor, constant: metrics.screenPadding
+            ),
+            stack.trailingAnchor.constraint(
+                equalTo: scroller.contentLayoutGuide.trailingAnchor, constant: -metrics.screenPadding
+            ),
+            stack.heightAnchor.constraint(equalTo: scroller.frameLayoutGuide.heightAnchor),
         ])
-        container.addAction(UIAction { [weak self] _ in
-            guard let self else { return }
-            Task { await self.model.play(episode, in: self.detail?.item ?? self.item) }
-        }, for: .touchUpInside)
-        return container
+        return scroller
+    }
+
+    /// Seçili çip düz beyaz zemin, siyah metin.
+    ///
+    /// Cam konfigürasyonda `baseBackgroundColor` camın **tonu** oluyor; beyaz
+    /// verilince saydam kalıyor ve zemin değişmiş gibi görünmüyordu. Seçili
+    /// çip bu yüzden cam değil dolu.
+    private func applySeasonChipStyle(to button: UIButton, isSelected: Bool) {
+        let title = button.configuration?.title
+        if isSelected {
+            var configuration = UIButton.Configuration.filled()
+            configuration.cornerStyle = .capsule
+            configuration.baseBackgroundColor = .white
+            configuration.baseForegroundColor = .black
+            configuration.contentInsets = .init(top: 8, leading: 16, bottom: 8, trailing: 16)
+            configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+                var outgoing = incoming
+                outgoing.font = .systemFont(ofSize: 14, weight: .semibold)
+                return outgoing
+            }
+            button.configuration = configuration
+        } else {
+            button.configuration = .appGlass(horizontalInset: 16, verticalInset: 8, fontSize: 14)
+        }
+        button.configuration?.title = title
     }
 
     private func renderCredits() {
         creditsSection.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
         // TMDB veya sağlayıcıdan gelen künye ve detaylar
-        let cast = tmdbMetadata?.cast.nilIfEmptyList ?? detail?.cast.nilIfEmptyList ?? item.cast
+        let castMembers = tmdbMetadata?.castMembers ?? []
+        let castNames = tmdbMetadata?.cast.nilIfEmptyList ?? detail?.cast.nilIfEmptyList ?? item.cast
         let director = tmdbMetadata?.director ?? detail?.director ?? item.director
         let originalTitle = tmdbMetadata?.originalTitle
         let originalLang = tmdbMetadata?.originalLanguage
@@ -394,63 +474,150 @@ final class DetailViewController: UIViewController {
         let status = tmdbMetadata?.status
         let country = tmdbMetadata?.country ?? detail?.country
         let trailerURL = tmdbMetadata?.trailerURL ?? detail?.trailerURL ?? item.trailerURL
+        let current = detail?.item ?? item
 
-        let hasAnyInfo = !cast.isEmpty || director != nil || originalTitle != nil || releaseDate != nil || trailerURL != nil
+        let hasAnyInfo = !castNames.isEmpty || director != nil || originalTitle != nil
+            || releaseDate != nil || trailerURL != nil
         guard hasAnyInfo else {
             creditsSection.isHidden = true
             return
         }
         creditsSection.isHidden = false
-        creditsSection.spacing = 18
+        creditsSection.spacing = metrics.detailSectionSpacing
+        // Raylar kenardan kenara; kenar payını kendileri veriyor.
+        creditsSection.isLayoutMarginsRelativeArrangement = false
 
-        if let director {
-            creditsSection.addArrangedSubview(makeCreditBlock(title: L10n.director, value: director))
-        }
-        if !cast.isEmpty {
-            creditsSection.addArrangedSubview(
-                makeCreditBlock(title: L10n.cast, value: cast.prefix(12).joined(separator: ", "))
-            )
-        }
-        if let originalTitle, originalTitle.lowercased() != item.title.lowercased() {
-            let langSuffix = originalLang != nil ? " (\(originalLang!))" : ""
-            creditsSection.addArrangedSubview(
-                makeCreditBlock(title: L10n.originalTitle, value: "\(originalTitle)\(langSuffix)")
-            )
-        }
-        if let releaseDate, !releaseDate.isEmpty {
-            creditsSection.addArrangedSubview(makeCreditBlock(title: L10n.releaseYear, value: releaseDate))
-        }
-        if let country, !country.isEmpty {
-            creditsSection.addArrangedSubview(makeCreditBlock(title: L10n.country, value: country))
-        }
-        if let status, !status.isEmpty {
-            creditsSection.addArrangedSubview(makeCreditBlock(title: L10n.status, value: status))
-        }
+        // 1) Fragman — bölümlerle aynı yatay kart düzeninde.
         if let trailerURL {
-            let trailerButton = makeTrailerButton(url: trailerURL)
-            creditsSection.addArrangedSubview(trailerButton)
+            creditsSection.addArrangedSubview(makeSectionHeader(L10n.watchTrailer))
+            creditsSection.addArrangedSubview(makeTrailerRow(url: trailerURL, item: current))
         }
 
-        creditsSection.isLayoutMarginsRelativeArrangement = true
-        creditsSection.directionalLayoutMargins = .init(
+        // 2) Oyuncular — TMDB fotoğraflarıyla yuvarlak kartlar.
+        if !castMembers.isEmpty {
+            creditsSection.addArrangedSubview(makeSectionHeader(L10n.cast))
+            creditsSection.addArrangedSubview(makeCastRow(castMembers))
+        } else if !castNames.isEmpty {
+            // TMDB yoksa elimizde yalnızca isim var; düz metin kalıyor.
+            creditsSection.addArrangedSubview(makeSectionHeader(L10n.cast))
+            creditsSection.addArrangedSubview(
+                inset(makeCreditBlock(title: "", value: castNames.prefix(12).joined(separator: ", ")))
+            )
+        }
+
+        // 3) Bilgi ızgarası.
+        var fields: [(String, String)] = []
+        if let director { fields.append((L10n.director, director)) }
+        if let originalTitle, originalTitle.lowercased() != item.title.lowercased() {
+            let langSuffix = originalLang.map { " (\($0))" } ?? ""
+            fields.append((L10n.originalTitle, originalTitle + langSuffix))
+        }
+        if let releaseDate, !releaseDate.isEmpty { fields.append((L10n.releaseYear, releaseDate)) }
+        if let duration = current.durationText { fields.append((L10n.runtime, duration)) }
+        if let country, !country.isEmpty { fields.append((L10n.country, country)) }
+        if let status, !status.isEmpty { fields.append((L10n.status, status)) }
+
+        if !fields.isEmpty {
+            creditsSection.addArrangedSubview(makeSectionHeader(L10n.info))
+            creditsSection.addArrangedSubview(inset(makeInfoGrid(fields)))
+        }
+    }
+
+    /// Ray başlığı; kenar payı içeride veriliyor.
+    private func makeSectionHeader(_ title: String) -> UIView {
+        let label = UILabel()
+        label.text = title
+        label.font = metrics.rowTitleFont
+        label.textColor = .white
+        return inset(label)
+    }
+
+    /// Görünümü ekran kenar payıyla saran yardımcı.
+    private func inset(_ view: UIView) -> UIView {
+        let row = UIStackView(arrangedSubviews: [view])
+        row.isLayoutMarginsRelativeArrangement = true
+        row.directionalLayoutMargins = .init(
             top: 0, leading: metrics.screenPadding, bottom: 0, trailing: metrics.screenPadding
+        )
+        return row
+    }
+
+    private func makeCastRow(_ members: [TMDBCastMember]) -> UIView {
+        let width = metrics.castPhotoWidth
+        // Daire + ad + karakter satırı.
+        let cardSize = CGSize(width: width, height: width + metrics.clipCardTextHeight)
+        return HorizontalCardRow<CastMemberCell, TMDBCastMember>(
+            values: members,
+            cardSize: cardSize,
+            spacing: metrics.cardSpacing,
+            contentInset: metrics.screenPadding,
+            reuseID: CastMemberCell.reuseID,
+            configureCell: { [weak self] cell, member in
+                guard let self else { return }
+                cell.configure(member: member, metrics: metrics, photoWidth: width)
+            }
         )
     }
 
+    private func makeTrailerRow(url: URL, item: MediaItem) -> UIView {
+        let width = metrics.clipCardWidth
+        let cardSize = CGSize(width: width, height: width * 9 / 16 + metrics.clipCardTextHeight)
+        return HorizontalCardRow<MediaClipCell, URL>(
+            values: [url],
+            cardSize: cardSize,
+            spacing: metrics.cardSpacing,
+            contentInset: metrics.screenPadding,
+            reuseID: MediaClipCell.reuseID,
+            configureCell: { [weak self] cell, _ in
+                guard let self else { return }
+                cell.configure(
+                    title: L10n.watchTrailer,
+                    durationText: nil,
+                    imageURL: tmdbMetadata?.backdropURL ?? item.backdropURL,
+                    metrics: metrics,
+                    width: width,
+                    playedFraction: nil
+                )
+            },
+            onSelect: { url, _ in
+                UIApplication.shared.open(url)
+            }
+        )
+    }
+
+    /// İki kolonlu bilgi ızgarası; Apple TV'nin "Bilgi" bloğunun karşılığı.
+    private func makeInfoGrid(_ fields: [(String, String)]) -> UIView {
+        let columns = UIStackView()
+        columns.axis = .horizontal
+        columns.distribution = .fillEqually
+        columns.spacing = metrics.cardSpacing
+        columns.alignment = .top
+
+        let half = (fields.count + 1) / 2
+        for slice in [fields.prefix(half), fields.suffix(from: half)] {
+            let column = UIStackView()
+            column.axis = .vertical
+            column.spacing = 18
+            column.alignment = .leading
+            for (title, value) in slice {
+                column.addArrangedSubview(InfoFieldView(title: title, value: value, metrics: metrics))
+            }
+            // Tek alan kalırsa kolon boş kalabiliyor; yine de yer tutuyor.
+            columns.addArrangedSubview(column)
+        }
+        return columns
+    }
+
     private func makeTrailerButton(url: URL) -> UIView {
-        var config = UIButton.Configuration.filled()
+        var config = UIButton.Configuration.appGlass()
         config.title = L10n.watchTrailer
         config.image = UIImage(systemName: "play.rectangle.fill")
-        config.imagePadding = 8
-        config.cornerStyle = .capsule
-        config.baseForegroundColor = .white
-        config.baseBackgroundColor = UIColor.white.withAlphaComponent(0.18)
-        config.contentInsets = .init(top: 10, leading: 18, bottom: 10, trailing: 18)
 
         let button = UIButton(configuration: config)
+        button.addSpringPressFeedback()
         button.addAction(UIAction { _ in
             UIApplication.shared.open(url)
-        }, for: .touchUpInside)
+        }, for: .primaryActionTriggered)
         button.heightAnchor.constraint(equalToConstant: 44).isActive = true
         return button
     }
@@ -517,7 +684,11 @@ final class DetailViewController: UIViewController {
             detail = try? await model.library.detail(for: item)
             selectedSeason = detail?.seasons.first?.number
             render()
+            #if os(tvOS)
+            updateFavoriteButton()
+            #else
             favoriteBarButton?.image = favoriteImage
+            #endif
         }
 
         await enrichWithTMDB(startTime: startTime)
@@ -525,21 +696,13 @@ final class DetailViewController: UIViewController {
 
     /// TMDB'den sinematik görsel, şeffaf logo ve zengin bilgiler.
     /// Yükleme süresince koyu blur/nabız animasyonu gösterilir ve TMDB tamamlandığında yumuşakça açılır.
-    /// Afiş (dikey poster) asla hero arka planına basılmaz; yalnızca gerçek yatay backdrop konur.
     private func enrichWithTMDB(startTime: Double) async {
         let current = detail?.item ?? item
 
         if TMDBService.isConfigured, let metadata = await TMDBService.shared.metadata(for: current, language: AppLanguage.current) {
             tmdbMetadata = metadata
 
-            // Arka plan: Yalnızca ve yalnızca TMDB'den gelen yatay sinematik backdrop.
-            // Dikey afiş/poster kesinlikle arka plana basılmaz!
             if let backdropURL = metadata.backdropURL {
-                hero.artwork.configure(
-                    url: backdropURL,
-                    title: current.title,
-                    displayWidth: metrics.heroImageWidth
-                )
                 detail?.item.backdropURL = backdropURL
                 item.backdropURL = backdropURL
             }
@@ -597,17 +760,58 @@ final class DetailViewController: UIViewController {
         }
 
         await MainActor.run {
+            self.applyHeroArtwork()
             self.render()
             self.hero.stopLoadingAnimation(animated: true)
         }
     }
 
+    /// Hero arka planı için en iyi görseli seçer.
+    ///
+    /// Tercih sırası: TMDB'nin sinematik yatay backdrop'u, sonra sağlayıcının
+    /// verdiği backdrop. İkisi de yoksa elde kalan dikey afiş basılıyor —
+    /// oranı hero'ya uymadığı için ortadan kırpılıyor ama içeriğin tamamen
+    /// karanlık durmasından iyi.
+    private func applyHeroArtwork() {
+        let current = detail?.item ?? item
+        let url = tmdbMetadata?.backdropURL
+            ?? current.backdropURL
+            ?? tmdbMetadata?.posterURL
+            ?? current.posterURL
+        guard let url else { return }
+        hero.artwork.configure(
+            backdropURL: url,
+            title: current.title,
+            displayWidth: metrics.heroImageWidth
+        )
+    }
+
     // MARK: - Aksiyonlar
+
+    /// Bölüm listesi hero'nun altında; buton oraya kaydırıyor.
+    #if os(tvOS)
+    @objc private func scrollToEpisodes() {
+        let target = episodesSection.convert(episodesSection.bounds, to: scrollView).minY
+        scrollView.setContentOffset(CGPoint(x: 0, y: max(target - 40, 0)), animated: true)
+    }
+    #endif
 
     @objc private func togglePlot() {
         isPlotExpanded.toggle()
+        hero.moreButton.configuration?.title = isPlotExpanded ? L10n.less : L10n.more
+        hero.moreButton.setSymbol(isPlotExpanded ? "chevron.up" : "chevron.down")
+
+        // Özet açılıp kapanırken hero içeriği zıplamasın; yaylanarak yerleşsin.
         hero.plotLabel.numberOfLines = isPlotExpanded ? 0 : 2
-        hero.moreButton.setTitle(isPlotExpanded ? L10n.less : L10n.more, for: .normal)
+        UIView.animate(
+            withDuration: 0.45,
+            delay: 0,
+            usingSpringWithDamping: 0.85,
+            initialSpringVelocity: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.view.layoutIfNeeded()
+        }
     }
 
     @objc private func toggleWatchlist() {
@@ -615,11 +819,10 @@ final class DetailViewController: UIViewController {
         model.activity.toggleWatchlist(current)
         let inWatchlist = model.activity.isInWatchlist(current)
 
-        let impact = UIImpactFeedbackGenerator(style: .medium)
-        impact.prepare()
-        impact.impactOccurred()
+        Haptics.impact(.medium)
 
-        hero.watchlistButton.configuration?.image = UIImage(systemName: inWatchlist ? "checkmark" : "plus")
+        // "+" yukarı kayıp yerini onay işaretine bırakıyor.
+        hero.watchlistButton.setSymbol(inWatchlist ? "checkmark" : "plus")
     }
 
     @objc private func toggleFavorite() {
@@ -627,12 +830,21 @@ final class DetailViewController: UIViewController {
         model.activity.toggleFavorite(current)
         let isFav = model.activity.isFavorite(current)
 
-        let impact = UIImpactFeedbackGenerator(style: .medium)
-        impact.prepare()
-        impact.impactOccurred()
+        Haptics.impact(.medium)
 
-        favoriteBarButton?.image = favoriteImage
+        // Kalp dolarken/boşalırken sembolün kendi katmanları morph oluyor.
+        #if os(tvOS)
+        hero.favoriteButton.setSymbol(
+            isFav ? "heart.fill" : "heart",
+            transition: .replace.magic(fallback: .upUp)
+        )
+        hero.favoriteButton.configuration?.baseForegroundColor = isFav ? .systemRed : .white
+        #else
+        if let image = favoriteImage {
+            favoriteBarButton?.setSymbolImage(image, contentTransition: .replace.magic(fallback: .upUp))
+        }
         favoriteBarButton?.tintColor = isFav ? .systemRed : .white
+        #endif
     }
 
     @objc private func shareItem() {
@@ -641,9 +853,12 @@ final class DetailViewController: UIViewController {
         if let trailer = detail?.trailerURL ?? current.trailerURL {
             payload.append(trailer)
         }
+        // Paylaşım sayfası tvOS'ta yok; orada buton da kurulmuyor.
+        #if os(iOS)
         let controller = UIActivityViewController(activityItems: payload, applicationActivities: nil)
         controller.popoverPresentationController?.barButtonItem = navigationItem.rightBarButtonItems?.first
         present(controller, animated: true)
+        #endif
     }
 
     @objc private func playPrimary() {

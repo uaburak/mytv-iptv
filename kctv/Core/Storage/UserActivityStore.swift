@@ -1,13 +1,18 @@
 import Foundation
 import Observation
 
-/// Favoriler ve "izlemeyi sürdür" kayıtları.
+/// Favoriler, izleme listesi ve "izlemeyi sürdür" kayıtları.
 /// Cihazda anında yazılır, oturum açıksa Firestore'a da aktarılır.
+///
+/// Favori ve izleme listesi yalnızca **içerik kimliği** olarak tutuluyor;
+/// içeriğin başlığı, afişi ve künyesi sağlayıcının kendi verisi ve katalogdan
+/// çözülüyor. Böylece hem bulutta gereksiz veri kopyası oluşmuyor hem de
+/// sağlayıcı içeriği güncellediğinde eski kopyada takılı kalınmıyor.
 @MainActor
 @Observable
 final class UserActivityStore {
-    private(set) var favorites: [MediaItem] = []
-    private(set) var watchlist: [MediaItem] = []
+    private(set) var favoriteIDs: [MediaID] = []
+    private(set) var watchlistIDs: [MediaID] = []
     private(set) var progress: [PlaybackProgress] = []
 
     private let store = LocalStore(folder: "activity")
@@ -16,40 +21,47 @@ final class UserActivityStore {
     private let progressKey = "progress"
 
     /// Firestore'a yazma işini üstlenen kapan; oturum açılınca bağlanır.
-    var onChange: ((_ favorites: [MediaItem], _ progress: [PlaybackProgress]) -> Void)?
+    var onChange: ((
+        _ favorites: [MediaID],
+        _ watchlist: [MediaID],
+        _ progress: [PlaybackProgress]
+    ) -> Void)?
 
     init() {
-        favorites = store.read([MediaItem].self, key: favoritesKey) ?? []
-        watchlist = store.read([MediaItem].self, key: watchlistKey) ?? []
+        favoriteIDs = Self.readIDs(store: store, key: favoritesKey)
+        watchlistIDs = Self.readIDs(store: store, key: watchlistKey)
         progress = store.read([PlaybackProgress].self, key: progressKey) ?? []
+    }
+
+    /// Eski sürümler tam `MediaItem` yazıyordu. Yeni biçim okunamazsa eski
+    /// biçim denenip kimliğe indirgeniyor; kullanıcı favorilerini kaybetmiyor.
+    private static func readIDs(store: LocalStore, key: String) -> [MediaID] {
+        if let ids = store.read([MediaID].self, key: key) { return ids }
+        return store.read([MediaItem].self, key: key)?.map(\.id) ?? []
     }
 
     // MARK: - Favoriler
 
-    func isFavorite(_ item: MediaItem) -> Bool {
-        favorites.contains { $0.id == item.id }
-    }
+    func isFavorite(_ item: MediaItem) -> Bool { favoriteIDs.contains(item.id) }
 
     func toggleFavorite(_ item: MediaItem) {
-        if isFavorite(item) {
-            favorites.removeAll { $0.id == item.id }
+        if let index = favoriteIDs.firstIndex(of: item.id) {
+            favoriteIDs.remove(at: index)
         } else {
-            favorites.insert(item, at: 0)
+            favoriteIDs.insert(item.id, at: 0)
         }
         persist()
     }
 
     // MARK: - İzleme Listesi (Watchlist)
 
-    func isInWatchlist(_ item: MediaItem) -> Bool {
-        watchlist.contains { $0.id == item.id }
-    }
+    func isInWatchlist(_ item: MediaItem) -> Bool { watchlistIDs.contains(item.id) }
 
     func toggleWatchlist(_ item: MediaItem) {
-        if isInWatchlist(item) {
-            watchlist.removeAll { $0.id == item.id }
+        if let index = watchlistIDs.firstIndex(of: item.id) {
+            watchlistIDs.remove(at: index)
         } else {
-            watchlist.insert(item, at: 0)
+            watchlistIDs.insert(item.id, at: 0)
         }
         persist()
     }
@@ -92,12 +104,13 @@ final class UserActivityStore {
         persist()
     }
 
-    func merge(favorites remoteFavorites: [MediaItem], progress remoteProgress: [PlaybackProgress]) {
-        var mergedFavorites = favorites
-        for item in remoteFavorites where !mergedFavorites.contains(where: { $0.id == item.id }) {
-            mergedFavorites.append(item)
-        }
-        favorites = mergedFavorites
+    func merge(
+        favorites remoteFavorites: [MediaID],
+        watchlist remoteWatchlist: [MediaID],
+        progress remoteProgress: [PlaybackProgress]
+    ) {
+        favoriteIDs = Self.union(favoriteIDs, remoteFavorites)
+        watchlistIDs = Self.union(watchlistIDs, remoteWatchlist)
 
         // Aynı içerik iki cihazda izlendiyse en yeni kayıt kazanır.
         var mergedProgress = Dictionary(progress.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -109,17 +122,27 @@ final class UserActivityStore {
         persist()
     }
 
+    /// Yereldekiler sırayı koruyor, uzaktakilerden eksikler sona ekleniyor.
+    private static func union(_ local: [MediaID], _ remote: [MediaID]) -> [MediaID] {
+        var merged = local
+        let known = Set(local)
+        for id in remote where !known.contains(id) {
+            merged.append(id)
+        }
+        return merged
+    }
+
     func clearAll() {
-        favorites.removeAll()
-        watchlist.removeAll()
+        favoriteIDs.removeAll()
+        watchlistIDs.removeAll()
         progress.removeAll()
         store.removeAll()
     }
 
     private func persist() {
-        store.write(favorites, key: favoritesKey)
-        store.write(watchlist, key: watchlistKey)
+        store.write(favoriteIDs, key: favoritesKey)
+        store.write(watchlistIDs, key: watchlistKey)
         store.write(progress, key: progressKey)
-        onChange?(favorites, progress)
+        onChange?(favoriteIDs, watchlistIDs, progress)
     }
 }

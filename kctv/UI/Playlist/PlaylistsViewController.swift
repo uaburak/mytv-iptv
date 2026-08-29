@@ -3,7 +3,12 @@ import UIKit
 /// Liste yönetimi: ekleme, seçme, düzenleme ve silme.
 final class PlaylistsViewController: UIViewController {
     private let model: AppModel
+    // `insetGrouped` tvOS'ta yok; orada düz gruplu stil kullanılıyor.
+    #if os(iOS)
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
+    #else
+    private let tableView = UITableView(frame: .zero, style: .grouped)
+    #endif
     private let emptyLabel = UILabel()
 
     init(model: AppModel) {
@@ -32,6 +37,9 @@ final class PlaylistsViewController: UIViewController {
         tableView.applyNativeScrollEdges()
         tableView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tableView)
+        #if os(tvOS)
+        installLongPressActions()
+        #endif
 
         emptyLabel.numberOfLines = 0
         emptyLabel.textAlignment = .center
@@ -41,7 +49,11 @@ final class PlaylistsViewController: UIViewController {
         view.addSubview(emptyLabel)
 
         NSLayoutConstraint.activate([
-            tableView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            // Güvenli alana değil ekranın tepesine: içerik navigation bar'ın
+            // ardından geçip bulanıklaşıyor, sert bir çizgide kesilmiyor.
+            // Dinlenme konumundaki boşluğu `contentInsetAdjustmentBehavior`
+            // varsayılanı veriyor.
+            tableView.topAnchor.constraint(equalTo: view.topAnchor),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -80,6 +92,47 @@ final class PlaylistsViewController: UIViewController {
         emptyLabel.isHidden = !model.playlists.playlists.isEmpty
         tableView.reloadData()
     }
+
+    // MARK: - tvOS satır eylemleri
+
+    /// tvOS'ta satırı kaydırmak mümkün değil; düzenleme ve silme odaklı satıra
+    /// uzun basınca açılan eylem listesinden yapılıyor.
+    #if os(tvOS)
+    private func installLongPressActions() {
+        let recognizer = UILongPressGestureRecognizer(
+            target: self, action: #selector(handleLongPress)
+        )
+        tableView.addGestureRecognizer(recognizer)
+    }
+
+    @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began,
+              let indexPath = tableView.indexPathForSelectedRow
+                  ?? tableView.indexPathsForVisibleRows?.first(where: {
+                      tableView.cellForRow(at: $0)?.isFocused == true
+                  }),
+              indexPath.row < model.playlists.playlists.count
+        else { return }
+
+        let playlist = model.playlists.playlists[indexPath.row]
+        let isTR = AppLanguage.current.effectiveLanguageCode == "tr"
+
+        let sheet = UIAlertController(title: playlist.name, message: nil, preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(title: isTR ? "Düzenle" : "Edit", style: .default) { [weak self] _ in
+            guard let self else { return }
+            edit(playlist)
+        })
+        sheet.addAction(UIAlertAction(title: isTR ? "Sil" : "Delete", style: .destructive) { [weak self] _ in
+            guard let self else { return }
+            Task {
+                await self.model.removePlaylist(playlist)
+                self.reload()
+            }
+        })
+        sheet.addAction(UIAlertAction(title: L10n.cancel, style: .cancel))
+        present(sheet, animated: true)
+    }
+    #endif
 
     @objc private func addPlaylist() {
         present(
@@ -173,6 +226,10 @@ extension PlaylistsViewController: UITableViewDataSource, UITableViewDelegate {
         present(alert, animated: true)
     }
 
+    /// Kaydırmalı satır eylemleri tvOS'ta yok — orada kumandayla kaydırma diye
+    /// bir etkileşim olmadığı için API'nin tamamı kullanılamıyor. tvOS'ta aynı
+    /// işi odaklı satıra uzun basmak açıyor (`playlistActions`).
+    #if os(iOS)
     func tableView(
         _ tableView: UITableView,
         trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath
@@ -195,4 +252,5 @@ extension PlaylistsViewController: UITableViewDataSource, UITableViewDelegate {
         edit.backgroundColor = AppPalette.accent
         return UISwipeActionsConfiguration(actions: [delete, edit])
     }
+    #endif
 }

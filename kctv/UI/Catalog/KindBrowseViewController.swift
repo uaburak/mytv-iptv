@@ -37,7 +37,7 @@ final class KindBrowseViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = AppPalette.background
-        navigationItem.largeTitleDisplayMode = .never
+        navigationItem.setPrefersLargeTitle(false)
         setupCollectionView()
         setupDataSource()
         setupFilterButton()
@@ -97,7 +97,12 @@ final class KindBrowseViewController: UIViewController {
         filterCategoryID = categoryID
         navigationItem.rightBarButtonItem?.menu = makeFilterMenu()
         applySnapshot(animated: true)
-        collectionView.setContentOffset(.zero, animated: false)
+        // Artık üstte navigation bar kadar içerik girintisi var; `.zero` ilk
+        // rayı çubuğun altında bırakırdı.
+        collectionView.setContentOffset(
+            CGPoint(x: 0, y: -collectionView.adjustedContentInset.top),
+            animated: false
+        )
     }
 
     private func setupCollectionView() {
@@ -116,7 +121,13 @@ final class KindBrowseViewController: UIViewController {
         view.addSubview(collectionView)
 
         NSLayoutConstraint.activate([
-            collectionView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            // Güvenli alana değil ekranın tepesine bağlanıyor: kaydırma
+            // görünümü navigation bar'ın altından geçiyor, içerik çubuğun
+            // ardında bulanıklaşarak kayboluyor. Güvenli alana bağlandığında
+            // içerik çubuğun hemen altında sert bir çizgide kesiliyordu.
+            // Dinlenme konumundaki boşluğu `contentInsetAdjustmentBehavior`
+            // varsayılanı (`.automatic`) kendisi veriyor.
+            collectionView.topAnchor.constraint(equalTo: view.topAnchor),
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -126,37 +137,12 @@ final class KindBrowseViewController: UIViewController {
     private func makeLayout() -> UICollectionViewCompositionalLayout {
         UICollectionViewCompositionalLayout { [weak self] _, environment in
             guard let self else { return nil }
-            let metrics = AppMetrics.metrics(for: environment.container.contentSize.width)
-
-            let size = NSCollectionLayoutSize(
-                widthDimension: .absolute(metrics.cardWidth(for: kind)),
-                heightDimension: .absolute(metrics.rowItemHeight(for: kind))
+            // Ray ölçüleri anasayfayla ortak; ekranlar arasında boşluklar ve
+            // başlık yükseklikleri ayrışmasın diye tek yerden geliyor.
+            return MediaSectionLayout.posterRow(
+                kind: kind,
+                metrics: AppMetrics.metrics(for: environment.container.contentSize.width)
             )
-            let item = NSCollectionLayoutItem(layoutSize: size)
-            let group = NSCollectionLayoutGroup.horizontal(layoutSize: size, subitems: [item])
-
-            let section = NSCollectionLayoutSection(group: group)
-            section.interGroupSpacing = metrics.cardSpacing
-            section.orthogonalScrollingBehavior = .continuous
-            section.contentInsets = NSDirectionalEdgeInsets(
-                top: 10,
-                leading: metrics.screenPadding,
-                bottom: metrics.rowSpacing * 0.5,
-                trailing: metrics.screenPadding
-            )
-
-            let headerSize = NSCollectionLayoutSize(
-                widthDimension: .fractionalWidth(1),
-                heightDimension: .absolute(28)
-            )
-            section.boundarySupplementaryItems = [
-                NSCollectionLayoutBoundarySupplementaryItem(
-                    layoutSize: headerSize,
-                    elementKind: UICollectionView.elementKindSectionHeader,
-                    alignment: .top
-                ),
-            ]
-            return section
         }
     }
 
@@ -228,6 +214,18 @@ final class KindBrowseViewController: UIViewController {
 }
 
 extension KindBrowseViewController: UICollectionViewDelegate {
+    /// Odaklanan kart hücresinin dışına büyüyor; ortogonal bölümün kendi
+    /// kaydırma görünümü kırpma yaparsa büyüme görünmüyor.
+    #if os(tvOS)
+    func collectionView(
+        _ collectionView: UICollectionView,
+        willDisplay cell: UICollectionViewCell,
+        forItemAt indexPath: IndexPath
+    ) {
+        collectionView.unclipFocusGrowth(around: cell)
+    }
+    #endif
+
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return }

@@ -29,6 +29,11 @@ final class HorizontalPosterRow: UIView {
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.backgroundColor = .clear
         collectionView.showsHorizontalScrollIndicator = false
+        // Odaklanan kart kendi hücresinin dışına büyüyor; kırpma açık kalırsa
+        // efektin üstü kesiliyor.
+        #if os(tvOS)
+        collectionView.clipsToBounds = false
+        #endif
         collectionView.applyNativeScrollEdges()
         collectionView.dataSource = self
         collectionView.delegate = self
@@ -66,6 +71,16 @@ extension HorizontalPosterRow: UICollectionViewDataSource, UICollectionViewDeleg
         let kind = items[indexPath.item].kind
         return CGSize(width: metrics.cardWidth(for: kind), height: metrics.rowItemHeight(for: kind))
     }
+
+    #if os(tvOS)
+    func collectionView(
+        _ collectionView: UICollectionView,
+        willDisplay cell: UICollectionViewCell,
+        forItemAt indexPath: IndexPath
+    ) {
+        collectionView.unclipFocusGrowth(around: cell)
+    }
+    #endif
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)

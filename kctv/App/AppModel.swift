@@ -64,9 +64,9 @@ final class AppModel {
     init(auth: any AuthService) {
         self.auth = auth
         self.library = ContentLibrary(activity: activity)
-        self.activity.onChange = { [weak self] favorites, progress in
+        self.activity.onChange = { [weak self] favorites, watchlist, progress in
             NotificationCenter.default.post(name: .appModelFavoritesDidChange, object: nil)
-            self?.pushActivity(favorites: favorites, progress: progress)
+            self?.pushActivity(favorites: favorites, watchlist: watchlist, progress: progress)
         }
         self.library.onChange = {
             NotificationCenter.default.post(name: .contentLibraryDidChange, object: nil)
@@ -186,20 +186,31 @@ final class AppModel {
 
         async let remotePlaylists = try? await sync.loadPlaylists()
         async let remoteFavorites = try? await sync.loadFavorites()
+        async let remoteWatchlist = try? await sync.loadWatchlist()
         async let remoteProgress = try? await sync.loadProgress()
 
         if let playlistsFromCloud = await remotePlaylists {
             playlists.merge(remote: playlistsFromCloud)
         }
         let favorites = await remoteFavorites
+        let watchlist = await remoteWatchlist
         let progress = await remoteProgress
-        activity.merge(favorites: favorites ?? [], progress: progress ?? [])
+        activity.merge(
+            favorites: favorites ?? [],
+            watchlist: watchlist ?? [],
+            progress: progress ?? []
+        )
     }
 
-    private func pushActivity(favorites: [MediaItem], progress: [PlaybackProgress]) {
+    private func pushActivity(
+        favorites: [MediaID],
+        watchlist: [MediaID],
+        progress: [PlaybackProgress]
+    ) {
         guard let sync else { return }
         Task {
             try? await sync.saveFavorites(favorites)
+            try? await sync.saveWatchlist(watchlist)
             try? await sync.saveProgress(progress)
         }
     }
@@ -265,15 +276,40 @@ final class AppModel {
         }
     }
 
-    func recordProgress(for context: PlaybackContext, position: Double, duration: Double) {
-        // Context kimliği "source|kind|raw#episodeID" biçiminde.
-        let parts = context.id.split(separator: "#", maxSplits: 1).map(String.init)
+    /// Oynatılan bölümden sonraki bölüm.
+    ///
+    /// Sezonlar sırayla düzleştiriliyor: sezonun son bölümünden sonra bir
+    /// sonraki sezonun ilk bölümü geliyor. Dizi değilse veya son bölümdeyse
+    /// `nil` dönüyor.
+    func nextEpisode(after context: PlaybackContext) async -> (episode: Episode, series: MediaItem)? {
+        guard let (mediaID, episodeID) = Self.decode(contextID: context.id),
+              mediaID.kind == .series,
+              let episodeID,
+              let series = library.item(for: mediaID),
+              let detail = try? await library.detail(for: series)
+        else { return nil }
+
+        let episodes = detail.seasons.flatMap(\.episodes)
+        guard let index = episodes.firstIndex(where: { $0.id == episodeID }),
+              episodes.indices.contains(index + 1)
+        else { return nil }
+
+        return (episodes[index + 1], detail.item)
+    }
+
+    /// Context kimliği "source|kind|raw#episodeID" biçiminde.
+    private static func decode(contextID: String) -> (MediaID, String?)? {
+        let parts = contextID.split(separator: "#", maxSplits: 1).map(String.init)
         let mediaParts = parts[0].split(separator: "|", maxSplits: 2).map(String.init)
-        guard mediaParts.count == 3, let kind = MediaKind(rawValue: mediaParts[1]) else { return }
-        let mediaID = MediaID(source: mediaParts[0], kind: kind, raw: mediaParts[2])
+        guard mediaParts.count == 3, let kind = MediaKind(rawValue: mediaParts[1]) else { return nil }
+        return (MediaID(source: mediaParts[0], kind: kind, raw: mediaParts[2]), parts.count > 1 ? parts[1] : nil)
+    }
+
+    func recordProgress(for context: PlaybackContext, position: Double, duration: Double) {
+        guard let (mediaID, episodeID) = Self.decode(contextID: context.id) else { return }
         activity.record(
             mediaID: mediaID,
-            episodeID: parts.count > 1 ? parts[1] : nil,
+            episodeID: episodeID,
             position: position,
             duration: duration
         )

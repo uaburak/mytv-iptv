@@ -1,16 +1,22 @@
 import UIKit
 
 /// Raylardaki tek içerik kartı.
+///
+/// Kart tamamen afişten ibaret: başlık ve ilerleme afişin üstündeki buzlu
+/// şeritte duruyor, altında ayrı etiket yok. Şerit yalnızca gerektiğinde
+/// görünüyor — yarım bırakılmış içerikte, ya da tvOS'ta kart odaktayken.
 final class PosterCell: UICollectionViewCell {
     static let reuseID = "PosterCell"
+    /// Odakta uygulanan büyüme; kenarlık kalınlığı da buna göre düzeltiliyor.
+    private static let focusScale: CGFloat = 1.08
 
     private let artwork = RemoteImageView()
-    private let titleLabel = UILabel()
-    private let captionLabel = UILabel()
-    private let progressTrack = UIView()
-    private let progressFill = UIView()
-    private var progressWidth: NSLayoutConstraint?
+    private let overlay = CardOverlayView()
     private var artworkHeight: NSLayoutConstraint?
+
+    private var title = ""
+    private var progress: Double?
+    private var metrics: AppMetrics?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -20,93 +26,108 @@ final class PosterCell: UICollectionViewCell {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     private func build() {
-        artwork.layer.cornerRadius = 8
         artwork.layer.cornerCurve = .continuous
         artwork.clipsToBounds = true
+        artwork.translatesAutoresizingMaskIntoConstraints = false
+        overlay.translatesAutoresizingMaskIntoConstraints = false
 
-        titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
-        titleLabel.textColor = AppPalette.primaryText
-        captionLabel.font = .systemFont(ofSize: 13)
-        captionLabel.textColor = AppPalette.secondaryText
+        contentView.addSubview(artwork)
+        // Bindirme afişin içinde: köşe yuvarlaması onu da kırpıyor.
+        artwork.addSubview(overlay)
 
-        progressTrack.backgroundColor = UIColor.white.withAlphaComponent(0.3)
-        progressTrack.layer.cornerRadius = 1.5
-        progressFill.backgroundColor = .white
-        progressFill.layer.cornerRadius = 1.5
-        progressTrack.isHidden = true
-
-        let stack = UIStackView(arrangedSubviews: [artwork, titleLabel, captionLabel])
-        stack.axis = .vertical
-        stack.spacing = 4
-        stack.setCustomSpacing(8, after: artwork)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(stack)
-
-        progressTrack.translatesAutoresizingMaskIntoConstraints = false
-        progressFill.translatesAutoresizingMaskIntoConstraints = false
-        artwork.addSubview(progressTrack)
-        progressTrack.addSubview(progressFill)
-
-        let width = progressFill.widthAnchor.constraint(equalToConstant: 0)
-        progressWidth = width
+        artwork.layer.borderColor = UIColor.white.cgColor
+        #if os(tvOS)
+        prepareFocusShadow()
+        #endif
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor),
+            artwork.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            artwork.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            artwork.topAnchor.constraint(equalTo: contentView.topAnchor),
 
-            progressTrack.leadingAnchor.constraint(equalTo: artwork.leadingAnchor, constant: 8),
-            progressTrack.trailingAnchor.constraint(equalTo: artwork.trailingAnchor, constant: -8),
-            progressTrack.bottomAnchor.constraint(equalTo: artwork.bottomAnchor, constant: -8),
-            progressTrack.heightAnchor.constraint(equalToConstant: 3),
-
-            progressFill.leadingAnchor.constraint(equalTo: progressTrack.leadingAnchor),
-            progressFill.topAnchor.constraint(equalTo: progressTrack.topAnchor),
-            progressFill.bottomAnchor.constraint(equalTo: progressTrack.bottomAnchor),
-            width,
+            overlay.leadingAnchor.constraint(equalTo: artwork.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: artwork.trailingAnchor),
+            overlay.bottomAnchor.constraint(equalTo: artwork.bottomAnchor),
         ])
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
         artwork.prepareForReuse()
-        progressTrack.isHidden = true
+        overlay.isHidden = true
+        // Odaktayken geri dönen hücrede kenarlık açık kalmasın.
+        artwork.layer.borderWidth = 0
     }
 
+    /// Odakta kartın tamamı büyüyüp yükseliyor ve başlık şeridi beliriyor.
+    ///
+    /// tvOS'un yerel afiş efekti (`adjustsImageWhenAncestorFocused`) burada
+    /// kullanılmıyor: o efekt görseli kendi çerçevesinin dışına taşırarak
+    /// çiziyor, dolayısıyla kırpma kapalı olmak zorunda — kırpma kapalıyken de
+    /// köşe yuvarlaması çalışmıyor. İkisi uzlaşmadığı için yuvarlak köşe ve
+    /// büyüyen kart tercih edildi.
+    #if os(tvOS)
+    override func didUpdateFocus(
+        in context: UIFocusUpdateContext,
+        with coordinator: UIFocusAnimationCoordinator
+    ) {
+        super.didUpdateFocus(in: context, with: coordinator)
+        // Metin ve oynat işareti animasyona girmiyor: yerleşim değişimi
+        // araya karıştığında yazılar kayarak/zıplayarak yerleşiyordu.
+        // Yumuşak geçiş yalnızca kartın kendisinde — ölçek, gölge, ışık.
+        applyOverlay()
+        layoutIfNeeded()
+
+        // Kenarlık animasyona girmiyor: düz açılıp kapanıyor. Kart ölçeğine
+        // bölünüyor ki büyürken kalınlaşmasın.
+        let focused = isFocused
+        artwork.layer.borderWidth = focused ? UIView.focusedBorderWidth / Self.focusScale : 0
+
+        updateFocusAppearance(isFocused: focused, using: coordinator, scale: Self.focusScale)
+    }
+    #endif
+
     func configure(item: MediaItem, metrics: AppMetrics, progress: PlaybackProgress?) {
+        self.title = item.title
+        self.progress = progress?.fraction
+        self.metrics = metrics
+
         let width = metrics.cardWidth(for: item.kind)
+        artwork.layer.cornerRadius = metrics.cardCornerRadius
         artwork.configure(url: item.posterURL, title: item.title, displayWidth: width)
+
         artworkHeight?.isActive = false
-        let height = artwork.heightAnchor.constraint(equalToConstant: metrics.cardHeight(for: item.kind))
+        let height = artwork.heightAnchor.constraint(
+            equalToConstant: metrics.cardHeight(for: item.kind)
+        )
         height.isActive = true
         artworkHeight = height
 
-        titleLabel.text = item.title
-        titleLabel.font = metrics.cardTitleFont
-        captionLabel.text = caption(for: item)
-        captionLabel.font = metrics.cardTitleFont
-
-        // Telefonda afiş kendi başına yeterli; etiketler kalabalık yapıyor.
-        titleLabel.isHidden = !metrics.showsCardLabels
-        captionLabel.isHidden = !metrics.showsCardLabels || captionLabel.text == nil
-
-        guard let progress else {
-            progressTrack.isHidden = true
-            return
-        }
-        progressTrack.isHidden = false
-        progressWidth?.constant = max(3, (width - 16) * progress.fraction)
+        applyOverlay()
     }
 
-    private func caption(for item: MediaItem) -> String? {
-        switch item.kind {
-        case .live:
-            item.categoryName
-        case .movie:
-            [item.yearText, item.durationText].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
-        case .series:
-            item.genres.first ?? item.yearText
-        }
+    private func applyOverlay() {
+        guard let metrics else { return }
+        #if os(tvOS)
+        let shouldShow = progress != nil || isFocused
+        #else
+        let shouldShow = progress != nil
+        #endif
+        overlay.isHidden = !shouldShow
+        guard shouldShow else { return }
+
+        #if os(tvOS)
+        let focused = isFocused
+        #else
+        let focused = false
+        #endif
+        overlay.configure(
+            title: title,
+            durationText: nil,
+            progress: progress,
+            focused: focused,
+            metrics: metrics
+        )
     }
 }
 
@@ -127,17 +148,24 @@ final class MainCardCell: UICollectionViewCell {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     private func build() {
+        #if os(tvOS)
+        contentView.layer.cornerRadius = 24
+        #else
         contentView.layer.cornerRadius = 12
+        #endif
         contentView.layer.cornerCurve = .continuous
         contentView.clipsToBounds = true
         contentView.layer.insertSublayer(gradientLayer, at: 0)
+        // Gölge `contentView` kırptığı için hücrenin kendisine kuruluyor.
+        #if os(tvOS)
+        prepareFocusShadow()
+        #endif
 
         symbolView.tintColor = UIColor.white.withAlphaComponent(0.22)
         symbolView.contentMode = .scaleAspectFit
 
-        titleLabel.font = .systemFont(ofSize: 22, weight: .semibold)
+        // Ölçüler `configure` içinde metriklerden geliyor.
         titleLabel.textColor = .white
-        countLabel.font = .systemFont(ofSize: 14)
         countLabel.textColor = UIColor.white.withAlphaComponent(0.8)
 
         let stack = UIStackView(arrangedSubviews: [titleLabel, countLabel])
@@ -165,7 +193,23 @@ final class MainCardCell: UICollectionViewCell {
         gradientLayer.frame = contentView.bounds
     }
 
-    func configure(kind: MediaKind, count: Int) {
+    // tvOS'ta hücre odaklanınca büyüyüp yükseliyor; kullanıcı nerede olduğunu
+    // yalnızca bundan anlıyor. Efekt `contentView`'e değil hücreye uygulanıyor:
+    // `contentView` kırpma yaptığında kendi gölgesi hiç çizilmiyor.
+    #if os(tvOS)
+    override func didUpdateFocus(
+        in context: UIFocusUpdateContext,
+        with coordinator: UIFocusAnimationCoordinator
+    ) {
+        super.didUpdateFocus(in: context, with: coordinator)
+        updateFocusAppearance(isFocused: isFocused, using: coordinator)
+    }
+    #endif
+
+
+    func configure(kind: MediaKind, count: Int, metrics: AppMetrics) {
+        titleLabel.font = metrics.mainCardTitleFont
+        countLabel.font = metrics.mainCardCountFont
         titleLabel.text = kind.title
         countLabel.text = count > 0 ? "\(count.formatted()) içerik" : nil
         symbolView.image = UIImage(systemName: kind.symbol)
@@ -203,20 +247,29 @@ final class RowHeaderView: UICollectionReusableView {
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
 
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.addTarget(self, action: #selector(handleTap), for: .touchUpInside)
-        addSubview(button)
-
-        NSLayoutConstraint.activate([
+        var constraints = [
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+        ]
 
+        // tvOS'ta ray başlığı yalnızca bir etiket: dokunulabilir olsaydı
+        // odaklanabilir olurdu ve sistem arkasına kendi odak zeminini çizerdi —
+        // başlık o zeminin içinde okunmuyordu. Kategoriye gitmek için zaten
+        // rayın kartları var, başlığa ayrıca yönlendirme gerekmiyor.
+        #if os(iOS)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addTarget(self, action: #selector(handleTap), for: .primaryActionTriggered)
+        addSubview(button)
+        constraints += [
             button.topAnchor.constraint(equalTo: topAnchor),
             button.bottomAnchor.constraint(equalTo: bottomAnchor),
             button.leadingAnchor.constraint(equalTo: leadingAnchor),
             button.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
-        ])
+        ]
+        #endif
+
+        NSLayoutConstraint.activate(constraints)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -224,8 +277,13 @@ final class RowHeaderView: UICollectionReusableView {
     func configure(title: String, font: UIFont, showsChevron: Bool) {
         titleLabel.text = title
         titleLabel.font = font
+        #if os(iOS)
         chevron.isHidden = !showsChevron
         button.isEnabled = showsChevron
+        #else
+        // tvOS'ta yönlendirme yok; ok işareti de anlamsız.
+        chevron.isHidden = true
+        #endif
     }
 
     @objc private func handleTap() { onTap?() }

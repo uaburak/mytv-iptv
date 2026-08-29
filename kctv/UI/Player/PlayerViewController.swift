@@ -2,13 +2,68 @@ import AVFoundation
 import KSPlayer
 import UIKit
 
+#if os(tvOS)
+/// `UISlider` tvOS'ta yok — orada bir tutamacı sürükleme diye bir etkileşim de
+/// yok. İlerleme bir çubukta gösteriliyor, sarma ileri/geri butonlarıyla
+/// yapılıyor (kumandada bunlar zaten odaklanabilir).
+///
+/// `UIControl` türetiliyor ve `UISlider`'ın kullanılan yüzeyini birebir
+/// karşılıyor; böylece ortak oynatıcı kodu iki platformda da aynı kalıyor.
+final class PlaybackSlider: UIControl {
+    var minimumValue: Float = 0
+    var maximumValue: Float = 1
+
+    var value: Float = 0 {
+        didSet { updateProgress() }
+    }
+
+    var minimumTrackTintColor: UIColor? {
+        get { progressView.progressTintColor }
+        set { progressView.progressTintColor = newValue }
+    }
+
+    var maximumTrackTintColor: UIColor? {
+        get { progressView.trackTintColor }
+        set { progressView.trackTintColor = newValue }
+    }
+
+    private let progressView = UIProgressView(progressViewStyle: .default)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        progressView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(progressView)
+        NSLayoutConstraint.activate([
+            progressView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            progressView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            progressView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 10),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Tutamaç tvOS'ta yok; çağrı sessizce yutuluyor.
+    func setThumbImage(_ image: UIImage?, for state: UIControl.State) {}
+
+    private func updateProgress() {
+        let span = maximumValue - minimumValue
+        guard span > 0 else { return }
+        progressView.progress = (value - minimumValue) / span
+    }
+}
+#else
+typealias PlaybackSlider = UISlider
+#endif
+
 /// Tam ekran oynatıcı.
 ///
 /// AVFoundation bu içerikleri açamıyor: sağlayıcı VOD'ları `mkv`, canlı
 /// yayınları ham `ts` olarak veriyor. Bu yüzden oynatma tamamen FFmpeg tabanlı
 /// `KSMEPlayer` üzerinden yürüyor.
 final class PlayerViewController: UIViewController {
-    private let context: PlaybackContext
+    /// Bölüm geçişinde yerine sıradakinin bağlamı konuyor.
+    private var context: PlaybackContext
     private let model: AppModel
 
     private var playerLayer: KSPlayerLayer?
@@ -24,10 +79,11 @@ final class PlayerViewController: UIViewController {
     private let audioTracksButton = UIButton(type: .system)
     private let subtitlesButton = UIButton(type: .system)
     private let aspectButton = UIButton(type: .system)
+    private let nextEpisodeButton = UIButton(type: .system)
 
     private let currentTimeLabel = UILabel()
     private let durationLabel = UILabel()
-    private let slider = UISlider()
+    private let slider = PlaybackSlider()
     private let liveBadge = UIStackView()
     private let spinner = UIActivityIndicatorView(style: .large)
 
@@ -40,6 +96,9 @@ final class PlayerViewController: UIViewController {
     private var selectedAudioTrackID: Int32?
     private var selectedSubtitleID: Int32?
 
+    /// Sıradaki bölüm; yoksa buton gizli ve bitince otomatik geçiş olmuyor.
+    private var nextEpisode: (episode: Episode, series: MediaItem)?
+
     init(context: PlaybackContext, model: AppModel) {
         self.context = context
         self.model = model
@@ -49,8 +108,11 @@ final class PlayerViewController: UIViewController {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    // Ana ekran çizgisi ve durum çubuğu yalnızca iOS'ta var.
+    #if os(iOS)
     override var prefersHomeIndicatorAutoHidden: Bool { true }
     override var prefersStatusBarHidden: Bool { true }
+    #endif
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -59,14 +121,122 @@ final class PlayerViewController: UIViewController {
         startPlayback()
         scheduleControlsHide()
 
+        // tvOS'ta ekrana dokunma diye bir şey yok; girdi `pressesBegan` ve
+        // `touchesBegan` üzerinden kumandadan geliyor.
+        #if os(iOS)
         let tap = UITapGestureRecognizer(target: self, action: #selector(toggleControls))
         tap.delegate = self
         view.addGestureRecognizer(tap)
+        #endif
 
         if context.isLive {
             loadLiveEPG()
         }
+        refreshNextEpisode()
     }
+
+    /// Sıradaki bölümü çözüp butonun görünürlüğünü ayarlar.
+    private func refreshNextEpisode() {
+        nextEpisode = nil
+        nextEpisodeButton.isHidden = true
+        guard context.kind == .series else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            let next = await model.nextEpisode(after: context)
+            await MainActor.run {
+                self.nextEpisode = next
+                self.nextEpisodeButton.isHidden = next == nil
+            }
+        }
+    }
+
+    /// Sıradaki bölüme geçer. Oynatıcı kapanıp yeniden açılmıyor; aynı ekranda
+    /// katman değiştiriliyor, böylece kullanıcı akıştan kopmuyor.
+    @objc private func playNextEpisode() {
+        guard let next = nextEpisode else { return }
+        nextEpisodeButton.isHidden = true
+        Task { [weak self] in
+            guard let self else { return }
+            guard let newContext = try? await model.library.playback(for: next.episode, in: next.series) else { return }
+            await MainActor.run { self.restart(with: newContext) }
+        }
+    }
+
+    private func restart(with newContext: PlaybackContext) {
+        saveProgress()
+        playerLayer?.pause()
+        playerLayer?.stop()
+        playerLayer = nil
+        videoView?.removeFromSuperview()
+        videoView = nil
+
+        context = newContext
+        currentTime = 0
+        duration = 0
+        isPlaying = true
+        playPauseButton.setImage(UIImage(systemName: "pause.fill"), for: .normal)
+        titleLabel.text = newContext.title
+        subtitleLabel.text = newContext.subtitle
+        subtitleLabel.isHidden = newContext.subtitle == nil
+
+        startPlayback()
+        refreshNextEpisode()
+        showControls()
+    }
+
+    // MARK: - Kumanda girdisi (tvOS)
+
+    #if os(tvOS)
+    /// Kontroller açıldığında odak doğrudan oynat/duraklat'a gidiyor.
+    override var preferredFocusEnvironments: [UIFocusEnvironment] {
+        [playPauseButton]
+    }
+
+    /// Kumanda tuşları.
+    ///
+    /// Kontroller gizliyken yön tuşu, seçim ve Menu yalnızca arayüzü geri
+    /// getiriyor; basış eylemi tetiklemiyor. Aksi hâlde kullanıcı göremediği
+    /// bir butonu yanlışlıkla çalıştırırdı.
+    ///
+    /// Oynat/Duraklat tuşu bunun dışında: o her zaman oynatmayı değiştiriyor,
+    /// arayüz kapalıyken bile — kumandadaki karşılığı bu ve beklenen davranış.
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        for press in presses {
+            switch press.type {
+            case .playPause:
+                togglePlayPause()
+                return
+
+            case .menu:
+                // Arayüz açıkken Menu oynatıcıdan çıkıyor; kapalıyken önce
+                // arayüzü geri getiriyor. Böylece çıkış yolu hep açık kalıyor.
+                if isControlsVisible {
+                    close()
+                } else {
+                    showControls()
+                }
+                return
+
+            case .select, .upArrow, .downArrow, .leftArrow, .rightArrow:
+                guard !isControlsVisible else { break }
+                showControls()
+                return
+
+            default:
+                break
+            }
+        }
+        super.pressesBegan(presses, with: event)
+    }
+
+    /// Kumandanın dokunmatik yüzeyine dokunmak da arayüzü geri getiriyor.
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if !isControlsVisible {
+            showControls()
+        }
+        super.touchesBegan(touches, with: event)
+    }
+    #endif
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
@@ -152,7 +322,7 @@ final class PlayerViewController: UIViewController {
         closeButton.tintColor = .white
         closeButton.backgroundColor = UIColor.black.withAlphaComponent(0.45)
         closeButton.layer.cornerRadius = 20
-        closeButton.addTarget(self, action: #selector(close), for: .touchUpInside)
+        closeButton.addTarget(self, action: #selector(close), for: .primaryActionTriggered)
 
         // Üst sağ kontrol butonları (Ses, Altyazı, Aspect Ratio)
         aspectButton.setImage(UIImage(systemName: "aspectratio"), for: .normal)
@@ -177,17 +347,17 @@ final class PlayerViewController: UIViewController {
         playPauseButton.setImage(UIImage(systemName: "pause.fill"), for: .normal)
         playPauseButton.tintColor = .white
         playPauseButton.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: 24, weight: .medium), forImageIn: .normal)
-        playPauseButton.addTarget(self, action: #selector(togglePlayPause), for: .touchUpInside)
+        playPauseButton.addTarget(self, action: #selector(togglePlayPause), for: .primaryActionTriggered)
 
         rewindButton.setImage(UIImage(systemName: "gobackward.15"), for: .normal)
         rewindButton.tintColor = .white
         rewindButton.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: 20, weight: .regular), forImageIn: .normal)
-        rewindButton.addTarget(self, action: #selector(seekBackward), for: .touchUpInside)
+        rewindButton.addTarget(self, action: #selector(seekBackward), for: .primaryActionTriggered)
 
         forwardButton.setImage(UIImage(systemName: "goforward.15"), for: .normal)
         forwardButton.tintColor = .white
         forwardButton.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: 20, weight: .regular), forImageIn: .normal)
-        forwardButton.addTarget(self, action: #selector(seekForward), for: .touchUpInside)
+        forwardButton.addTarget(self, action: #selector(seekForward), for: .primaryActionTriggered)
 
         for label in [currentTimeLabel, durationLabel] {
             label.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
@@ -223,9 +393,16 @@ final class PlayerViewController: UIViewController {
         liveBadge.alignment = .center
         liveBadge.isHidden = !context.isLive
 
+        nextEpisodeButton.setImage(UIImage(systemName: "forward.end.fill"), for: .normal)
+        nextEpisodeButton.tintColor = .white
+        nextEpisodeButton.accessibilityLabel = L10n.nextEpisode
+        nextEpisodeButton.isHidden = true
+        nextEpisodeButton.addTarget(self, action: #selector(playNextEpisode), for: .primaryActionTriggered)
+
         let controlButtons: [UIView] = context.isLive
             ? [playPauseButton, liveBadge, UIView()]
-            : [rewindButton, playPauseButton, forwardButton, currentTimeLabel, slider, durationLabel]
+            : [rewindButton, playPauseButton, forwardButton, nextEpisodeButton,
+               currentTimeLabel, slider, durationLabel]
 
         let scrubberRow = UIStackView(arrangedSubviews: controlButtons)
         scrubberRow.axis = .horizontal
@@ -417,25 +594,41 @@ final class PlayerViewController: UIViewController {
     }
 
     @objc private func toggleControls() {
-        controlsView.alpha > 0 ? hideControls() : showControls()
+        isControlsVisible ? hideControls() : showControls()
     }
 
+    private var isControlsVisible: Bool { controlsView.alpha > 0 }
+
     private func showControls() {
-        UIView.animate(withDuration: 0.2) { self.controlsView.alpha = 1 }
+        setControlsVisible(true, duration: 0.2)
         scheduleControlsHide()
     }
 
     private func hideControls() {
         guard !isScrubbing else { return }
         hideControlsWork?.cancel()
-        UIView.animate(withDuration: 0.2) { self.controlsView.alpha = 0 }
+        setControlsVisible(false, duration: 0.2)
+    }
+
+    /// Saydamlık tek başına yetmiyor: tvOS'ta görünmez ama etkileşime açık bir
+    /// katman odak almaya devam ediyor ve kullanıcı boşlukta gezinmiş oluyor.
+    /// Etkileşim kapatılınca içindeki butonlar odak sisteminden de düşüyor.
+    private func setControlsVisible(_ visible: Bool, duration: TimeInterval) {
+        controlsView.isUserInteractionEnabled = visible
+        UIView.animate(withDuration: duration) { self.controlsView.alpha = visible ? 1 : 0 }
+        #if os(tvOS)
+        if visible {
+            setNeedsFocusUpdate()
+            updateFocusIfNeeded()
+        }
+        #endif
     }
 
     private func scheduleControlsHide() {
         hideControlsWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.isPlaying, !self.isScrubbing else { return }
-            UIView.animate(withDuration: 0.25) { self.controlsView.alpha = 0 }
+            setControlsVisible(false, duration: 0.25)
         }
         hideControlsWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: work)
@@ -491,8 +684,14 @@ extension PlayerViewController: KSPlayerLayerDelegate {
     }
 
     func player(layer: KSPlayerLayer, finish error: (any Error)?) {
-        guard let error else { return }
-        showFailure(error.localizedDescription)
+        if let error {
+            showFailure(error.localizedDescription)
+            return
+        }
+        // Hatasız bitiş: dizide sıradaki bölüm varsa kendiliğinden geçiyor.
+        if nextEpisode != nil {
+            playNextEpisode()
+        }
     }
 
     func player(layer: KSPlayerLayer, bufferedCount: Int, consumeTime: TimeInterval) {}

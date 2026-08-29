@@ -18,6 +18,26 @@ final class HomeViewController: UIViewController {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private let spinner = UIActivityIndicatorView(style: .large)
+    /// Liste yüklenemediğinde gösterilen açıklama ve yeniden deneme.
+    private let statusStack = UIStackView()
+    private let statusLabel = UILabel()
+    private let retryButton = UIButton(configuration: .appGlass())
+
+    /// Banner'ın sayfa göstergesi. Koleksiyonun kendi alt görünümü olduğu için
+    /// içerikle birlikte kayıyor ve daima hero'nun alt kenarına yapışık kalıyor.
+    private let pageIndicator = BannerPageIndicator()
+
+    /// Banner'ın kendiliğinden ilerlemesi.
+    ///
+    /// `Timer` yerine görev kullanılıyor: `Timer`'ın kapanı yalıtımsız
+    /// çalıştığı için `self`'e oradan dokunmak Swift 6'da izolasyon ihlali.
+    /// Görev baştan `@MainActor`, ek bir sıçrama gerekmiyor.
+    private var bannerTask: Task<Void, Never>?
+    private var currentBannerPage = 0
+    /// Bir içeriğin ekranda kalma süresi; gösterge bu sürede doluyor.
+    private static let bannerDwellDuration: TimeInterval = 5
+    /// "İzlemeye devam et" rayının kimliği; düzeni ve hücresi diğerlerinden farklı.
+    private static let continueRowID = "continue" 
 
     private var metrics: AppMetrics {
         AppMetrics.metrics(for: view.bounds.width)
@@ -35,8 +55,10 @@ final class HomeViewController: UIViewController {
         // Navigasyonda başlık yok; hero görseli tepeye kadar uzanıyor.
         title = nil
         view.backgroundColor = AppPalette.background
-        navigationItem.largeTitleDisplayMode = .never
+        navigationItem.setPrefersLargeTitle(false)
+        #if os(iOS)
         setupAccountButton()
+        #endif
         setupCollectionView()
         setupDataSource()
         applySnapshot(animated: false)
@@ -54,6 +76,33 @@ final class HomeViewController: UIViewController {
             name: .appLanguageDidChange,
             object: nil
         )
+
+        // İzleme listesi satırı buradan besleniyor; detayda "+" basılınca
+        // anasayfanın haberi olmalı.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(libraryDidChange),
+            name: .appModelFavoritesDidChange,
+            object: nil
+        )
+    }
+
+    /// Noktalar koleksiyonun içerik uzayına yerleştiriliyor; böylece dikey
+    /// kaydırmada hero ile birlikte hareket ediyorlar.
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let width = collectionView.bounds.width
+        guard width > 0 else { return }
+        let height: CGFloat = 24
+        pageIndicator.frame = CGRect(
+            x: 0,
+            y: metrics.heroHeight - height - 8,
+            width: width,
+            height: height
+        )
+        // Hücreler koleksiyonun alt görünümü olarak ekleniyor ve göstergenin
+        // üstünde kalabiliyorlar.
+        collectionView.bringSubviewToFront(pageIndicator)
     }
 
     // MARK: - Kurulum
@@ -61,6 +110,7 @@ final class HomeViewController: UIViewController {
     /// Profil rozeti. Sabit boyutlu özel görünüm yerine hazır görsel
     /// kullanıyoruz: navigation bar öğe sarmalayıcısı kendi genişliğini
     /// dayattığı için 30pt'lik kısıt onunla çakışıp uyarı basıyordu.
+    #if os(iOS)
     private func setupAccountButton() {
         let item = UIBarButtonItem(
             image: Self.avatarImage(initials: model.user?.initials ?? "?"),
@@ -71,6 +121,7 @@ final class HomeViewController: UIViewController {
         item.accessibilityLabel = "Hesap ve ayarlar"
         navigationItem.rightBarButtonItem = item
     }
+    #endif
 
     private static func avatarImage(initials: String) -> UIImage {
         let side: CGFloat = 28
@@ -105,6 +156,7 @@ final class HomeViewController: UIViewController {
         collectionView.register(HeroCell.self, forCellWithReuseIdentifier: HeroCell.reuseID)
         collectionView.register(MainCardCell.self, forCellWithReuseIdentifier: MainCardCell.reuseID)
         collectionView.register(PosterCell.self, forCellWithReuseIdentifier: PosterCell.reuseID)
+        collectionView.register(MediaClipCell.self, forCellWithReuseIdentifier: MediaClipCell.reuseID)
         collectionView.register(
             RowHeaderView.self,
             forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader,
@@ -114,9 +166,32 @@ final class HomeViewController: UIViewController {
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(collectionView)
 
+        pageIndicator.isHidden = true
+        pageIndicator.onSelectPage = { [weak self] page in
+            self?.showBannerPage(page)
+        }
+        collectionView.addSubview(pageIndicator)
+
         spinner.translatesAutoresizingMaskIntoConstraints = false
         spinner.color = .white
         view.addSubview(spinner)
+
+        statusLabel.textColor = AppPalette.secondaryText
+        statusLabel.textAlignment = .center
+        statusLabel.numberOfLines = 0
+        retryButton.configuration?.title = L10n.retry
+        retryButton.addSpringPressFeedback()
+        retryButton.addAction(UIAction { [weak self] _ in
+            Task { await self?.model.library.reload(force: true) }
+        }, for: .primaryActionTriggered)
+
+        statusStack.axis = .vertical
+        statusStack.spacing = 16
+        statusStack.alignment = .center
+        statusStack.isHidden = true
+        statusStack.translatesAutoresizingMaskIntoConstraints = false
+        [statusLabel, retryButton].forEach(statusStack.addArrangedSubview)
+        view.addSubview(statusStack)
 
         NSLayoutConstraint.activate([
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -126,6 +201,12 @@ final class HomeViewController: UIViewController {
 
             spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+
+            statusStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            statusStack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            statusStack.leadingAnchor.constraint(
+                greaterThanOrEqualTo: view.leadingAnchor, constant: 40
+            ),
         ])
     }
 
@@ -140,8 +221,12 @@ final class HomeViewController: UIViewController {
                 return self.heroSection(metrics: metrics)
             case .mainCards:
                 return self.mainCardsSection(metrics: metrics)
-            case let .row(_, _, kind, _):
-                return self.posterRowSection(kind: kind, metrics: metrics)
+            case let .row(id, _, kind, _):
+                // İzlemeye devam et rayı dikey afiş değil yatay kart:
+                // kaldığın yeri gösteren kare görselin kendisi.
+                return id == Self.continueRowID
+                    ? MediaSectionLayout.clipRow(metrics: metrics)
+                    : MediaSectionLayout.posterRow(kind: kind, metrics: metrics)
             }
         }
     }
@@ -156,60 +241,56 @@ final class HomeViewController: UIViewController {
         let group = NSCollectionLayoutGroup.horizontal(layoutSize: size, subitems: [item])
         let section = NSCollectionLayoutSection(group: group)
         section.orthogonalScrollingBehavior = .paging
+        // Sayfa noktaları yatay kaydırmayı buradan izliyor: ortogonal bölümün
+        // kendi kaydırma görünümüne delege olunamıyor.
+        section.visibleItemsInvalidationHandler = { [weak self] _, offset, environment in
+            guard let self else { return }
+            let width = environment.container.contentSize.width
+            guard width > 0, pageIndicator.numberOfPages > 0 else { return }
+            let page = min(max(Int((offset.x / width).rounded()), 0), pageIndicator.numberOfPages - 1)
+
+            // Yalnızca sayfa gerçekten değiştiğinde: bu kapan kaydırmanın her
+            // karesinde çağrılıyor, her seferinde zamanlayıcıyı yenilemek
+            // otomatik geçişi tamamen durdururdu. Elle kaydırma sırasında ise
+            // sayfa değiştikçe süre baştan başlıyor — istenen davranış bu.
+            guard page != currentBannerPage else { return }
+            currentBannerPage = page
+            pageIndicator.setCurrentPage(page)
+            restartBannerTimer()
+        }
         return section
     }
 
     private func mainCardsSection(metrics: AppMetrics) -> NSCollectionLayoutSection {
-        let size = NSCollectionLayoutSize(
-            widthDimension: .absolute(metrics.mainCardWidth),
-            heightDimension: .absolute(metrics.mainCardWidth * 0.56)
+        let height = metrics.mainCardWidth * 0.56
+        let item = NSCollectionLayoutItem(
+            layoutSize: NSCollectionLayoutSize(
+                widthDimension: .absolute(metrics.mainCardWidth),
+                heightDimension: .absolute(height)
+            )
         )
-        let item = NSCollectionLayoutItem(layoutSize: size)
-        let group = NSCollectionLayoutGroup.horizontal(layoutSize: size, subitems: [item])
+        // Grup satırın tamamını kaplayıp üç kartı birden taşıyor. Grup tek kart
+        // genişliğinde bırakılırsa, yatay kaydırma kapalı olduğu için bölüm
+        // grupları alt alta diziyor ve kartlar dikey sıralanıyordu.
+        let group = NSCollectionLayoutGroup.horizontal(
+            layoutSize: NSCollectionLayoutSize(
+                widthDimension: .fractionalWidth(1),
+                heightDimension: .absolute(height)
+            ),
+            repeatingSubitem: item,
+            count: MediaKind.allCases.count
+        )
+        group.interItemSpacing = .fixed(metrics.cardSpacing)
+
         let section = NSCollectionLayoutSection(group: group)
-        section.interGroupSpacing = metrics.cardSpacing
-        section.orthogonalScrollingBehavior = .continuous
+        // Üç kart ekrana sığdığı için yatay kaydırmaya gerek yok.
+        section.orthogonalScrollingBehavior = .none
         section.contentInsets = NSDirectionalEdgeInsets(
             top: metrics.rowSpacing * 0.6,
             leading: metrics.screenPadding,
             bottom: metrics.rowSpacing * 0.5,
             trailing: metrics.screenPadding
         )
-        return section
-    }
-
-    private func posterRowSection(kind: MediaKind, metrics: AppMetrics) -> NSCollectionLayoutSection {
-        let width = metrics.cardWidth(for: kind)
-        let height = metrics.rowItemHeight(for: kind)
-        let size = NSCollectionLayoutSize(
-            widthDimension: .absolute(width),
-            heightDimension: .absolute(height)
-        )
-        let item = NSCollectionLayoutItem(layoutSize: size)
-        let group = NSCollectionLayoutGroup.horizontal(layoutSize: size, subitems: [item])
-        let section = NSCollectionLayoutSection(group: group)
-        section.interGroupSpacing = metrics.cardSpacing
-        section.orthogonalScrollingBehavior = .continuous
-        section.contentInsets = NSDirectionalEdgeInsets(
-            top: 12,
-            leading: metrics.screenPadding,
-            bottom: metrics.rowSpacing * 0.5,
-            trailing: metrics.screenPadding
-        )
-
-        let headerSize = NSCollectionLayoutSize(
-            widthDimension: .fractionalWidth(1),
-            heightDimension: .absolute(28)
-        )
-        let header = NSCollectionLayoutBoundarySupplementaryItem(
-            layoutSize: headerSize,
-            elementKind: UICollectionView.elementKindSectionHeader,
-            alignment: .top
-        )
-        // Bölümün kendi girintisi zaten uygulanıyor; burada tekrar vermek
-        // başlığı kartlardan iki kat içeri itiyordu.
-        header.contentInsets = .zero
-        section.boundarySupplementaryItems = [header]
         return section
     }
 
@@ -234,15 +315,32 @@ final class HomeViewController: UIViewController {
                 let cell = collectionView.dequeueReusableCell(
                     withReuseIdentifier: MainCardCell.reuseID, for: indexPath
                 ) as! MainCardCell
-                cell.configure(kind: kind, count: model.library.catalog[kind]?.count ?? 0)
+                cell.configure(kind: kind, count: model.library.catalog[kind]?.count ?? 0, metrics: metrics)
                 return cell
 
             case let .poster(rowID, media):
+                guard rowID == Self.continueRowID else {
+                    let cell = collectionView.dequeueReusableCell(
+                        withReuseIdentifier: PosterCell.reuseID, for: indexPath
+                    ) as! PosterCell
+                    cell.configure(item: media, metrics: metrics, progress: nil)
+                    return cell
+                }
+
+                // Sürdürme kartı yatay: kaldığın yeri gösteren görsel afiş
+                // değil backdrop, ve dizide kaldığın bölümün adı yazıyor.
                 let cell = collectionView.dequeueReusableCell(
-                    withReuseIdentifier: PosterCell.reuseID, for: indexPath
-                ) as! PosterCell
-                let progress = rowID == "continue" ? model.activity.progress(for: media.id) : nil
-                cell.configure(item: media, metrics: metrics, progress: progress)
+                    withReuseIdentifier: MediaClipCell.reuseID, for: indexPath
+                ) as! MediaClipCell
+                let progress = model.activity.progress(for: media.id)
+                cell.configure(
+                    title: continueTitle(for: media, progress: progress),
+                    durationText: media.durationText,
+                    imageURL: media.backdropURL ?? media.posterURL,
+                    metrics: metrics,
+                    width: metrics.clipCardWidth,
+                    playedFraction: progress?.fraction
+                )
                 return cell
             }
         }
@@ -264,6 +362,18 @@ final class HomeViewController: UIViewController {
         }
     }
 
+    /// Sürdürme kartının başlığı. Dizide kaldığın bölümün adı gösteriliyor;
+    /// bölüm adı ancak dizinin detayı daha önce açılmışsa elde oluyor, yoksa
+    /// dizinin kendi adıyla yetiniliyor.
+    private func continueTitle(for item: MediaItem, progress: PlaybackProgress?) -> String {
+        guard item.kind == .series,
+              let episodeID = progress?.episodeID,
+              let detail = model.library.cachedDetail(for: item),
+              let episode = detail.seasons.flatMap(\.episodes).first(where: { $0.id == episodeID })
+        else { return item.title }
+        return [episode.numberText, episode.title].compactMap { $0 }.joined(separator: " · ")
+    }
+
     @objc private func libraryDidChange() {
         applySnapshot(animated: true)
     }
@@ -275,6 +385,29 @@ final class HomeViewController: UIViewController {
         if !spotlight.isEmpty {
             snapshot.appendSections([.hero])
             snapshot.appendItems(spotlight.map(Item.hero), toSection: .hero)
+        }
+
+        // Tek banner varken gösterge de otomatik geçiş de anlamsız.
+        pageIndicator.setPages(spotlight.count)
+        pageIndicator.isHidden = spotlight.count <= 1
+        if currentBannerPage >= spotlight.count {
+            currentBannerPage = max(0, spotlight.count - 1)
+            pageIndicator.setCurrentPage(currentBannerPage)
+        }
+        view.setNeedsLayout()
+        restartBannerTimer()
+
+// Kaldığın yer en üstte: kullanıcının aradığı ilk şey bu.
+        let continueWatching = model.library.continueWatching
+        if !continueWatching.isEmpty {
+            let section = Section.row(
+                id: Self.continueRowID, title: L10n.continueWatching, kind: .movie, categoryID: nil
+            )
+            snapshot.appendSections([section])
+            snapshot.appendItems(
+                continueWatching.map { Item.poster(rowID: Self.continueRowID, item: $0.item) },
+                toSection: section
+            )
         }
 
         snapshot.appendSections([.mainCards])
@@ -290,12 +423,15 @@ final class HomeViewController: UIViewController {
             snapshot.reconfigureItems(refreshable)
         }
 
-        let continueWatching = model.library.continueWatching
-        if !continueWatching.isEmpty {
-            let section = Section.row(id: "continue", title: L10n.continueWatching, kind: .movie, categoryID: nil)
+        // İzleme listesi: detaydaki "+" ile eklenen içerikler. Kimlik olarak
+        // saklandığı için katalogdan çözülüyor; karşılığı kalmayanlar
+        // listelenmiyor ama kaydı duruyor.
+        let watchlist = model.activity.watchlistIDs.compactMap { model.library.item(for: $0) }
+        if !watchlist.isEmpty {
+            let section = Section.row(id: "watchlist", title: L10n.myWatchlist, kind: .movie, categoryID: nil)
             snapshot.appendSections([section])
             snapshot.appendItems(
-                continueWatching.map { Item.poster(rowID: "continue", item: $0.item) },
+                watchlist.map { Item.poster(rowID: "watchlist", item: $0) },
                 toSection: section
             )
         }
@@ -303,16 +439,89 @@ final class HomeViewController: UIViewController {
         for row in model.library.rows {
             let section = Section.row(id: row.id, title: row.title, kind: row.kind, categoryID: row.categoryID)
             snapshot.appendSections([section])
+            // Sağlayıcı listeleri her zaman temiz değil; aynı yayın iki kez
+            // gelirse diffable data source çift kimlik görüp çöküyor.
+            var seen = Set<MediaID>()
             snapshot.appendItems(
-                row.items.map { Item.poster(rowID: row.id, item: $0) },
+                row.items
+                    .filter { seen.insert($0.id).inserted }
+                    .map { Item.poster(rowID: row.id, item: $0) },
                 toSection: section
             )
         }
 
         dataSource.apply(snapshot, animatingDifferences: animated)
 
+        // Ana kartlar her zaman var; onlardan başka bir şey yoksa içerik boş.
         let isEmpty = snapshot.numberOfItems == MediaKind.allCases.count
         isEmpty && model.library.state == .loading ? spinner.startAnimating() : spinner.stopAnimating()
+
+        // Yükleme başarısızsa ekran sessizce boş kalmıyor: sebep yazılıyor ve
+        // yeniden denemek için bir yol sunuluyor.
+        if case let .failed(message) = model.library.state, isEmpty {
+            statusLabel.text = "\(L10n.libraryLoadFailed)\n\(message)"
+            statusStack.isHidden = false
+        } else {
+            statusStack.isHidden = true
+        }
+    }
+
+    // MARK: - Banner otomatik geçişi
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        restartBannerTimer()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        stopBannerTimer()
+    }
+
+    /// Süreyi baştan başlatır ve göstergenin dolumunu yeniden kurar.
+    private func restartBannerTimer() {
+        stopBannerTimer()
+        guard pageIndicator.numberOfPages > 1, isViewLoaded, view.window != nil else { return }
+
+        pageIndicator.startProgress(duration: Self.bannerDwellDuration)
+        bannerTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(Self.bannerDwellDuration))
+            guard !Task.isCancelled else { return }
+            self?.advanceBanner()
+        }
+    }
+
+    private func stopBannerTimer() {
+        bannerTask?.cancel()
+        bannerTask = nil
+        pageIndicator.stopProgress()
+    }
+
+    private func advanceBanner() {
+        let count = pageIndicator.numberOfPages
+        guard count > 1 else { return }
+        showBannerPage((currentBannerPage + 1) % count)
+    }
+
+    /// Banner'ı verilen sayfaya kaydırır.
+    ///
+    /// Hero yukarıda görünmüyorken kendiliğinden geçmiyor: `scrollToItem`
+    /// gerekirse dikey konumu da oynatabiliyor ve kullanıcı aşağıda içerik
+    /// okurken ekranın zıplaması kabul edilebilir değil.
+    private func showBannerPage(_ page: Int) {
+        guard let heroSection = dataSource.snapshot().indexOfSection(.hero),
+              page >= 0, page < pageIndicator.numberOfPages
+        else { return }
+        guard collectionView.contentOffset.y < metrics.heroHeight / 2 else {
+            restartBannerTimer()
+            return
+        }
+
+        collectionView.scrollToItem(
+            at: IndexPath(item: page, section: heroSection),
+            at: .centeredHorizontally,
+            animated: true
+        )
     }
 
     // MARK: - Gezinme
@@ -340,6 +549,39 @@ final class HomeViewController: UIViewController {
 }
 
 extension HomeViewController: UICollectionViewDelegate {
+    /// Stretchy header: aşağı çekildiğinde banner görseli üste doğru büyüyor.
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        // Ortogonal bölümlerin kendi kaydırma görünümleri de bu delegeye
+        // düşmüyor ama yine de yalnızca ana koleksiyona bakılıyor.
+        guard scrollView === collectionView else { return }
+        let offset = scrollView.contentOffset.y
+        for case let cell as HeroCell in collectionView.visibleCells {
+            cell.applyStretch(offset: offset)
+        }
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        willDisplay cell: UICollectionViewCell,
+        forItemAt indexPath: IndexPath
+    ) {
+        // Hücre, ortogonal bölümün kendi kaydırma görünümünün içinde duruyor
+        // ve o görünüm kırpma yapıyor. Hem hero'nun esnemesi hem de tvOS'ta
+        // odaklanan kartın büyümesi bunun dışına taşıyor.
+        var ancestor = cell.superview
+        while let view = ancestor, view !== collectionView {
+            view.clipsToBounds = false
+            ancestor = view.superview
+        }
+        #if os(tvOS)
+        collectionView.clipsToBounds = false
+        #endif
+
+        guard let cell = cell as? HeroCell else { return }
+        // Sayfa değiştirirken zaten çekili durumdaysak yeni hücre de esnesin.
+        cell.applyStretch(offset: collectionView.contentOffset.y)
+    }
+
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
@@ -348,10 +590,12 @@ extension HomeViewController: UICollectionViewDelegate {
         case let .poster(_, media):
             openDetail(media, sourceView: collectionView.cellForItem(at: indexPath))
         case let .mainCard(kind):
-            navigationController?.pushViewController(
-                KindBrowseViewController(kind: kind, model: model),
-                animated: true
-            )
+            // Canlı yayında beklenen ekran kanal ızgarası değil rehber:
+            // hangi kanalda şu an ne var. Film ve dizi eskisi gibi.
+            let controller: UIViewController = kind == .live
+                ? GuideViewController(model: model)
+                : KindBrowseViewController(kind: kind, model: model)
+            navigationController?.pushViewController(controller, animated: true)
         case .hero:
             break
         }

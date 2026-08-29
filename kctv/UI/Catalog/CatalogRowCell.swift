@@ -38,9 +38,8 @@ final class CatalogRowCell: UITableViewCell {
         artwork.clipsToBounds = true
         artwork.translatesAutoresizingMaskIntoConstraints = false
 
-        titleLabel.font = .systemFont(ofSize: 17)
+        // Ölçüler `configure` içinde metriklerden geliyor; tvOS'ta çok daha büyük.
         titleLabel.textColor = AppPalette.primaryText
-        subtitleLabel.font = .systemFont(ofSize: 15)
         subtitleLabel.textColor = AppPalette.secondaryText
 
         let textStack = UIStackView(arrangedSubviews: [titleLabel, subtitleLabel])
@@ -107,6 +106,8 @@ final class CatalogRowCell: UITableViewCell {
         separatorLeading?.constant = width + 32
 
         artwork.configure(url: item.posterURL, title: item.title, displayWidth: width)
+        titleLabel.font = metrics.listTitleFont
+        subtitleLabel.font = metrics.listSubtitleFont
         titleLabel.text = item.title
 
         let parts = [item.yearText, item.genres.first ?? item.categoryName]

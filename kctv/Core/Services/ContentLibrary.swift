@@ -56,6 +56,9 @@ final class ContentLibrary {
     private var provider: (any ContentProvider)?
     private var currentPlaylistID: String?
     private let cache = LocalStore(folder: "catalog")
+    /// Yayın akışı hızla eskiyor; kısa ömürlü bellek önbelleği yetiyor.
+    private var epgCache: [MediaID: (entries: [EPGEntry], fetchedAt: Date)] = [:]
+    private static let epgCacheLifetime: TimeInterval = 300
     private let activity: UserActivityStore
     /// Aynı anda birden fazla yenileme başlamasın.
     private var isReloading = false
@@ -259,14 +262,29 @@ final class ContentLibrary {
             return picked
         }
 
-        let pool = candidates(.movie, limit: 40) + candidates(.series, limit: 20)
+        // Katalogda aynı yayın iki kez bulunabiliyor (sağlayıcı listeleri
+        // temiz değil); banner'da tekrar eden kayıt hem yanlış görünüyor hem
+        // de diffable data source'u çökertiyor.
+        var seen = Set<MediaID>()
+        let pool = (candidates(.movie, limit: 40) + candidates(.series, limit: 20))
+            .filter { seen.insert($0.id).inserted }
         return Array(pool.sorted { ($0.rating ?? 0) > ($1.rating ?? 0) }.prefix(8))
     }
 
     /// İzleme kayıtlarını katalogdaki gerçek içerikle eşleştirir.
+    ///
+    /// İçerik başına tek kayıt dönüyor. İlerleme dizilerde **bölüm bazında**
+    /// tutuluyor: aynı dizinin iki bölümü yarım kalırsa iki kayıt oluşuyor ve
+    /// ikisi de aynı diziye çözülüyordu. Rayda dizinin iki kez çıkması hem
+    /// yanlış hem de diffable data source'u çökertiyordu ("supplied item
+    /// identifiers are not unique"). `activity.continueWatching` en yeniden
+    /// eskiye sıralı olduğu için ilk görülen kayıt en son izlenen bölüm oluyor.
     var continueWatching: [(progress: PlaybackProgress, item: MediaItem)] {
-        activity.continueWatching.compactMap { entry in
-            guard let item = item(for: entry.mediaID) else { return nil }
+        var seen = Set<MediaID>()
+        return activity.continueWatching.compactMap { entry in
+            guard !seen.contains(entry.mediaID),
+                  let item = item(for: entry.mediaID) else { return nil }
+            seen.insert(entry.mediaID)
             return (entry, item)
         }
     }
@@ -313,9 +331,21 @@ final class ContentLibrary {
         return result
     }
 
+    /// Kanal başına ayrı bir ağ isteği; rehber ekranı yalnızca görünen
+    /// satırlar için istiyor. Yanıt kısa ömürlü önbellekte tutuluyor ki
+    /// listede ileri geri kaydırmak aynı isteği tekrarlamasın.
     func epg(for item: MediaItem) async -> [EPGEntry] {
+        if let cached = epgCache[item.id], Date().timeIntervalSince(cached.fetchedAt) < Self.epgCacheLifetime {
+            return cached.entries
+        }
         guard let provider else { return [] }
-        return (try? await provider.shortEPG(for: item)) ?? []
+        let entries = (try? await provider.shortEPG(for: item)) ?? []
+        epgCache[item.id] = (entries, Date())
+        // Önbellek sınırsız büyümesin; canlı listeler on binlerce kanal olabiliyor.
+        if epgCache.count > 400 {
+            for key in epgCache.keys.prefix(200) { epgCache.removeValue(forKey: key) }
+        }
+        return entries
     }
 
     func playback(for item: MediaItem) async throws -> PlaybackContext {

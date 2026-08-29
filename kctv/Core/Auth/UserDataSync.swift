@@ -6,8 +6,12 @@ import FirebaseFirestore
 /// Şema:
 ///   users/{uid}                       -> profil
 ///   users/{uid}/playlists/{id}        -> liste metadata'sı (şifre YOK)
-///   users/{uid}/favorites/{mediaID}   -> favoriler
+///   users/{uid}/favorites/{mediaID}   -> favoriler (yalnızca kimlik)
+///   users/{uid}/watchlist/{mediaID}   -> izleme listesi (yalnızca kimlik)
 ///   users/{uid}/progress/{id}         -> izlemeyi sürdür
+///
+/// Favori ve izleme listesi belgelerinde içeriğin tamamı değil yalnızca
+/// `MediaID` duruyor: sağlayıcı kimliği, tür ve ham `stream_id`/`series_id`.
 ///
 /// Şifreler bilinçli olarak buluta gitmiyor; yalnızca cihazın Keychain'inde.
 /// Bu yüzden yeni bir cihazda liste görünür ama şifre bir kez sorulur.
@@ -56,25 +60,49 @@ actor UserDataSync {
 
     // MARK: - Favoriler ve ilerleme
 
-    func saveFavorites(_ items: [MediaItem]) async throws {
-        let collection = userDocument.collection("favorites")
+    func saveFavorites(_ ids: [MediaID]) async throws {
+        try await saveIDs(ids, in: "favorites")
+    }
+
+    func loadFavorites() async throws -> [MediaID] {
+        try await loadIDs(in: "favorites")
+    }
+
+    func saveWatchlist(_ ids: [MediaID]) async throws {
+        try await saveIDs(ids, in: "watchlist")
+    }
+
+    func loadWatchlist() async throws -> [MediaID] {
+        try await loadIDs(in: "watchlist")
+    }
+
+    /// Buluta yalnızca içerik kimliği yazılıyor — sağlayıcının `stream_id` /
+    /// `series_id` değeri, türü ve hangi listeden geldiği. Başlık, afiş ve
+    /// künye içeriğin kendi verisi; katalogdan çözülüyor.
+    private func saveIDs(_ ids: [MediaID], in collectionName: String) async throws {
+        let collection = userDocument.collection(collectionName)
         let existing = try await collection.getDocuments()
-        let keep = Set(items.map { Self.documentID(for: $0.id) })
+        let keep = Set(ids.map { Self.documentID(for: $0) })
 
         let batch = database.batch()
         for document in existing.documents where !keep.contains(document.documentID) {
             batch.deleteDocument(document.reference)
         }
-        for item in items {
-            let data = try Firestore.Encoder().encode(item)
-            batch.setData(data, forDocument: collection.document(Self.documentID(for: item.id)), merge: true)
+        for id in ids {
+            let data = try Firestore.Encoder().encode(id)
+            batch.setData(data, forDocument: collection.document(Self.documentID(for: id)), merge: false)
         }
         try await batch.commit()
     }
 
-    func loadFavorites() async throws -> [MediaItem] {
-        let snapshot = try await userDocument.collection("favorites").getDocuments()
-        return snapshot.documents.compactMap { try? $0.data(as: MediaItem.self) }
+    private func loadIDs(in collectionName: String) async throws -> [MediaID] {
+        let snapshot = try await userDocument.collection(collectionName).getDocuments()
+        return snapshot.documents.compactMap { document in
+            if let id = try? document.data(as: MediaID.self) { return id }
+            // Eski kayıtlar içeriğin tamamını tutuyordu; kimliği içinden alıp
+            // devam ediyoruz. Bir sonraki yazmada belge yeni biçime dönüyor.
+            return try? document.data(as: MediaItem.self).id
+        }
     }
 
     func saveProgress(_ entries: [PlaybackProgress]) async throws {

@@ -10,7 +10,12 @@ final class SettingsViewController: UITableViewController {
 
     init(model: AppModel) {
         self.model = model
+        // `insetGrouped` tvOS'ta yok; orada düz gruplu stil kullanılıyor.
+        #if os(iOS)
         super.init(style: .insetGrouped)
+        #else
+        super.init(style: .grouped)
+        #endif
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -20,11 +25,14 @@ final class SettingsViewController: UITableViewController {
         title = L10n.settingsTitle
         tableView.backgroundColor = AppPalette.background
         // Sekme olarak açıldığında kapat butonu anlamsız; yalnızca modalde.
+        // `.close` sistem öğesi tvOS'ta yok; orada Menu tuşu kapatıyor.
+        #if os(iOS)
         if presentingViewController != nil {
             navigationItem.rightBarButtonItem = UIBarButtonItem(
                 barButtonSystemItem: .close, target: self, action: #selector(close)
             )
         }
+        #endif
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
         tableView.applyNativeScrollEdges()
 

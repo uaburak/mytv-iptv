@@ -52,6 +52,15 @@ final class FirebaseAuthService: AuthService, @unchecked Sendable {
         }
     }
 
+    /// Google girişi Firebase'in web yönlendirme akışına dayanıyor
+    /// (`OAuthProvider.getCredentialWith`). O akış bir tarayıcı bağlamı
+    /// gerektirdiği için tvOS'ta yok; orada Apple ile giriş kullanılıyor ve
+    /// giriş ekranında Google butonu hiç gösterilmiyor.
+    #if os(tvOS)
+    func signInWithGoogle() async throws -> AuthUser {
+        throw AuthError.notConfigured(L10n.googleSignInUnavailable)
+    }
+    #else
     func signInWithGoogle() async throws -> AuthUser {
         let provider = OAuthProvider(providerID: "google.com")
         provider.scopes = ["profile", "email"]
@@ -93,6 +102,7 @@ final class FirebaseAuthService: AuthService, @unchecked Sendable {
             throw AuthError.failed(error.localizedDescription)
         }
     }
+    #endif
 
     private static func topViewController() -> UIViewController? {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
@@ -123,7 +133,9 @@ final class FirebaseAuthService: AuthService, @unchecked Sendable {
     }
 }
 
-/// Firebase OAuth için arayüz sunucu temsilcisi
+/// Firebase OAuth için arayüz sunucu temsilcisi.
+/// `AuthUIDelegate` web yönlendirme akışının parçası; tvOS'ta yok.
+#if !os(tvOS)
 private final class AuthPresenter: NSObject, AuthUIDelegate {
     private weak var viewController: UIViewController?
 
@@ -139,3 +151,4 @@ private final class AuthPresenter: NSObject, AuthUIDelegate {
         viewController?.dismiss(animated: flag, completion: completion)
     }
 }
+#endif
