@@ -6,6 +6,8 @@ final class DetailViewController: UIViewController {
     private let model: AppModel
     private var item: MediaItem
     private var detail: MediaDetail?
+    private var franchiseItems: [FranchiseEntry] = []
+    private var isFranchiseLoading: Bool = false
     private var related: [MediaItem] = []
     private var selectedSeason: Int?
 
@@ -514,7 +516,7 @@ final class DetailViewController: UIViewController {
         let trailerURL = tmdbMetadata?.trailerURL ?? detail?.trailerURL ?? item.trailerURL
         let current = detail?.item ?? item
 
-        let hasAnyInfo = !castNames.isEmpty || director != nil || originalTitle != nil
+        let hasAnyInfo = !franchiseItems.isEmpty || !castNames.isEmpty || director != nil || originalTitle != nil
             || releaseDate != nil || trailerURL != nil
         guard hasAnyInfo else {
             creditsSection.isHidden = true
@@ -531,7 +533,31 @@ final class DetailViewController: UIViewController {
             creditsSection.addArrangedSubview(makeTrailerRow(url: trailerURL, item: current))
         }
 
-        // 2) Oyuncular — TMDB fotoğraflarıyla yuvarlak kartlar.
+        // 2) Seri Filmler (Fragmandan hemen sonra)
+        if isFranchiseLoading {
+            creditsSection.addArrangedSubview(makeSectionHeader(L10n.seriesCollection))
+            let skeleton = FranchiseSkeletonRow(metrics: metrics)
+            skeleton.translatesAutoresizingMaskIntoConstraints = false
+            skeleton.heightAnchor.constraint(equalToConstant: metrics.rowItemHeight(for: item.kind)).isActive = true
+            creditsSection.addArrangedSubview(skeleton)
+        } else if !franchiseItems.isEmpty {
+            creditsSection.addArrangedSubview(makeSectionHeader(L10n.seriesCollection))
+            let franchiseRow = HorizontalFranchiseRow(items: franchiseItems, metrics: metrics) { [weak self] selected, sourceView in
+                guard let self else { return }
+                if selected.isAvailableInCatalog, let local = selected.localItem {
+                    let controller = DetailViewController(item: local, model: self.model)
+                    controller.applyZoomTransition(from: sourceView)
+                    self.navigationController?.pushViewController(controller, animated: true)
+                } else {
+                    self.showUnavailableFranchiseAlert(for: selected)
+                }
+            }
+            franchiseRow.translatesAutoresizingMaskIntoConstraints = false
+            franchiseRow.heightAnchor.constraint(equalToConstant: metrics.rowItemHeight(for: item.kind)).isActive = true
+            creditsSection.addArrangedSubview(franchiseRow)
+        }
+
+        // 3) Oyuncular — TMDB fotoğraflarıyla yuvarlak kartlar.
         if !castMembers.isEmpty {
             creditsSection.addArrangedSubview(makeSectionHeader(L10n.cast))
             creditsSection.addArrangedSubview(makeCastRow(castMembers))
@@ -684,14 +710,14 @@ final class DetailViewController: UIViewController {
 
     private func renderRelated() {
         relatedSection.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        guard related.count >= 4 else {
+        guard !related.isEmpty else {
             relatedSection.isHidden = true
             return
         }
         relatedSection.isHidden = false
 
         let header = UILabel()
-        header.text = L10n.relatedContent
+        header.text = L10n.recommendedContent
         header.font = metrics.rowTitleFont
         header.textColor = .white
 
@@ -719,7 +745,13 @@ final class DetailViewController: UIViewController {
     private func load() async {
         let startTime = CACurrentMediaTime()
 
-        related = model.library.related(to: item, limit: 12)
+        // Film ise arka planda seri sorgulanırken anında skeleton moduna geç
+        if item.kind == .movie {
+            isFranchiseLoading = true
+        }
+        related = model.library.recommendations(for: item, limit: 16)
+        render()
+        renderCredits()
         renderRelated()
 
         if detail == nil {
@@ -791,21 +823,51 @@ final class DetailViewController: UIViewController {
             if let trailerURL = metadata.trailerURL {
                 detail?.trailerURL = trailerURL
             }
-        }
 
-        // Açılışta en az 350ms koyu efekt tutularak ani görsel sıçramaları önlenir
-        let elapsed = CACurrentMediaTime() - startTime
-        let targetDelay: Double = 0.35
-        if elapsed < targetDelay {
-            let sleepNanos = UInt64((targetDelay - elapsed) * 1_000_000_000)
-            try? await Task.sleep(nanoseconds: sleepNanos)
+            related = model.library.recommendations(for: item, tmdb: metadata, limit: 16)
+
+            // Aşama 2: Arka planda koleksiyon parçalarını asenkron yükle (etkileşim kilitlenmez)
+            if let collectionID = metadata.collectionID {
+                Task.detached(priority: .userInitiated) { [weak self, model, item] in
+                    let parts = await TMDBService.shared.collectionParts(for: collectionID, language: AppLanguage.current)
+                    let entries = model.library.matchFranchiseEntries(parts: parts, for: item)
+                    await MainActor.run {
+                        guard let self else { return }
+                        self.franchiseItems = entries
+                        self.isFranchiseLoading = false
+                        self.renderCredits()
+                        self.renderRelated()
+                    }
+                }
+            } else {
+                let localEntries = model.library.franchiseEntries(for: item)
+                franchiseItems = localEntries
+                isFranchiseLoading = false
+            }
+        } else {
+            let localEntries = model.library.franchiseEntries(for: item)
+            franchiseItems = localEntries
+            isFranchiseLoading = false
         }
 
         await MainActor.run {
             self.applyHeroArtwork()
             self.render()
+            self.renderCredits()
+            self.renderRelated()
             self.hero.stopLoadingAnimation(animated: true)
         }
+    }
+
+    private func showUnavailableFranchiseAlert(for entry: FranchiseEntry) {
+        let yearSuffix = entry.year.map { " (\($0))" } ?? ""
+        let alert = UIAlertController(
+            title: "\(entry.title)\(yearSuffix)",
+            message: L10n.notInCatalogDescription,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: L10n.close, style: .default))
+        present(alert, animated: true)
     }
 
     /// Hero arka planı için en iyi görseli seçer.

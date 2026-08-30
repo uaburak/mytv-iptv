@@ -253,16 +253,15 @@ final class PlaybackSlider: UIControl {
         progressView.progress = (value - minimumValue) / span
     }
 }
-/// Denetim satırının hemen altındaki görünmez odak durağı.
-///
-/// Bilgi panelinin ne zaman açılacağını odak motorunun kendisi söylüyor:
-/// odak buraya düştüyse satırın altına gerçekten inilmiş demektir. Tuşa
-/// basıldığı anda odağın nerede olduğuna bakmak işe yaramıyor — motor
-/// basışı bizden önce işliyor ve odak zaten inmiş oluyor, bu yüzden çubuktan
-/// tek basışta panel açılıyordu.
+#else
+typealias PlaybackSlider = UISlider
+#endif
+
+/// Denetim satırının hemen altındaki görünmez odak durağı (tvOS).
 final class PlayerFocusSentinel: UIView {
     var onFocus: (() -> Void)?
 
+    #if os(tvOS)
     override var canBecomeFocused: Bool { true }
 
     override func didUpdateFocus(
@@ -272,10 +271,8 @@ final class PlayerFocusSentinel: UIView {
         super.didUpdateFocus(in: context, with: coordinator)
         if isFocused { onFocus?() }
     }
+    #endif
 }
-#else
-typealias PlaybackSlider = UISlider
-#endif
 
 /// Tam ekran oynatıcı.
 ///

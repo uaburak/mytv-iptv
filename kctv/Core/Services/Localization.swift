@@ -91,6 +91,12 @@ enum L10n {
     static var season: String { isTurkish ? "Sezon" : "Season" }
     static var castAndCrew: String { isTurkish ? "Künye ve Detaylar" : "Cast & Details" }
     static var relatedContent: String { isTurkish ? "Benzer İçerikler" : "Similar Content" }
+    static var recommendedContent: String { isTurkish ? "Önerilen İçerikler" : "Recommended for You" }
+    static var seriesCollection: String { isTurkish ? "Seri Filmler" : "Film Series" }
+    static var notInCatalog: String { isTurkish ? "Listede Yok" : "Not in List" }
+    static var notInCatalogDescription: String {
+        isTurkish ? "Bu film seriye dahildir ancak yayın listenizde bulunmuyor." : "This movie is part of the series but is not in your playlist."
+    }
     static var director: String { isTurkish ? "Yönetmen" : "Director" }
     static var cast: String { isTurkish ? "Oyuncular" : "Cast" }
     static var genre: String { isTurkish ? "Tür" : "Genre" }

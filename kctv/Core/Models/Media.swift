@@ -180,3 +180,34 @@ struct EPGEntry: Identifiable, Hashable, Codable, Sendable {
         return min(1, max(0, Date().timeIntervalSince(start) / total))
     }
 }
+
+/// Bir seriye (franchise/collection) ait film kaydı.
+/// Kullanıcının katalogunda var olabilir (`localItem != nil`) veya yalnızca TMDB'de kayıtlı olup
+/// kullanıcının listesinde henüz bulunmayabilir (`localItem == nil`).
+struct FranchiseEntry: Identifiable, Hashable, Codable, Sendable {
+    var id: String
+    var title: String
+    var originalTitle: String?
+    var year: Int?
+    var releaseDate: String?
+    var posterURL: URL?
+    var backdropURL: URL?
+    var overview: String?
+    var tmdbID: Int?
+    var localItem: MediaItem?
+
+    var isAvailableInCatalog: Bool { localItem != nil }
+
+    var effectiveItem: MediaItem {
+        if let localItem { return localItem }
+        return MediaItem(
+            id: MediaID(source: "tmdb", kind: .movie, raw: "\(tmdbID ?? 0)"),
+            title: title,
+            posterURL: posterURL,
+            backdropURL: backdropURL,
+            year: year,
+            plot: overview,
+            streamReference: ""
+        )
+    }
+}

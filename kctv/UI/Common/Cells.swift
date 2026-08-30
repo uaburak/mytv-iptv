@@ -12,6 +12,8 @@ final class PosterCell: UICollectionViewCell {
 
     private let artwork = RemoteImageView()
     private let overlay = CardOverlayView()
+    private let badgeContainer = UIView()
+    private let badgeLabel = UILabel()
     /// Afişin üstündeki cam katman yalnızca tvOS'ta.
     ///
     /// 10 feet mesafede camın kenardaki kırılması ve parlaması kartı zeminden
@@ -41,6 +43,20 @@ final class PosterCell: UICollectionViewCell {
         artwork.translatesAutoresizingMaskIntoConstraints = false
         overlay.translatesAutoresizingMaskIntoConstraints = false
 
+        badgeContainer.translatesAutoresizingMaskIntoConstraints = false
+        badgeContainer.backgroundColor = UIColor.black.withAlphaComponent(0.72)
+        badgeContainer.layer.cornerRadius = 6
+        badgeContainer.layer.borderWidth = 0.8
+        badgeContainer.layer.borderColor = UIColor.white.withAlphaComponent(0.25).cgColor
+        badgeContainer.clipsToBounds = true
+        badgeContainer.isHidden = true
+
+        badgeLabel.translatesAutoresizingMaskIntoConstraints = false
+        badgeLabel.font = .systemFont(ofSize: 10, weight: .bold)
+        badgeLabel.textColor = .white
+        badgeLabel.textAlignment = .center
+        badgeContainer.addSubview(badgeLabel)
+
         contentView.addSubview(artwork)
         // Sıra önemli: cam afişin üstünde (onu kırıyor), bilgi katmanı camın
         // üstünde (metin kırılmasın diye). İkisi de afişin içinde, böylece
@@ -49,6 +65,7 @@ final class PosterCell: UICollectionViewCell {
         artwork.addSubview(glass)
         #endif
         artwork.addSubview(overlay)
+        artwork.addSubview(badgeContainer)
 
         #if os(tvOS)
         prepareFocusShadow()
@@ -68,12 +85,21 @@ final class PosterCell: UICollectionViewCell {
             overlay.leadingAnchor.constraint(equalTo: artwork.leadingAnchor),
             overlay.trailingAnchor.constraint(equalTo: artwork.trailingAnchor),
             overlay.bottomAnchor.constraint(equalTo: artwork.bottomAnchor),
+
+            badgeContainer.topAnchor.constraint(equalTo: artwork.topAnchor, constant: 8),
+            badgeContainer.trailingAnchor.constraint(equalTo: artwork.trailingAnchor, constant: -8),
+            badgeLabel.topAnchor.constraint(equalTo: badgeContainer.topAnchor, constant: 3),
+            badgeLabel.bottomAnchor.constraint(equalTo: badgeContainer.bottomAnchor, constant: -3),
+            badgeLabel.leadingAnchor.constraint(equalTo: badgeContainer.leadingAnchor, constant: 6),
+            badgeLabel.trailingAnchor.constraint(equalTo: badgeContainer.trailingAnchor, constant: -6),
         ])
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
         artwork.prepareForReuse()
+        artwork.alpha = 1.0
+        badgeContainer.isHidden = true
         overlay.isHidden = true
     }
 
@@ -107,7 +133,9 @@ final class PosterCell: UICollectionViewCell {
         item: MediaItem,
         metrics: AppMetrics,
         progress: PlaybackProgress?,
-        cardWidth: CGFloat? = nil
+        cardWidth: CGFloat? = nil,
+        badgeText: String? = nil,
+        isAvailable: Bool = true
     ) {
         self.title = item.title
         self.progress = progress?.fraction
@@ -119,6 +147,14 @@ final class PosterCell: UICollectionViewCell {
         glass.cornerConfiguration = .uniformCorners(radius: .fixed(metrics.cardCornerRadius))
         #endif
         artwork.configure(url: item.posterURL, title: item.title, displayWidth: width)
+        artwork.alpha = isAvailable ? 1.0 : 0.65
+
+        if let badgeText, !badgeText.isEmpty {
+            badgeLabel.text = badgeText
+            badgeContainer.isHidden = false
+        } else {
+            badgeContainer.isHidden = true
+        }
 
         artworkHeight?.isActive = false
         let height = artwork.heightAnchor.constraint(

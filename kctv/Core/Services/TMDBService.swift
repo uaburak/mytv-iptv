@@ -34,6 +34,30 @@ struct TMDBMetadata: Codable, Sendable {
     /// Fotoğraflı künye. `cast` geriye dönük uyumluluk için duruyor.
     var castMembers: [TMDBCastMember] = []
     var trailerURL: URL?
+    var collectionID: Int?
+    var collectionName: String?
+    var collectionParts: [TMDBCollectionPart] = []
+    var recommendedMovieIDs: [Int] = []
+    var recommendedMovieTitles: [String] = []
+}
+
+struct TMDBCollectionPart: Codable, Sendable, Hashable {
+    var id: Int
+    var title: String
+    var originalTitle: String?
+    var posterPath: String?
+    var backdropPath: String?
+    var releaseDate: String?
+    var releaseYear: String?
+    var overview: String?
+
+    var posterURL: URL? {
+        TMDBService.imageURL(posterPath, size: "w500")
+    }
+
+    var backdropURL: URL? {
+        TMDBService.imageURL(backdropPath, size: "w1280")
+    }
 }
 
 /// TMDB istemcisi.
@@ -106,6 +130,33 @@ actor TMDBService {
         return result
     }
 
+    private var collectionCache: [String: [TMDBCollectionPart]] = [:]
+
+    func collectionParts(for collectionID: Int, language: AppLanguage = AppLanguage.current) async -> [TMDBCollectionPart] {
+        let key = "\(language.tmdbLanguageCode)_collection_\(collectionID)"
+        if let cached = collectionCache[key] { return cached }
+
+        guard let response = await fetchCollection(id: collectionID, language: language),
+              let parts = response.parts
+        else { return [] }
+
+        let result = parts.compactMap { p -> TMDBCollectionPart? in
+            guard let title = p.displayTitle else { return nil }
+            return TMDBCollectionPart(
+                id: p.id,
+                title: title,
+                originalTitle: p.originalTitle,
+                posterPath: p.posterPath,
+                backdropPath: p.backdropPath,
+                releaseDate: p.releaseDate,
+                releaseYear: p.releaseYear,
+                overview: p.overview
+            )
+        }
+        collectionCache[key] = result
+        return result
+    }
+
     /// Kimlik bilindiğinde doğrudan çekiyoruz; belirsizlik yok.
     private func fetchByID(_ id: Int, mediaType: String, language: AppLanguage) async -> TMDBMetadata? {
         async let imagesTask = images(mediaType: mediaType, id: id, language: language)
@@ -121,16 +172,24 @@ actor TMDBService {
     private func details(mediaType: String, id: Int, language: AppLanguage) async -> TMDBDetailResponse? {
         guard let data = await get(
             path: "\(mediaType)/\(id)",
-            query: ["language": language.tmdbLanguageCode, "append_to_response": "credits,videos"]
+            query: ["language": language.tmdbLanguageCode, "append_to_response": "credits,videos,recommendations,similar"]
         ) else {
             return nil
         }
         return try? decoder.decode(TMDBDetailResponse.self, from: data)
     }
 
+    private func fetchCollection(id: Int, language: AppLanguage) async -> TMDBDetailResponse.CollectionResponse? {
+        guard let data = await get(path: "collection/\(id)", query: ["language": language.tmdbLanguageCode]) else {
+            return nil
+        }
+        return try? decoder.decode(TMDBDetailResponse.CollectionResponse.self, from: data)
+    }
+
     private func makeMetadata(
         details: TMDBDetailResponse?,
-        images: (logo: URL?, poster: URL?, backdrop: URL?)
+        images: (logo: URL?, poster: URL?, backdrop: URL?),
+        collectionParts: [TMDBCollectionPart] = []
     ) -> TMDBMetadata {
         let releaseDate = details?.releaseDate ?? details?.firstAirDate
         let releaseYear = releaseDate.flatMap { str -> String? in
@@ -157,6 +216,16 @@ actor TMDBService {
             .first(where: { $0.site.lowercased() == "youtube" && ($0.type == "Trailer" || $0.type == "Teaser") })?.key
         let trailerURL = trailerKey.flatMap { URL(string: "https://www.youtube.com/watch?v=\($0)") }
 
+        var recommendedMovieIDs: [Int] = []
+        var recommendedMovieTitles: [String] = []
+        let recItems = (details?.recommendations?.results ?? []) + (details?.similar?.results ?? [])
+        for item in recItems {
+            recommendedMovieIDs.append(item.id)
+            if let title = item.displayTitle {
+                recommendedMovieTitles.append(title)
+            }
+        }
+
         return TMDBMetadata(
             logoURL: images.logo,
             posterURL: images.poster,
@@ -176,7 +245,12 @@ actor TMDBService {
             director: director,
             cast: castList,
             castMembers: castMembers,
-            trailerURL: trailerURL
+            trailerURL: trailerURL,
+            collectionID: details?.belongsToCollection?.id,
+            collectionName: details?.belongsToCollection?.name,
+            collectionParts: collectionParts,
+            recommendedMovieIDs: recommendedMovieIDs,
+            recommendedMovieTitles: recommendedMovieTitles
         )
     }
 
@@ -347,7 +421,7 @@ actor TMDBService {
         }.first
     }
 
-    private static func imageURL(_ path: String?, size: String) -> URL? {
+    static func imageURL(_ path: String?, size: String) -> URL? {
         guard let path, !path.isEmpty else { return nil }
         return URL(string: "https://image.tmdb.org/t/p/\(size)\(path)")
     }
@@ -424,6 +498,8 @@ struct SearchResponse: Decodable {
         var originalNameValue: String?
         var releaseDate: String?
         var firstAirDate: String?
+        var posterPath: String?
+        var backdropPath: String?
 
         var displayTitle: String? { title ?? name }
         var originalTitle: String? { originalTitleValue ?? originalNameValue }
@@ -440,6 +516,8 @@ struct SearchResponse: Decodable {
             case originalNameValue = "original_name"
             case releaseDate = "release_date"
             case firstAirDate = "first_air_date"
+            case posterPath = "poster_path"
+            case backdropPath = "backdrop_path"
         }
     }
 }
@@ -494,6 +572,32 @@ struct TMDBDetailResponse: Decodable {
     var credits: CreditsResponse?
     var videos: VideosResponse?
 
+    var belongsToCollection: CollectionItem?
+    var recommendations: RecommendationsResponse?
+    var similar: RecommendationsResponse?
+
+    struct CollectionItem: Decodable, Sendable {
+        var id: Int
+        var name: String?
+        var posterPath: String?
+        var backdropPath: String?
+        enum CodingKeys: String, CodingKey {
+            case id, name
+            case posterPath = "poster_path"
+            case backdropPath = "backdrop_path"
+        }
+    }
+
+    struct RecommendationsResponse: Decodable, Sendable {
+        var results: [SearchResponse.Item]?
+    }
+
+    struct CollectionResponse: Decodable, Sendable {
+        var id: Int?
+        var name: String?
+        var parts: [SearchResponse.Item]?
+    }
+
     struct GenreItem: Decodable {
         var id: Int?
         var name: String
@@ -545,6 +649,8 @@ struct TMDBDetailResponse: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case id, overview, tagline, status, genres, credits, videos
+        case belongsToCollection = "belongs_to_collection"
+        case recommendations, similar
         case voteAverage = "vote_average"
         case voteCount = "vote_count"
         case title, name
