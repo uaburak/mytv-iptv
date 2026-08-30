@@ -476,6 +476,16 @@ final class PlayerViewController: UIViewController {
         menuPress.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
         view.addGestureRecognizer(menuPress)
 
+        let swipeUp = UISwipeGestureRecognizer(target: self, action: #selector(swipedUp))
+        swipeUp.direction = .up
+        swipeUp.delegate = self
+        view.addGestureRecognizer(swipeUp)
+
+        let swipeDown = UISwipeGestureRecognizer(target: self, action: #selector(swipedDown))
+        swipeDown.direction = .down
+        swipeDown.delegate = self
+        view.addGestureRecognizer(swipeDown)
+
         // Arayüz kapalıyken herhangi bir yöne kaydırmak onu geri getiriyor.
         // Kapalıyken odaklanabilir hiçbir şey olmadığı için bu jestler odak
         // gezinmesinin önüne geçmiyor; delege de açıkken devreye girmelerini
@@ -616,7 +626,20 @@ final class PlayerViewController: UIViewController {
                 beginScrubFromHidden(direction: press.type == .leftArrow ? -1 : 1)
                 return
 
-            case .select, .upArrow, .downArrow:
+            case .upArrow:
+                guard !isControlsVisible else {
+                    if tabs.isPanelOpen {
+                        tabs.close()
+                        setNeedsFocusUpdate()
+                        updateFocusIfNeeded()
+                        return
+                    }
+                    break
+                }
+                showControls()
+                return
+
+            case .select, .downArrow:
                 // Aşağı inmek yalnızca odak hareketi; bilgi panelini denetim
                 // satırının altındaki odak durağı açıyor.
                 guard !isControlsVisible else { break }
@@ -1297,9 +1320,7 @@ final class PlayerViewController: UIViewController {
         scheduleControlsHide()
     }
 
-    #if os(iOS)
-    /// Aşağı kaydırmak bilgi panelini getiriyor; tvOS'ta bu işi odak durağı
-    /// yapıyor.
+    /// Aşağı kaydırmak bilgi panelini getiriyor.
     @objc private func swipedDown() {
         guard isControlsVisible else {
             showControls()
@@ -1309,10 +1330,17 @@ final class PlayerViewController: UIViewController {
         tabs.open(.info)
     }
 
+    /// Yukarı kaydırmak veya yukarı tuşuna basmak açık olan bilgi panelini kapatıyor.
     @objc private func swipedUp() {
+        guard tabs.isPanelOpen else { return }
         tabs.close()
+        #if os(tvOS)
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
+        #endif
     }
-    #else
+
+    #if os(tvOS)
     /// Kapalı arayüzü geri getiren kaydırmalar. Açıkken delege bu jestleri
     /// hiç başlatmıyor.
     @objc private func swipedWhileHidden() {
@@ -1440,6 +1468,14 @@ extension PlayerViewController: UIGestureRecognizerDelegate {
         #if os(tvOS)
         if revealSwipes.contains(where: { $0 === gestureRecognizer }) {
             return !isControlsVisible
+        }
+        if let swipe = gestureRecognizer as? UISwipeGestureRecognizer {
+            if swipe.direction == .up {
+                return isControlsVisible && tabs.isPanelOpen
+            }
+            if swipe.direction == .down {
+                return isControlsVisible && !tabs.isPanelOpen
+            }
         }
         #endif
         return true
