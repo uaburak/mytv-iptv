@@ -257,8 +257,13 @@ final class AppModel {
             return
         }
 
-        phase = .ready
+        // Sekmelere geçmeden önce ilk içerik bekleniyor: aksi hâlde anasayfa
+        // boş açılıyor, liste sonradan düşüyor ve yerleşen her bölüm düzeni
+        // sıçratıyordu. Kütüphane önbellekten gösterebiliyorsa hemen dönüyor;
+        // yalnızca elde hiçbir şey yokken ağ bekleniyor ve o sırada açılış
+        // ekranının göstergesi dönmeye devam ediyor.
         await library.connect(to: playlist, secret: playlists.secret(for: playlist))
+        phase = .ready
     }
 
     func addPlaylist(_ playlist: Playlist, secret: String?) async {
@@ -346,6 +351,10 @@ final class AppModel {
         activity.record(
             mediaID: mediaID,
             episodeID: episodeID,
+            // Bölümün adı kayda yazılıyor: "izlemeye devam et" rayı kalınan
+            // bölümü dizinin detayını yeniden indirmeden yazabiliyor.
+            // Filmde alt satır tür/kategori olduğu için geçilmiyor.
+            episodeLabel: episodeID == nil ? nil : context.subtitle,
             position: position,
             duration: duration
         )

@@ -234,7 +234,13 @@ final class DetailViewController: UIViewController {
     private func wireActions() {
         hero.playButton.addTarget(self, action: #selector(playPrimary), for: .primaryActionTriggered)
         hero.watchlistButton.addTarget(self, action: #selector(toggleWatchlist), for: .primaryActionTriggered)
-        hero.moreButton.addTarget(self, action: #selector(togglePlot), for: .primaryActionTriggered)
+        #if os(iOS)
+        // Özetin tamamını okumak için metne dokunmak yeterli; ayrı bir
+        // "daha fazlası" butonu yok.
+        hero.plotLabel.addGestureRecognizer(
+            UITapGestureRecognizer(target: self, action: #selector(togglePlot))
+        )
+        #endif
         #if os(tvOS)
         hero.favoriteButton.addTarget(self, action: #selector(toggleFavorite), for: .primaryActionTriggered)
         hero.episodesButton.addTarget(self, action: #selector(scrollToEpisodes), for: .primaryActionTriggered)
@@ -276,7 +282,9 @@ final class DetailViewController: UIViewController {
         let plotText = current.plot ?? tmdbMetadata?.overview
         hero.plotLabel.text = plotText
         hero.plotLabel.isHidden = plotText?.isEmpty != false
-        hero.moreButton.isHidden = (plotText?.count ?? 0) <= 140
+        // İki satıra sığan bir özette açılacak bir şey yok; dokunma da
+        // kapalı kalıyor.
+        hero.plotLabel.isUserInteractionEnabled = (plotText?.count ?? 0) > 140
 
         var metaParts: [String] = []
         if let year = current.yearText ?? tmdbMetadata?.releaseYear { metaParts.append(year) }
@@ -306,11 +314,58 @@ final class DetailViewController: UIViewController {
         renderRelated()
     }
 
+    /// Dizide sürdürülecek bölümün neden seçildiği.
+    private enum ResumeKind {
+        /// Hiç izlenmemiş (ya da dizi bitmiş): baştan.
+        case fresh
+        /// Yarım kalmış bölüm.
+        case resume
+        /// Önceki bölüm bitmiş; sıradaki bölüm.
+        case next
+    }
+
+    /// Dizide sürdürülecek bölüm.
+    ///
+    /// En son **izlenen** kayda bakılıyor, listedeki ilk yarım kalmış bölüme
+    /// değil: bölümü bitirip bıraktığında sıradakinden devam etmek gerekiyor,
+    /// baştan başlamak değil.
+    private func resumeTarget(in detail: MediaDetail) -> (episode: Episode, kind: ResumeKind)? {
+        let episodes = detail.seasons.flatMap(\.episodes)
+        guard let first = episodes.first else { return nil }
+
+        guard let latest = model.activity.latestProgress(for: detail.item.id),
+              let index = episodes.firstIndex(where: { $0.id == latest.episodeID })
+        else { return (first, .fresh) }
+
+        guard latest.isFinished else { return (episodes[index], .resume) }
+        // Son bölüm de bitmişse dizi tamamlanmış: baştan.
+        guard episodes.indices.contains(index + 1) else { return (first, .fresh) }
+        return (episodes[index + 1], .next)
+    }
+
     private func playTitle(for current: MediaItem) -> String {
-        if let progress = model.activity.progress(for: current.id), !progress.isFinished, progress.positionSeconds > 60 {
-            return L10n.resume
+        guard current.kind == .series else {
+            // Filmde yarım kalan bir kayıt varsa buton baştan oynatmıyor,
+            // kalınan yerden devam ediyor.
+            let progress = model.activity.progress(for: current.id)
+            let canResume = progress.map { !$0.isFinished && $0.positionSeconds > 60 } ?? false
+            return canResume ? L10n.resume : L10n.play
         }
-        return current.kind == .series ? L10n.playFirstEpisode : L10n.play
+
+        guard let detail, let target = resumeTarget(in: detail) else {
+            // Bölüm listesi henüz gelmedi: elde yalnızca bu dizide yarım
+            // kalmış bir kayıt olup olmadığı bilgisi var.
+            let hasProgress = model.activity.progress.contains {
+                $0.mediaID == current.id && !$0.isFinished
+            }
+            return hasProgress ? L10n.resume : L10n.playFirstEpisode
+        }
+
+        switch target.kind {
+        case .fresh: return L10n.playFirstEpisode
+        case .resume: return L10n.resume
+        case .next: return L10n.nextEpisode
+        }
     }
 
     private func renderEpisodes() {
@@ -845,8 +900,6 @@ final class DetailViewController: UIViewController {
 
     @objc private func togglePlot() {
         isPlotExpanded.toggle()
-        hero.moreButton.configuration?.title = isPlotExpanded ? L10n.less : L10n.more
-        hero.moreButton.setSymbol(isPlotExpanded ? "chevron.up" : "chevron.down")
 
         // Özet açılıp kapanırken hero içeriği zıplamasın; yaylanarak yerleşsin.
         hero.plotLabel.numberOfLines = isPlotExpanded ? 0 : 2
@@ -911,17 +964,11 @@ final class DetailViewController: UIViewController {
     @objc private func playPrimary() {
         let current = detail?.item ?? item
         Task {
-            // Diziyse kaldığı bölüm, yoksa ilk bölüm.
-            if current.kind == .series, let detail {
-                let episodes = detail.seasons.flatMap(\.episodes)
-                let resume = episodes.first { episode in
-                    guard let progress = model.activity.progress(for: current.id, episodeID: episode.id) else { return false }
-                    return !progress.isFinished
-                }
-                if let episode = resume ?? episodes.first {
-                    await model.play(episode, in: current)
-                    return
-                }
+            // Diziyse kaldığı bölüm — yarım kalan bölüm, o bittiyse sıradaki.
+            // Bölüm içindeki saniye `playback(for:in:)` tarafından ekleniyor.
+            if current.kind == .series, let detail, let target = resumeTarget(in: detail) {
+                await model.play(target.episode, in: current)
+                return
             }
             await model.play(current)
         }

@@ -42,6 +42,12 @@ struct PlaybackProgress: Identifiable, Hashable, Codable, Sendable {
     var id: String
     var mediaID: MediaID
     var episodeID: String?
+    /// Bölümün okunur adı: "S3:B4 · Bölüm adı".
+    ///
+    /// Oynatma sırasında yazılıyor. "İzlemeye devam et" rayında dizinin
+    /// kendisi değil kalınan bölüm görünüyor ve bunun için dizinin detayını
+    /// yeniden indirmek gerekmiyor. Eski kayıtlarda boş.
+    var episodeLabel: String?
     var positionSeconds: Double
     var durationSeconds: Double
     var updatedAt: Date

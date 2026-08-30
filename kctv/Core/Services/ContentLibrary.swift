@@ -70,6 +70,8 @@ final class ContentLibrary {
     private var detailCache: [MediaID: MediaDetail] = [:]
 
     private var provider: (any ContentProvider)?
+    /// Bayat önbellekten sonra arkada süren tazeleme.
+    private var refreshTask: Task<Void, Never>?
     private var currentPlaylistID: String?
     private let cache = LocalStore(folder: "catalog")
     /// Yayın akışı hızla eskiyor; kısa ömürlü bellek önbelleği yetiyor.
@@ -116,6 +118,7 @@ final class ContentLibrary {
         guard let provider, !isReloading else { return }
         isReloading = true
         defer { isReloading = false }
+        refreshTask?.cancel()
 
         // Zorlanmış yenilemede sağlayıcının bellek içi anlık görüntüsü de
         // atılıyor; M3U sağlayıcısı listeyi bir kez indirip sakladığı için
@@ -133,18 +136,34 @@ final class ContentLibrary {
             // Önbellek tazeyse tek bir istek bile atmıyoruz. Yayın biçimi
             // sağlayıcıda kalıcı saklandığı için doğrulamaya da gerek yok.
             if isCacheFresh { return }
-        } else {
-            state = .loading
+
+            // Bayat önbellek: ekran zaten dolu, tazeleme arkada sürüyor.
+            // Çağıran bunu beklemiyor — gösterilecek içerik varken ağ turunu
+            // beklemek açılışı boş ekranla geciktirmek olurdu.
+            refreshTask = Task { [weak self] in
+                await self?.refresh(from: provider, cacheKey: cacheKey)
+            }
+            return
         }
 
+        state = .loading
+        await refresh(from: provider, cacheKey: cacheKey)
+    }
+
+    /// Sağlayıcıdan taze anlık görüntüyü çekip uygular.
+    private func refresh(from provider: any ContentProvider, cacheKey: String) async {
         do {
             // Abonelik durumu ve sunucunun izin verdiği yayın biçimi burada.
             account = try await provider.validate()
             let snapshot = try await fetchSnapshot(from: provider)
+            // Arkadaki tazeleme iptal edildiyse (liste değişti, çıkış yapıldı)
+            // eldeki sonucu ekrana basmıyoruz.
+            guard !Task.isCancelled else { return }
             writeSnapshot(snapshot, key: cacheKey)
             apply(snapshot)
             state = .ready
         } catch {
+            guard !Task.isCancelled else { return }
             let message = (error as? ContentError)?.errorDescription ?? error.localizedDescription
             // Önbellekten bir şey gösterebiliyorsak hatayı ekranı boşaltacak
             // şekilde değil, sessizce geçiyoruz.
@@ -538,6 +557,8 @@ final class ContentLibrary {
         itemsByID = [:]
         itemsByCategory = [:]
         detailCache = [:]
+        refreshTask?.cancel()
+        refreshTask = nil
         state = .idle
         notifyChange()
     }

@@ -79,7 +79,23 @@ final class UserActivityStore {
         progress.first { $0.mediaID == mediaID && $0.episodeID == episodeID }
     }
 
-    func record(mediaID: MediaID, episodeID: String?, position: Double, duration: Double) {
+    /// Bir içeriğin en son kaydı, bölümü fark etmeksizin.
+    ///
+    /// Dizide kayıt bölüm başına tutuluyor; "izlemeye devam et" rayı ve detay
+    /// ekranı hangi bölümde kalındığını bilmeden en yenisini soruyor.
+    func latestProgress(for mediaID: MediaID) -> PlaybackProgress? {
+        progress
+            .filter { $0.mediaID == mediaID }
+            .max { $0.updatedAt < $1.updatedAt }
+    }
+
+    func record(
+        mediaID: MediaID,
+        episodeID: String?,
+        episodeLabel: String? = nil,
+        position: Double,
+        duration: Double
+    ) {
         // Canlı yayında ilerleme kaydı anlamsız.
         guard mediaID.kind != .live, duration > 0 else { return }
 
@@ -88,6 +104,7 @@ final class UserActivityStore {
             id: identifier,
             mediaID: mediaID,
             episodeID: episodeID,
+            episodeLabel: episodeLabel,
             positionSeconds: position,
             durationSeconds: duration,
             updatedAt: .now

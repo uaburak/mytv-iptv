@@ -6,6 +6,9 @@ import UIKit
 /// bileşenlerindeki gibi, içinde bulunulan sayfanın çubuğu bekleme süresi
 /// boyunca soldan sağa doluyor ve dolduğunda sıradaki içeriğe geçiliyor.
 /// Çubuklara dokunarak da geçiş yapılabiliyor.
+///
+/// Görünümün boyunu çubuklar belirliyor; dışarıdan genişlik/yükseklik kısıtı
+/// verilmiyor, yalnızca konumlandırılıyor.
 final class BannerPageIndicator: UIView {
     /// Bir çubuğa dokunulduğunda o sayfaya geçiş isteniyor.
     var onSelectPage: ((Int) -> Void)?
@@ -19,10 +22,13 @@ final class BannerPageIndicator: UIView {
     private(set) var numberOfPages = 0
     private(set) var currentPage = 0
 
-    private static let segmentHeight: CGFloat = 6
-    private static let segmentSpacing: CGFloat = 7
+    private static let segmentHeight: CGFloat = 7
+    private static let segmentSpacing: CGFloat = 8
     /// İçinde bulunulan sayfa dolan bir çubuk, diğerleri nokta.
-    private static let activeWidth: CGFloat = 34
+    private static let activeWidth: CGFloat = 38
+    /// Göstergenin yüksekliği. Banner içeriği alt boşluğunu buna göre
+    /// bırakıyor.
+    static var preferredHeight: CGFloat { segmentHeight }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -41,12 +47,19 @@ final class BannerPageIndicator: UIView {
         addSubview(stack)
 
         NSLayoutConstraint.activate([
-            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
             stack.heightAnchor.constraint(equalToConstant: Self.segmentHeight),
         ])
 
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
+    }
+
+    /// Çubuklar birkaç punto yüksekliğinde; dokunma alanı görünürden geniş.
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        bounds.insetBy(dx: -8, dy: -14).contains(point)
     }
 
     func setPages(_ count: Int) {

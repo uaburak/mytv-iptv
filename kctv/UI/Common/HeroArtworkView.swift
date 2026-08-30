@@ -69,6 +69,12 @@ final class HeroArtworkView: UIView {
         imageView.configure(url: backdropURL, title: title, displayWidth: displayWidth)
     }
 
+    /// Önceden yüklenmiş görseli doğrudan basar. Banner çapraz geçişi
+    /// görselin ağdan gelmesini bekleyemiyor.
+    func setImage(_ image: UIImage?) {
+        imageView.setImage(image)
+    }
+
     func startLoading() {
         loadingBlurView.layer.removeAllAnimations()
         loadingBlurView.isHidden = false

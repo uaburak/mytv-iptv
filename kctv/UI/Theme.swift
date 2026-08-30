@@ -1,3 +1,4 @@
+import AudioToolbox
 import Symbols
 import UIKit
 
@@ -113,6 +114,34 @@ extension UIButton.Configuration {
         return config
     }
 
+    /// Öne çıkan birincil aksiyon: düz beyaz zemin, siyah yazı ve simge.
+    ///
+    /// Telefonda cam buton görselin üstünde siliniyor ve birincil aksiyon
+    /// (oynat, daha fazla bilgi) ikincillerden ayırt edilemiyor. Dolu beyaz
+    /// buton hem her zeminde okunuyor hem de hangi aksiyonun ana aksiyon
+    /// olduğunu tek bakışta söylüyor.
+    static func appProminent(
+        horizontalInset: CGFloat = 24,
+        verticalInset: CGFloat = 12,
+        fontSize: CGFloat = 16
+    ) -> UIButton.Configuration {
+        var config = UIButton.Configuration.filled()
+        config.cornerStyle = .capsule
+        config.baseBackgroundColor = .white
+        config.baseForegroundColor = .black
+        config.imagePadding = 8
+        config.contentInsets = .init(
+            top: verticalInset, leading: horizontalInset,
+            bottom: verticalInset, trailing: horizontalInset
+        )
+        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var outgoing = incoming
+            outgoing.font = .systemFont(ofSize: fontSize, weight: .semibold)
+            return outgoing
+        }
+        return config
+    }
+
     /// Seçilebilir çip: tür süzgeci, son aramalar, sezon seçici.
     ///
     /// Seçili çip düz beyaz zemin ve siyah metin, seçili olmayan cam. Cam
@@ -137,22 +166,11 @@ extension UIButton.Configuration {
                 fontSize: fontSize
             )
         }
-
-        var config = UIButton.Configuration.filled()
-        config.cornerStyle = .capsule
-        config.baseBackgroundColor = .white
-        config.baseForegroundColor = .black
-        config.imagePadding = 8
-        config.contentInsets = .init(
-            top: verticalInset, leading: horizontalInset,
-            bottom: verticalInset, trailing: horizontalInset
+        return .appProminent(
+            horizontalInset: horizontalInset,
+            verticalInset: verticalInset,
+            fontSize: fontSize
         )
-        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
-            var outgoing = incoming
-            outgoing.font = .systemFont(ofSize: fontSize, weight: .semibold)
-            return outgoing
-        }
-        return config
     }
 }
 
@@ -278,6 +296,37 @@ enum Haptics {
         let generator = UIImpactFeedbackGenerator(style: style)
         generator.prepare()
         generator.impactOccurred()
+        #endif
+    }
+}
+
+/// Kumanda geri bildirimi.
+///
+/// tvOS'ta odak bir öğeden diğerine geçtiğinde sistem bir ses çalıyor.
+/// Banner'da içerik değiştirmek odağı yerinden oynatmıyor ama kullanıcı için
+/// aynı hareket ve aynı sesi bekliyor.
+///
+/// Sesi tetikleyen bir API yok: `UIFocusSoundIdentifier` yalnızca
+/// **gerçekleşen** bir odak hareketinde hangi sesin çalacağını seçtiriyor. Bu
+/// yüzden sistemin kendi ses dosyası doğrudan çalınıyor — uydurma bir ses
+/// değil, odak hareketinde duyulanın aynısı.
+enum RemoteFeedback {
+    #if os(tvOS)
+    /// Sistemin odak sesi. Bir kez kaydediliyor; dosya bulunamazsa (ileride
+    /// yeri değişirse) sessiz kalıyor.
+    private static let focusSound: SystemSoundID? = {
+        let url = URL(fileURLWithPath: "/System/Library/Audio/UISounds/focus_change_small.caf")
+        var identifier: SystemSoundID = 0
+        let status = AudioServicesCreateSystemSoundID(url as CFURL, &identifier)
+        return status == kAudioServicesNoError ? identifier : nil
+    }()
+    #endif
+
+    /// Odak bir butona geldiğinde çıkan sesin aynısı.
+    static func focusChange() {
+        #if os(tvOS)
+        guard let focusSound else { return }
+        AudioServicesPlaySystemSound(focusSound)
         #endif
     }
 }

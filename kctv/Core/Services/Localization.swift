@@ -84,13 +84,11 @@ enum L10n {
 
     // MARK: - Detay Ekranı (Detail)
     static var play: String { isTurkish ? "Oynat" : "Play" }
-    static var resume: String { isTurkish ? "Sürdür" : "Resume" }
+    static var resume: String { isTurkish ? "Devam Et" : "Resume" }
     static var playFirstEpisode: String { isTurkish ? "İlk Bölümü Oynat" : "Play Episode 1" }
     static var nextEpisode: String { isTurkish ? "Sıradaki Bölüm" : "Next Episode" }
     static var episodes: String { isTurkish ? "Bölümler" : "Episodes" }
     static var season: String { isTurkish ? "Sezon" : "Season" }
-    static var more: String { isTurkish ? "DAHA FAZLASI" : "MORE" }
-    static var less: String { isTurkish ? "DAHA AZ" : "LESS" }
     static var castAndCrew: String { isTurkish ? "Künye ve Detaylar" : "Cast & Details" }
     static var relatedContent: String { isTurkish ? "Benzer İçerikler" : "Similar Content" }
     static var director: String { isTurkish ? "Yönetmen" : "Director" }
@@ -106,6 +104,8 @@ enum L10n {
 
     // MARK: - Ana Sayfa (Home) & Katalog
     static var moreInfo: String { isTurkish ? "Daha Fazla Bilgi" : "More Info" }
+    /// Banner'daki ok butonu: sıradaki öne çıkan içeriği getiriyor.
+    static var nextContent: String { isTurkish ? "Sonraki İçerik" : "Next Item" }
     static var continueWatching: String { isTurkish ? "İzlemeye Devam Et" : "Continue Watching" }
     static var myWatchlist: String { isTurkish ? "İzleme Listem" : "My Watchlist" }
     static var liveTV: String { isTurkish ? "Canlı Yayın" : "Live TV" }
@@ -265,7 +265,49 @@ enum L10n {
     // MARK: - Oynatıcı
 
     static var liveBadge: String { isTurkish ? "CANLI" : "LIVE" }
-    static var aspectStretch: String { isTurkish ? "Tam Ekran (Uzat)" : "Stretch (16:9)" }
+
+    /// Oynatıcıdaki "Bilgi" panelinin birincil aksiyonu.
+    static var playFromStart: String { isTurkish ? "Baştan" : "From the Beginning" }
+    /// Oynatılan bölümün kartındaki rozet.
+    static var nowPlayingBadge: String { isTurkish ? "İZLENİYOR" : "NOW PLAYING" }
+    /// Dosyanın kendi bölüm işaretleri adsız geldiğinde.
+    static func chapterName(_ number: Int) -> String {
+        isTurkish ? "\(number). Bölüm" : "Chapter \(number)"
+    }
+
+    // MARK: - Altyazı ayarları
+
+    static var subtitleSettings: String { isTurkish ? "Altyazı Ayarları" : "Subtitle Settings" }
+    static var subtitleNotFound: String { isTurkish ? "Altyazı bulunamadı" : "No subtitles found" }
+    static var subtitleTextSize: String { isTurkish ? "Yazı Boyutu" : "Text Size" }
+    static var subtitleTextColor: String { isTurkish ? "Yazı Rengi" : "Text Color" }
+    static var subtitleBackground: String { isTurkish ? "Arka Plan" : "Background" }
+    static var subtitleBold: String { isTurkish ? "Kalın Yazı" : "Bold Text" }
+    static var subtitleDelay: String { isTurkish ? "Gecikme" : "Delay" }
+    static var subtitleAutoEnable: String { isTurkish ? "Kendiliğinden Aç" : "Enable Automatically" }
+
+    static var subtitleSizeSmall: String { isTurkish ? "Küçük" : "Small" }
+    static var subtitleSizeMedium: String { isTurkish ? "Normal" : "Medium" }
+    static var subtitleSizeLarge: String { isTurkish ? "Büyük" : "Large" }
+    static var subtitleSizeExtraLarge: String { isTurkish ? "Çok Büyük" : "Extra Large" }
+
+    static var colorWhite: String { isTurkish ? "Beyaz" : "White" }
+    static var colorYellow: String { isTurkish ? "Sarı" : "Yellow" }
+    static var colorGreen: String { isTurkish ? "Yeşil" : "Green" }
+    static var colorCyan: String { isTurkish ? "Turkuaz" : "Cyan" }
+
+    static var subtitleBackgroundNone: String { isTurkish ? "Yok" : "None" }
+    static var subtitleBackgroundDim: String { isTurkish ? "Hafif" : "Dim" }
+    static var subtitleBackgroundSolid: String { isTurkish ? "Koyu" : "Solid" }
+
+    /// Gecikme menüsündeki değerler: "0 sn", "+1,5 sn", "-0,5 sn".
+    static func subtitleDelayValue(_ seconds: Double) -> String {
+        guard seconds != 0 else { return isTurkish ? "0 sn" : "0 s" }
+        let amount = String(format: "%+.1f", seconds)
+        return isTurkish
+            ? "\(amount.replacingOccurrences(of: ".", with: ",")) sn"
+            : "\(amount) s"
+    }
 
     // MARK: - Listeler & form
 

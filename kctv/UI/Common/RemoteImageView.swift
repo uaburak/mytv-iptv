@@ -16,6 +16,16 @@ final class RemoteImageView: UIView {
     /// Odaktaki büyüme payı; kartların ölçek katsayısıyla aynı.
     private static let focusHeadroom: CGFloat = 1.1
 
+    /// Bir görselin kaç piksele çözüleceği.
+    ///
+    /// Kural ortak: aynı görseli farklı ölçüyle isteyen iki taraf
+    /// `ImageLoader` önbelleğinde iki ayrı kayıt açıyor ve aynı backdrop
+    /// bellekte iki kez duruyor. Banner yüklemesini kendi yaptığı için hesabı
+    /// buradan alıyor.
+    static func pixelSize(displayWidth: CGFloat, scale: CGFloat) -> CGFloat {
+        displayWidth * max(2, scale > 0 ? scale : 3) * focusHeadroom
+    }
+
     /// Kartlarda başlığın baş harfleri yer tutucu olarak gösteriliyor.
     /// Detay hero'sunda kapalı: orada yalnızca bulanık bir zemin isteniyor.
     var showsInitials = true {
@@ -89,10 +99,9 @@ final class RemoteImageView: UIView {
 
         guard let url else { return }
         let scale = window?.windowScene?.screen.scale ?? traitCollection.displayScale
-        let effectiveScale = scale > 0 ? scale : 3.0
         // Kart odakta büyüyor; görsel dinlenme boyutuna göre indirilirse
         // büyürken yumuşuyor. Büyüme payı baştan hesaba katılıyor.
-        let maxPixelSize = displayWidth * max(2, effectiveScale) * Self.focusHeadroom
+        let maxPixelSize = Self.pixelSize(displayWidth: displayWidth, scale: scale)
 
         loadTask = Task { [weak self] in
             // Önbellekte varsa ilk karede göster.
@@ -104,6 +113,19 @@ final class RemoteImageView: UIView {
             guard let image else { return }
             self?.apply(image, animated: true, for: url)
         }
+    }
+
+    /// Önceden çözülmüş görseli doğrudan basar; ağa çıkmaz.
+    ///
+    /// Anasayfa banner'ı geçişi kendisi yönetiyor: görsel çapraz geçiş
+    /// başlamadan **önce** hazır olmalı. `configure` ile URL verildiğinde
+    /// resim bir-iki kare sonra düşüyor ve geçiş ikiye bölünüyordu.
+    func setImage(_ image: UIImage?) {
+        loadTask?.cancel()
+        loadTask = nil
+        currentURL = nil
+        imageView.image = image
+        imageView.alpha = image == nil ? 0 : 1
     }
 
     private func apply(_ image: UIImage, animated: Bool, for url: URL) {

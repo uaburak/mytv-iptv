@@ -3,18 +3,29 @@ import KSPlayer
 import UIKit
 
 #if os(tvOS)
-/// `UISlider` tvOS'ta yok — orada bir tutamacı sürükleme diye bir etkileşim de
-/// yok. İlerleme bir çubukta gösteriliyor, sarma ileri/geri butonlarıyla
-/// yapılıyor (kumandada bunlar zaten odaklanabilir).
+/// `UISlider` tvOS'ta yok — orada tutamacı parmakla sürükleme diye bir
+/// etkileşim de yok. Sarma şöyle işliyor:
+///
+/// - Çubuk **odağa gelince** bulunulan yerde bir tutamaç beliriyor. Tıklamak
+///   gerekmiyor ve görüntü akmaya devam ediyor; kullanıcı yalnızca gezinmiş
+///   olabilir.
+/// - **Sağ/sol tuşu ya da dokunmatik yüzeyde yatay kaydırma** tutamacı
+///   gezdirmeye başlıyor. O anda görüntü duruyor: nereye gidileceğini durağan
+///   bir karede seçmek daha kolay.
+/// - **Tıklama** oraya atlayıp oynatmayı sürdürüyor, **Menu** vazgeçiyor.
 ///
 /// `UIControl` türetiliyor ve `UISlider`'ın kullanılan yüzeyini birebir
 /// karşılıyor; böylece ortak oynatıcı kodu iki platformda da aynı kalıyor.
+/// Konumu saniyeye çeviren taraf oynatıcı — süre ve hızlanma orada.
 final class PlaybackSlider: UIControl {
     var minimumValue: Float = 0
     var maximumValue: Float = 1
 
     var value: Float = 0 {
-        didSet { updateProgress() }
+        didSet {
+            updateProgress()
+            setNeedsLayout()
+        }
     }
 
     var minimumTrackTintColor: UIColor? {
@@ -27,29 +38,239 @@ final class PlaybackSlider: UIControl {
         set { progressView.trackTintColor = newValue }
     }
 
+    /// Sarma başladı: oynatıcı görüntüyü durdurup hedefi bulunulan ana
+    /// sabitliyor.
+    var onScrubBegin: (() -> Void)?
+    /// Sağ/sol tuşu: yön olarak -1 ya da +1.
+    var onScrubStep: ((Int) -> Void)?
+    /// Dokunmatik yüzeyde kaydırma: 0...1 aralığında doğrudan konum.
+    var onScrubFraction: ((Float) -> Void)?
+    /// Tıklama: hedefe atla.
+    var onScrubCommit: (() -> Void)?
+    /// Menu ya da odağın kaçması: vazgeç, bulunulan yerde kal.
+    var onScrubCancel: (() -> Void)?
+
+    /// Tutamaç gezdirilmeye başlandı mı. Odakta olmak yetmiyor: yalnızca
+    /// gezinen kullanıcının görüntüsü durmamalı.
+    private(set) var isScrubbingActive = false
+
+    private static let handleSize: CGFloat = 30
+
+    /// Dokunmatik yüzeyin sarma hızı. Sağ/sol tuşundan hızlı olmalı ama
+    /// birebir eşleme çok sertti: parmağın küçük bir hareketi dakikaları
+    /// atlıyordu. Bu değerle yüzeyi baştan sona kaydırmak filmin yaklaşık
+    /// üçte birini geçiyor.
+    private static let panSensitivity: CGFloat = 1.0 / 3.0
+
     private let progressView = UIProgressView(progressViewStyle: .default)
+    private let handle = UIView()
+    private var repeatWork: DispatchWorkItem?
+    /// Kaydırma başladığında tutamacın bulunduğu oran.
+    private var panOrigin: CGFloat = 0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         progressView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(progressView)
+
+        // Tutamaç otomatik yerleşimin dışında: konumu değere göre her düzen
+        // turunda hesaplanıyor.
+        handle.backgroundColor = .white
+        handle.layer.cornerRadius = Self.handleSize / 2
+        handle.layer.shadowColor = UIColor.black.cgColor
+        handle.layer.shadowOpacity = 0.4
+        handle.layer.shadowRadius = 6
+        handle.layer.shadowOffset = .zero
+        handle.isHidden = true
+        handle.alpha = 0
+        handle.transform = CGAffineTransform(scaleX: 0.1, y: 0.1)
+        addSubview(handle)
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
+        addGestureRecognizer(pan)
+
         NSLayoutConstraint.activate([
             progressView.leadingAnchor.constraint(equalTo: leadingAnchor),
             progressView.trailingAnchor.constraint(equalTo: trailingAnchor),
             progressView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            heightAnchor.constraint(greaterThanOrEqualToConstant: 10),
+            heightAnchor.constraint(greaterThanOrEqualToConstant: Self.handleSize + 6),
         ])
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    /// Tutamaç tvOS'ta yok; çağrı sessizce yutuluyor.
+    /// Tutamaç tvOS'ta ayrı bir resim değil; çağrı sessizce yutuluyor.
     func setThumbImage(_ image: UIImage?, for state: UIControl.State) {}
+
+    override var canBecomeFocused: Bool { true }
+
+    /// Tutamacın yeri `frame` ile değil `bounds` + `center` ile veriliyor.
+    /// Dönüşümü sıfırdan farklı bir görünüme `frame` atamak tanımsız: beliriş
+    /// ve kayboluş animasyonu sürerken düzen turu araya girince bounds
+    /// şişiyor, sabit köşe yarıçapı da yuvarlağı büyüyen bir kareye
+    /// çeviriyordu.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let span = maximumValue - minimumValue
+        let fraction = span > 0 ? CGFloat((value - minimumValue) / span) : 0
+        let size = Self.handleSize
+        handle.bounds = CGRect(origin: .zero, size: CGSize(width: size, height: size))
+        handle.center = CGPoint(
+            x: size / 2 + (bounds.width - size) * max(0, min(1, fraction)),
+            y: bounds.midY
+        )
+    }
+
+    /// Odak geri bildirimi yalnızca tutamaç: çubuğu kalınlaştırmak istenmiyor.
+    override func didUpdateFocus(
+        in context: UIFocusUpdateContext,
+        with coordinator: UIFocusAnimationCoordinator
+    ) {
+        super.didUpdateFocus(in: context, with: coordinator)
+        // Odak aşağıdaki butonlara inerken yarım kalan sarma uygulanıyor:
+        // tutamacı oraya kullanıcı taşıdı, çıkarken atmak yaptığı işi
+        // boşa çıkarıyordu. Vazgeçmenin yolu Menu.
+        if !isFocused, isScrubbingActive {
+            finish(commit: true)
+        }
+        let visible = isFocused
+        if visible { handle.isHidden = false }
+        coordinator.addCoordinatedAnimations {
+            UIView.animate(
+                withDuration: 0.24,
+                delay: 0,
+                usingSpringWithDamping: 0.72,
+                initialSpringVelocity: 0,
+                options: [.allowUserInteraction, .beginFromCurrentState]
+            ) {
+                self.handle.transform = visible ? .identity : CGAffineTransform(scaleX: 0.1, y: 0.1)
+                self.handle.alpha = visible ? 1 : 0
+            } completion: { _ in
+                if !visible { self.handle.isHidden = true }
+            }
+        }
+    }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        for press in presses {
+            switch press.type {
+            case .leftArrow:
+                beginRepeating(-1)
+                return
+            case .rightArrow:
+                beginRepeating(1)
+                return
+            case .select where isScrubbingActive:
+                finish(commit: true)
+                return
+            default:
+                break
+            }
+        }
+        super.pressesBegan(presses, with: event)
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        stopRepeating()
+        super.pressesEnded(presses, with: event)
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        stopRepeating()
+        super.pressesCancelled(presses, with: event)
+    }
+
+    /// Menu ile iptal. Basışı oynatıcıdaki tanıyıcı aldığı için çubuk onu
+    /// kendi `pressesBegan`'inde göremiyor.
+    func cancelScrubbing() {
+        guard isScrubbingActive else { return }
+        finish(commit: false)
+    }
+
+    /// Kumandanın dokunmatik yüzeyi. Yüzeyin bir ucundan diğerine kaydırmak
+    /// çubuğun bir ucundan diğerine gitmeye denk geliyor.
+    @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
+        guard isFocused, bounds.width > 0 else { return }
+        switch recognizer.state {
+        case .began:
+            activateScrubbing()
+            panOrigin = CGFloat(value)
+        case .changed:
+            let shift = recognizer.translation(in: self).x / bounds.width * Self.panSensitivity
+            onScrubFraction?(Float(max(0, min(1, panOrigin + shift))))
+        default:
+            break
+        }
+    }
+
+    /// Tuş basılı tutuldukça adım tekrarlanıyor; uzun bir filmde tek tek
+    /// basmak dakikalar sürüyor.
+    private func beginRepeating(_ direction: Int) {
+        activateScrubbing()
+        onScrubStep?(direction)
+        scheduleRepeat(direction)
+    }
+
+    /// Arayüz kapalıyken sağ/sol basıldığında oynatıcı çubuğu odağa alıp
+    /// sarmayı da başlatıyor. Tekrar zamanlayıcısı kurulmuyor: bu basışın
+    /// bırakılması çubuğa gelmiyor, kurulsa sonsuza dek sarardı.
+    func startScrubbing(direction: Int) {
+        activateScrubbing()
+        onScrubStep?(direction)
+    }
+
+    private func activateScrubbing() {
+        guard !isScrubbingActive else { return }
+        isScrubbingActive = true
+        onScrubBegin?()
+    }
+
+    private func scheduleRepeat(_ direction: Int) {
+        repeatWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, isScrubbingActive else { return }
+            onScrubStep?(direction)
+            scheduleRepeat(direction)
+        }
+        repeatWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: work)
+    }
+
+    private func stopRepeating() {
+        repeatWork?.cancel()
+        repeatWork = nil
+    }
+
+    private func finish(commit: Bool) {
+        stopRepeating()
+        isScrubbingActive = false
+        commit ? onScrubCommit?() : onScrubCancel?()
+    }
 
     private func updateProgress() {
         let span = maximumValue - minimumValue
         guard span > 0 else { return }
         progressView.progress = (value - minimumValue) / span
+    }
+}
+/// Denetim satırının hemen altındaki görünmez odak durağı.
+///
+/// Bilgi panelinin ne zaman açılacağını odak motorunun kendisi söylüyor:
+/// odak buraya düştüyse satırın altına gerçekten inilmiş demektir. Tuşa
+/// basıldığı anda odağın nerede olduğuna bakmak işe yaramıyor — motor
+/// basışı bizden önce işliyor ve odak zaten inmiş oluyor, bu yüzden çubuktan
+/// tek basışta panel açılıyordu.
+final class PlayerFocusSentinel: UIView {
+    var onFocus: (() -> Void)?
+
+    override var canBecomeFocused: Bool { true }
+
+    override func didUpdateFocus(
+        in context: UIFocusUpdateContext,
+        with coordinator: UIFocusAnimationCoordinator
+    ) {
+        super.didUpdateFocus(in: context, with: coordinator)
+        if isFocused { onFocus?() }
     }
 }
 #else
@@ -59,8 +280,20 @@ typealias PlaybackSlider = UISlider
 /// Tam ekran oynatıcı.
 ///
 /// AVFoundation bu içerikleri açamıyor: sağlayıcı VOD'ları `mkv`, canlı
-/// yayınları ham `ts` olarak veriyor. Bu yüzden oynatma tamamen FFmpeg tabanlı
-/// `KSMEPlayer` üzerinden yürüyor.
+/// yayınları ham `ts` olarak veriyor. Bu yüzden oynatma çoğunlukla FFmpeg
+/// tabanlı `KSMEPlayer` üzerinden yürüyor; AVPlayer önce deneniyor ki
+/// açabildiği yayınlarda PiP, AirPlay ve kilit ekranı denetimleri çalışsın.
+///
+/// Yerleşim Apple TV uygulamasının oynatıcısını izliyor: üst çubuk yok, her
+/// şey altta tek bir sütunda duruyor.
+///
+///     S3:B9 · Veda
+///     0:42 ─────────── ilerleme ──────────── -1:50:08
+///     ⟨i⟩⟨cc⟩⟨ses⟩      ◀◀ ▶ ▶▶      [Bölümler]⟨boyut⟩
+///     ┌ seçili sekmenin paneli ────────────────────────┐
+///
+/// Sütun alta bağlı: bir sekme açıldığında panel en alta ekleniyor ve
+/// üstündeki her şey olduğu gibi yukarı kayıyor. Hiçbir satır gizlenmiyor.
 final class PlayerViewController: UIViewController {
     /// Bölüm geçişinde yerine sıradakinin bağlamı konuyor.
     private var context: PlaybackContext
@@ -69,23 +302,53 @@ final class PlayerViewController: UIViewController {
     private var playerLayer: KSPlayerLayer?
     private var videoView: UIView?
 
+    // MARK: - Görünümler
+
     private let controlsView = UIView()
+    private let bottomScrim = HeroGradientView()
+
+    /// Büyük satır: dizide bölümün kendisi ("S3:B9 · Veda"), filmde ve canlıda
+    /// içeriğin adı.
     private let titleLabel = UILabel()
-    private let subtitleLabel = UILabel()
-    private let closeButton = UIButton(type: .system)
-    private let playPauseButton = UIButton(type: .system)
-    private let rewindButton = UIButton(type: .system)
-    private let forwardButton = UIButton(type: .system)
-    private let audioTracksButton = UIButton(type: .system)
-    private let subtitlesButton = UIButton(type: .system)
-    private let aspectButton = UIButton(type: .system)
-    private let nextEpisodeButton = UIButton(type: .system)
+    /// Üstündeki ince satır: filmde yıl, canlıda anlık EPG programı. Dizide
+    /// boş — bölüm satırı zaten başlıkta ve dizinin adını bir kez daha
+    /// okumanın bilgi değeri yok.
+    private let infoLabel = UILabel()
+
+    private let aspectButton = UIButton()
+    private let audioTracksButton = UIButton()
+    private let subtitlesButton = UIButton()
+
+    private let playPauseButton = UIButton()
+    private let rewindButton = UIButton()
+    private let forwardButton = UIButton()
+    private let nextEpisodeButton = UIButton()
 
     private let currentTimeLabel = UILabel()
-    private let durationLabel = UILabel()
+    /// Sağ uçtaki süre: toplam değil **kalan**. "-1:50:08".
+    private let remainingLabel = UILabel()
     private let slider = PlaybackSlider()
     private let liveBadge = UIStackView()
     private let spinner = UIActivityIndicatorView(style: .large)
+
+    private let subtitleOverlay = SubtitleOverlayView()
+    private lazy var subtitles = PlayerSubtitleController(overlay: subtitleOverlay)
+    private let tabs = PlayerTabsController()
+
+    /// Alt sütunun tamamı. Altyazının ne kadar yükseleceği buradan ölçülüyor.
+    private let bottomStack = UIStackView()
+    /// Çipler, transport ve simge butonlarının bulunduğu satır. Aşağı tuşunun
+    /// ne yapacağı odağın burada olup olmamasına bakıyor.
+    private let controlRow = UIView()
+
+    // Kapatma butonu ve üstteki karartma yalnızca iOS'ta: tvOS'ta oynatıcıdan
+    // Menu tuşuyla çıkılıyor ve Apple TV'nin oynatıcısında da üst çubuk yok.
+    #if os(iOS)
+    private let closeButton = UIButton()
+    private let topScrim = HeroGradientView()
+    #endif
+
+    // MARK: - Durum
 
     private var isPlaying = true
     private var isScrubbing = false
@@ -94,7 +357,22 @@ final class PlayerViewController: UIViewController {
     private var hideControlsWork: DispatchWorkItem?
 
     private var selectedAudioTrackID: Int32?
-    private var selectedSubtitleID: Int32?
+    /// Kumandayla sarma: hedef zaman ve arka arkaya kaç adım atıldığı.
+    private var pendingScrubTime: Double?
+    private var scrubStepCount = 0
+    /// Aşağı kaydırma jesti; tvOS'ta ne zaman devreye gireceğine delege
+    /// karar veriyor.
+    /// tvOS: arayüz kapalıyken onu geri getiren kaydırmalar.
+    private var revealSwipes: [UISwipeGestureRecognizer] = []
+    /// Denetim satırının altındaki görünmez odak durağı; bilgi panelini o
+    /// açıyor.
+    private let focusSentinel = PlayerFocusSentinel()
+    /// Odağın bir kereliğine gideceği yer. Arayüz kapalıyken sağ/sol
+    /// basıldığında çubuğa yönlendirmek için.
+    private weak var pendingFocusTarget: UIView?
+    /// Yalnızca iki durum var: sığdır ve doldur. Buton menü açmıyor, her
+    /// basışta ikisi arasında gidip geliyor.
+    private var videoContentMode: UIView.ContentMode = .scaleAspectFit
 
     /// Hata uyarısı bir kez gösteriliyor. `.error` durumu ile `finish(error:)`
     /// arka arkaya gelebiliyor ve ikinci `present` çağrısı, ilki hâlâ
@@ -108,8 +386,42 @@ final class PlayerViewController: UIViewController {
     private var lastProgressSave = Date.distantPast
     private static let progressSaveInterval: TimeInterval = 30
 
+    /// Arayüzün kendiliğinden solmasına kalan süre. Kısa tutulunca kullanıcı
+    /// daha okumaya fırsat bulmadan künye ve ilerleme kayboluyordu.
+    private static let controlsHideDelay: TimeInterval = 15
+
     /// Sıradaki bölüm; yoksa buton gizli ve bitince otomatik geçiş olmuyor.
     private var nextEpisode: (episode: Episode, series: MediaItem)?
+
+    // MARK: - Ölçüler
+
+    #if os(tvOS)
+    private static let edgeInset: CGFloat = 60
+    private static let iconInset: CGFloat = 18
+    private static let iconPointSize: CGFloat = 26
+    private static let transportPointSize: CGFloat = 30
+    /// Oynat/duraklat komşularından iri: satırın ana aksiyonu o.
+    private static let playPointSize: CGFloat = 42
+    private static let titleSize: CGFloat = 50
+    private static let infoSize: CGFloat = 26
+    private static let timeSize: CGFloat = 24
+    /// Yazılı çip yanındaki simge butonuyla aynı boyda dursun diye ayrı.
+    private static let chipInset: CGFloat = 26
+    private static let chipVerticalInset: CGFloat = 15
+    private static let chipFontSize: CGFloat = 26
+    #else
+    private static let edgeInset: CGFloat = 20
+    private static let iconInset: CGFloat = 11
+    private static let iconPointSize: CGFloat = 16
+    private static let transportPointSize: CGFloat = 20
+    private static let playPointSize: CGFloat = 28
+    private static let titleSize: CGFloat = 26
+    private static let infoSize: CGFloat = 14
+    private static let timeSize: CGFloat = 13
+    private static let chipInset: CGFloat = 16
+    private static let chipVerticalInset: CGFloat = 10
+    private static let chipFontSize: CGFloat = 15
+    #endif
 
     init(context: PlaybackContext, model: AppModel) {
         self.context = context
@@ -130,15 +442,51 @@ final class PlayerViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .black
         buildControls()
+        wireMenus()
+        wireTabs()
         startPlayback()
         scheduleControlsHide()
 
-        // tvOS'ta ekrana dokunma diye bir şey yok; girdi `pressesBegan` ve
-        // `touchesBegan` üzerinden kumandadan geliyor.
         #if os(iOS)
         let tap = UITapGestureRecognizer(target: self, action: #selector(toggleControls))
         tap.delegate = self
         view.addGestureRecognizer(tap)
+
+        let up = UISwipeGestureRecognizer(target: self, action: #selector(swipedUp))
+        up.direction = .up
+        up.delegate = self
+        view.addGestureRecognizer(up)
+
+        // Aşağı kaydırma bilgi panelini getiriyor. tvOS'ta buna gerek yok:
+        // orada aşağı kaydırmak odağı denetim satırının altındaki durağa
+        // indiriyor ve paneli o açıyor.
+        let down = UISwipeGestureRecognizer(target: self, action: #selector(swipedDown))
+        down.direction = .down
+        down.delegate = self
+        view.addGestureRecognizer(down)
+        #endif
+
+        #if os(tvOS)
+        // Menu tuşu için ayrı bir tanıyıcı şart. tvOS, modal olarak sunulmuş
+        // bir denetleyicide Menu'yü kendisi yakalayıp ekranı kapatıyor ve
+        // `pressesBegan` bunun önüne geçmiyor — zincirde ne yazarsa yazsın
+        // oynatıcı kapanıyordu. Basış tipi Menu olan bir tanıyıcı, basışı
+        // sistemin kendi davranışından önce alıyor.
+        let menuPress = UITapGestureRecognizer(target: self, action: #selector(menuPressed))
+        menuPress.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
+        view.addGestureRecognizer(menuPress)
+
+        // Arayüz kapalıyken herhangi bir yöne kaydırmak onu geri getiriyor.
+        // Kapalıyken odaklanabilir hiçbir şey olmadığı için bu jestler odak
+        // gezinmesinin önüne geçmiyor; delege de açıkken devreye girmelerini
+        // engelliyor.
+        for direction in [UISwipeGestureRecognizer.Direction.up, .down, .left, .right] {
+            let swipe = UISwipeGestureRecognizer(target: self, action: #selector(swipedWhileHidden))
+            swipe.direction = direction
+            swipe.delegate = self
+            view.addGestureRecognizer(swipe)
+            revealSwipes.append(swipe)
+        }
         #endif
 
         if context.isLive {
@@ -147,10 +495,40 @@ final class PlayerViewController: UIViewController {
         refreshNextEpisode()
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // Kart ölçüleri ekran genişliğinden geliyor; sekme panelleri açılırken
+        // güncel değeri okuyor.
+        tabs.metrics = AppMetrics.metrics(for: view.bounds.width)
+        // Altyazı, kontroller açıkken alt sütunun üstüne çıkıyor. Yükseklik
+        // ancak yerleşimden sonra biliniyor.
+        subtitleOverlay.bottomInset = isControlsVisible ? raisedSubtitleInset : 0
+    }
+
+    /// Video oynarken ekran kararmamalı. tvOS'ta boşta kalma zamanlayıcısı
+    /// zaten oynatma sırasında sistem tarafından yönetiliyor ama çağrı orada
+    /// da geçerli ve zararsız.
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        UIApplication.shared.isIdleTimerDisabled = true
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        UIApplication.shared.isIdleTimerDisabled = false
+        saveProgress()
+        playerLayer?.pause()
+        playerLayer?.stop()
+        playerLayer = nil
+    }
+
+    // MARK: - Bölüm geçişi
+
     /// Sıradaki bölümü çözüp butonun görünürlüğünü ayarlar.
     private func refreshNextEpisode() {
         nextEpisode = nil
         nextEpisodeButton.isHidden = true
+        tabs.hasNextEpisode = false
         guard context.kind == .series else { return }
         Task { [weak self] in
             guard let self else { return }
@@ -158,6 +536,7 @@ final class PlayerViewController: UIViewController {
             await MainActor.run {
                 self.nextEpisode = next
                 self.nextEpisodeButton.isHidden = next == nil
+                self.tabs.hasNextEpisode = next != nil
             }
         }
     }
@@ -188,10 +567,9 @@ final class PlayerViewController: UIViewController {
         isPlaying = true
         didShowFailure = false
         lastProgressSave = .distantPast
-        playPauseButton.setImage(UIImage(systemName: "pause.fill"), for: .normal)
-        titleLabel.text = newContext.title
-        subtitleLabel.text = newContext.subtitle
-        subtitleLabel.isHidden = newContext.subtitle == nil
+        selectedAudioTrackID = nil
+        playPauseButton.setSymbol("pause.fill", animated: false)
+        applyTitleLines()
 
         startPlayback()
         refreshNextEpisode()
@@ -201,9 +579,12 @@ final class PlayerViewController: UIViewController {
     // MARK: - Kumanda girdisi (tvOS)
 
     #if os(tvOS)
-    /// Kontroller açıldığında odak doğrudan oynat/duraklat'a gidiyor.
+    /// Kontroller açıldığında odak oynat/duraklat'a gidiyor; bir sekme paneli
+    /// açıksa seçili çipte kalıyor — Apple TV'de de odak panele kendiliğinden
+    /// inmiyor, kullanıcı aşağı basınca iniyor.
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
-        [playPauseButton]
+        if let pendingFocusTarget { return [pendingFocusTarget] }
+        return tabs.isPanelOpen ? tabs.focusEnvironments : [playPauseButton]
     }
 
     /// Kumanda tuşları.
@@ -214,6 +595,13 @@ final class PlayerViewController: UIViewController {
     ///
     /// Oynat/Duraklat tuşu bunun dışında: o her zaman oynatmayı değiştiriyor,
     /// arayüz kapalıyken bile — kumandadaki karşılığı bu ve beklenen davranış.
+    ///
+    /// Arayüzü **yalnızca** gerçek bir basış açıyor. Eskiden kumandanın
+    /// dokunmatik yüzeyine değmek de açıyordu ve geri tuşu hiçbir zaman
+    /// oynatıcıyı kapatamıyordu: kullanıcının başparmağı yüzeyde dururken
+    /// arayüz kendiliğinden geri geliyor, geri tuşu da onu kapatmakla
+    /// yetiniyordu. Arayüz kapalıyken yön/seçim tuşu ya da aşağı kaydırma
+    /// geri getiriyor.
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         for press in presses {
             switch press.type {
@@ -221,17 +609,16 @@ final class PlayerViewController: UIViewController {
                 togglePlayPause()
                 return
 
-            case .menu:
-                // Arayüz açıkken Menu oynatıcıdan çıkıyor; kapalıyken önce
-                // arayüzü geri getiriyor. Böylece çıkış yolu hep açık kalıyor.
-                if isControlsVisible {
-                    close()
-                } else {
-                    showControls()
-                }
+            case .leftArrow, .rightArrow:
+                // Arayüz kapalıyken sağ/sol doğrudan sarmaya giriyor: kullanıcı
+                // önce arayüzü açıp sonra çubuğa inmek zorunda kalmıyor.
+                guard !isControlsVisible else { break }
+                beginScrubFromHidden(direction: press.type == .leftArrow ? -1 : 1)
                 return
 
-            case .select, .upArrow, .downArrow, .leftArrow, .rightArrow:
+            case .select, .upArrow, .downArrow:
+                // Aşağı inmek yalnızca odak hareketi; bilgi panelini denetim
+                // satırının altındaki odak durağı açıyor.
                 guard !isControlsVisible else { break }
                 showControls()
                 return
@@ -243,31 +630,7 @@ final class PlayerViewController: UIViewController {
         super.pressesBegan(presses, with: event)
     }
 
-    /// Kumandanın dokunmatik yüzeyine dokunmak da arayüzü geri getiriyor.
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if !isControlsVisible {
-            showControls()
-        }
-        super.touchesBegan(touches, with: event)
-    }
     #endif
-
-    /// Video oynarken ekran kararmamalı. tvOS'ta boşta kalma zamanlayıcısı
-    /// zaten oynatma sırasında sistem tarafından yönetiliyor ama çağrı orada
-    /// da geçerli ve zararsız.
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        UIApplication.shared.isIdleTimerDisabled = true
-    }
-
-    override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
-        UIApplication.shared.isIdleTimerDisabled = false
-        saveProgress()
-        playerLayer?.pause()
-        playerLayer?.stop()
-        playerLayer = nil
-    }
 
     // MARK: - Oynatma
 
@@ -288,12 +651,20 @@ final class PlayerViewController: UIViewController {
         if let startAt = context.startAt, startAt > 0, !context.isLive {
             options.startPlayTime = startAt
         }
+        // Gömülü altyazıyı biz seçiyoruz: kullanıcının "kendiliğinden aç"
+        // tercihi kütüphanenin varsayılanının önünde.
+        options.autoSelectEmbedSubtitle = false
+
+        subtitles.prepare(url: context.url)
+        tabs.configure(context: context, model: model)
 
         let layer = KSPlayerLayer(url: context.url, options: options, delegate: self)
         playerLayer = layer
+        refreshTrackMenus()
 
         guard let videoView = layer.player.view else { return }
         self.videoView = videoView
+        videoView.contentMode = videoContentMode
         videoView.translatesAutoresizingMaskIntoConstraints = false
         view.insertSubview(videoView, at: 0)
         NSLayoutConstraint.activate([
@@ -310,97 +681,147 @@ final class PlayerViewController: UIViewController {
     }
 
     private func loadLiveEPG() {
-        // Canlı yayınlarda anlık program bilgisini alt başlık olarak göster
+        // Canlı yayında künye satırı anlık programı gösteriyor.
         guard let decoded = AppModel.decode(contextID: context.id) else { return }
+        guard let item = model.library.item(for: decoded.mediaID) else { return }
 
-        if let item = model.library.item(for: decoded.mediaID) {
-            Task {
-                let epgEntries = await model.library.epg(for: item)
-                let now = Date()
-                if let currentProgram = epgEntries.first(where: { $0.start <= now && $0.end >= now }) {
-                    await MainActor.run {
-                        let formatter = DateFormatter()
-                        formatter.dateFormat = "HH:mm"
-                        let timeRange = "\(formatter.string(from: currentProgram.start)) - \(formatter.string(from: currentProgram.end))"
-                        self.subtitleLabel.text = "\(timeRange) · \(currentProgram.title)"
-                        self.subtitleLabel.isHidden = false
-                    }
-                }
+        Task { [weak self] in
+            guard let self else { return }
+            let epgEntries = await model.library.epg(for: item)
+            let now = Date()
+            guard let current = epgEntries.first(where: { $0.start <= now && $0.end >= now }) else { return }
+            await MainActor.run {
+                let formatter = DateFormatter()
+                formatter.dateFormat = "HH:mm"
+                let range = "\(formatter.string(from: current.start)) - \(formatter.string(from: current.end))"
+                self.infoLabel.text = "\(range) · \(current.title)"
+                self.infoLabel.isHidden = false
             }
         }
     }
 
-    // MARK: - Kontroller
+    /// Künye satırlarını bağlamdan çıkarır.
+    ///
+    /// Dizide ekranda yalnızca bölüm duruyor: "S3:B9 · Veda". Dizinin adını
+    /// izleyen zaten biliyor, ince satır boş kalıyor.
+    ///
+    /// Filmde ince satır yıl — bağlamın taşıdığı kategori adı başlığın yanında
+    /// bir şey anlatmıyor. Canlıda ince satırı `loadLiveEPG` dolduruyor.
+    private func applyTitleLines() {
+        if context.kind == .series, let episode = context.subtitle {
+            titleLabel.text = episode
+            infoLabel.text = nil
+        } else {
+            titleLabel.text = context.title
+            infoLabel.text = secondaryLine()
+        }
+        infoLabel.isHidden = (infoLabel.text ?? "").isEmpty
+    }
+
+    private func secondaryLine() -> String? {
+        if context.kind == .movie,
+           let decoded = AppModel.decode(contextID: context.id),
+           let year = model.library.item(for: decoded.mediaID)?.yearText
+        {
+            return year
+        }
+        return context.subtitle
+    }
+
+    // MARK: - Kontrollerin kurulumu
 
     private func buildControls() {
-        titleLabel.text = context.title
-        titleLabel.font = .systemFont(ofSize: 20, weight: .semibold)
+        buildScrims()
+        buildHeader()
+        buildTransport()
+        layoutControls()
+    }
+
+    /// Kontroller videonun üstünde duruyor ve açık bir sahnede beyaz yazı
+    /// zeminle karışıyor. Alttaki karartma, cam butonların da tutunacağı koyu
+    /// bir zemin bırakıyor.
+    private func buildScrims() {
+        bottomScrim.colors = [
+            .clear,
+            UIColor.black.withAlphaComponent(0.45),
+            UIColor.black.withAlphaComponent(0.9),
+        ]
+        bottomScrim.locations = [0, 0.4, 1]
+
+        #if os(iOS)
+        topScrim.colors = [UIColor.black.withAlphaComponent(0.6), .clear]
+        topScrim.locations = [0, 1]
+        #endif
+    }
+
+    private func buildHeader() {
+        titleLabel.font = .systemFont(ofSize: Self.titleSize, weight: .bold)
         titleLabel.textColor = .white
-        titleLabel.numberOfLines = 2
+        titleLabel.numberOfLines = 1
 
-        subtitleLabel.text = context.subtitle
-        subtitleLabel.font = .systemFont(ofSize: 14)
-        subtitleLabel.textColor = UIColor.white.withAlphaComponent(0.7)
-        subtitleLabel.isHidden = context.subtitle == nil
+        infoLabel.font = .systemFont(ofSize: Self.infoSize)
+        infoLabel.textColor = UIColor.white.withAlphaComponent(0.75)
+        infoLabel.numberOfLines = 1
+        applyTitleLines()
 
-        closeButton.setImage(UIImage(systemName: "xmark"), for: .normal)
-        closeButton.tintColor = .white
-        closeButton.backgroundColor = UIColor.black.withAlphaComponent(0.45)
-        closeButton.layer.cornerRadius = 20
-        closeButton.addTarget(self, action: #selector(close), for: .primaryActionTriggered)
+        // Görüntü boyutu menü açmıyor: iki durum var ve buton her basışta
+        // ikisi arasında gidip geliyor. Simge yapılacak işi gösteriyor.
+        style(aspectButton, symbol: "arrow.up.left.and.arrow.down.right", accessibility: L10n.aspectFill)
+        aspectButton.addTarget(self, action: #selector(toggleAspect), for: .primaryActionTriggered)
 
-        // Üst sağ kontrol butonları (Ses, Altyazı, Aspect Ratio)
-        aspectButton.setImage(UIImage(systemName: "aspectratio"), for: .normal)
-        aspectButton.tintColor = .white
-        aspectButton.backgroundColor = UIColor.black.withAlphaComponent(0.45)
-        aspectButton.layer.cornerRadius = 20
-        aspectButton.showsMenuAsPrimaryAction = true
-        aspectButton.menu = makeAspectMenu()
-
-        audioTracksButton.setImage(UIImage(systemName: "speaker.wave.2"), for: .normal)
-        audioTracksButton.tintColor = .white
-        audioTracksButton.backgroundColor = UIColor.black.withAlphaComponent(0.45)
-        audioTracksButton.layer.cornerRadius = 20
+        style(audioTracksButton, symbol: "waveform", accessibility: L10n.audioTracks)
         audioTracksButton.showsMenuAsPrimaryAction = true
+        audioTracksButton.isHidden = true
 
-        subtitlesButton.setImage(UIImage(systemName: "captions.bubble"), for: .normal)
-        subtitlesButton.tintColor = .white
-        subtitlesButton.backgroundColor = UIColor.black.withAlphaComponent(0.45)
-        subtitlesButton.layer.cornerRadius = 20
+        style(subtitlesButton, symbol: "captions.bubble", accessibility: L10n.subtitles)
         subtitlesButton.showsMenuAsPrimaryAction = true
 
-        playPauseButton.setImage(UIImage(systemName: "pause.fill"), for: .normal)
-        playPauseButton.tintColor = .white
-        playPauseButton.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: 24, weight: .medium), forImageIn: .normal)
+        #if os(iOS)
+        style(closeButton, symbol: "xmark", accessibility: L10n.close)
+        closeButton.addTarget(self, action: #selector(close), for: .primaryActionTriggered)
+        #endif
+    }
+
+    private func buildTransport() {
+        style(playPauseButton, symbol: "pause.fill", pointSize: Self.playPointSize)
         playPauseButton.addTarget(self, action: #selector(togglePlayPause), for: .primaryActionTriggered)
 
-        rewindButton.setImage(UIImage(systemName: "gobackward.15"), for: .normal)
-        rewindButton.tintColor = .white
-        rewindButton.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: 20, weight: .regular), forImageIn: .normal)
+        style(rewindButton, symbol: "gobackward.15", pointSize: Self.transportPointSize)
         rewindButton.addTarget(self, action: #selector(seekBackward), for: .primaryActionTriggered)
 
-        forwardButton.setImage(UIImage(systemName: "goforward.15"), for: .normal)
-        forwardButton.tintColor = .white
-        forwardButton.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: 20, weight: .regular), forImageIn: .normal)
+        style(forwardButton, symbol: "goforward.15", pointSize: Self.transportPointSize)
         forwardButton.addTarget(self, action: #selector(seekForward), for: .primaryActionTriggered)
 
-        for label in [currentTimeLabel, durationLabel] {
-            label.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
-            label.textColor = .white
+        style(nextEpisodeButton, symbol: "forward.end.fill", pointSize: Self.transportPointSize,
+              accessibility: L10n.nextEpisode)
+        nextEpisodeButton.isHidden = true
+        nextEpisodeButton.addTarget(self, action: #selector(playNextEpisode), for: .primaryActionTriggered)
+
+        for label in [currentTimeLabel, remainingLabel] {
+            label.font = .monospacedDigitSystemFont(ofSize: Self.timeSize, weight: .regular)
+            label.textColor = UIColor.white.withAlphaComponent(0.8)
         }
         currentTimeLabel.text = "0:00"
-        durationLabel.text = "0:00"
+        remainingLabel.text = "-0:00"
+        remainingLabel.textAlignment = .right
 
-        // İnteraktif Scrubber Slider
         slider.minimumValue = 0
         slider.maximumValue = 1
         slider.value = 0
         slider.minimumTrackTintColor = .white
-        slider.maximumTrackTintColor = UIColor.white.withAlphaComponent(0.25)
-        slider.setThumbImage(makeThumbImage(), for: .normal)
+        slider.maximumTrackTintColor = UIColor.white.withAlphaComponent(0.28)
+        slider.setThumbImage(Self.thumbImage, for: .normal)
         slider.addTarget(self, action: #selector(sliderTouchDown), for: .touchDown)
         slider.addTarget(self, action: #selector(sliderValueChanged), for: .valueChanged)
         slider.addTarget(self, action: #selector(sliderTouchUp), for: [.touchUpInside, .touchUpOutside, .touchCancel])
+
+        #if os(tvOS)
+        slider.onScrubBegin = { [weak self] in self?.beginScrub() }
+        slider.onScrubStep = { [weak self] direction in self?.scrubStep(direction) }
+        slider.onScrubFraction = { [weak self] fraction in self?.scrub(toFraction: fraction) }
+        slider.onScrubCommit = { [weak self] in self?.finishScrub(commit: true) }
+        slider.onScrubCancel = { [weak self] in self?.finishScrub(commit: false) }
+        #endif
 
         let dot = UIView()
         dot.backgroundColor = .systemRed
@@ -409,161 +830,324 @@ final class PlayerViewController: UIViewController {
         dot.heightAnchor.constraint(equalToConstant: 8).isActive = true
         let liveLabel = UILabel()
         liveLabel.text = L10n.liveBadge
-        liveLabel.font = .systemFont(ofSize: 12, weight: .bold)
+        liveLabel.font = .systemFont(ofSize: Self.timeSize, weight: .bold)
         liveLabel.textColor = .white
         liveBadge.addArrangedSubview(dot)
         liveBadge.addArrangedSubview(liveLabel)
         liveBadge.axis = .horizontal
         liveBadge.spacing = 6
         liveBadge.alignment = .center
-        liveBadge.isHidden = !context.isLive
+        // Rozet kendi boyunda kalsın: satırdaki boşluğu yanındaki dolgu
+        // yutuyor, rozet değil.
+        liveBadge.setContentHuggingPriority(.required, for: .horizontal)
+        liveBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
+    }
 
-        nextEpisodeButton.setImage(UIImage(systemName: "forward.end.fill"), for: .normal)
-        nextEpisodeButton.tintColor = .white
-        nextEpisodeButton.accessibilityLabel = L10n.nextEpisode
-        nextEpisodeButton.isHidden = true
-        nextEpisodeButton.addTarget(self, action: #selector(playNextEpisode), for: .primaryActionTriggered)
+    private func layoutControls() {
+        // Künye: ince satır üstte, başlık altında.
+        let titlesStack = UIStackView()
+        titlesStack.axis = .vertical
+        titlesStack.spacing = 2
+        titlesStack.addArrangedSubview(infoLabel)
+        titlesStack.addArrangedSubview(titleLabel)
 
-        let controlButtons: [UIView] = context.isLive
-            ? [playPauseButton, liveBadge, UIView()]
-            : [rewindButton, playPauseButton, forwardButton, nextEpisodeButton,
-               currentTimeLabel, slider, durationLabel]
+        // Geçen süre solda, kalan süre sağda, ilerleme ortada. Canlıda
+        // ilerleme yok: yerinde "CANLI" rozeti duruyor.
+        let sliderRow = UIStackView()
+        sliderRow.axis = .horizontal
+        sliderRow.spacing = 12
+        sliderRow.alignment = .center
+        for subview in context.isLive ? [liveBadge, UIView()] : [currentTimeLabel, slider, remainingLabel] {
+            sliderRow.addArrangedSubview(subview)
+        }
 
-        let scrubberRow = UIStackView(arrangedSubviews: controlButtons)
-        scrubberRow.axis = .horizontal
-        scrubberRow.spacing = 14
-        scrubberRow.alignment = .center
+        // Solda sekme çipleri, ortada transport, sağda simge butonları —
+        // hepsi tek satırda.
+        let transportRow = UIStackView(
+            arrangedSubviews: context.isLive
+                ? [playPauseButton]
+                : [rewindButton, playPauseButton, forwardButton, nextEpisodeButton]
+        )
+        transportRow.axis = .horizontal
+        transportRow.spacing = 10
+        transportRow.alignment = .center
+        let transportGlass = UIView.glassContainer(wrapping: transportRow, spacing: 10)
 
-        let bar = UIView()
-        bar.backgroundColor = UIColor.black.withAlphaComponent(0.65)
-        bar.layer.cornerRadius = 16
-        bar.layer.cornerCurve = .continuous
-        scrubberRow.translatesAutoresizingMaskIntoConstraints = false
-        bar.addSubview(scrubberRow)
+        // Yan yana duran cam butonlar tek bir cam yüzeyde; birbirlerine
+        // yaklaştıklarında malzeme akışkan biçimde birleşiyor.
+        let leadingRow = UIStackView(arrangedSubviews: [tabs.infoChip, subtitlesButton, audioTracksButton])
+        leadingRow.axis = .horizontal
+        leadingRow.spacing = 8
+        leadingRow.alignment = .center
+        let leadingGlass = UIView.glassContainer(wrapping: leadingRow, spacing: 8)
 
-        let topButtons = UIStackView(arrangedSubviews: [aspectButton, audioTracksButton, subtitlesButton, closeButton])
-        topButtons.axis = .horizontal
-        topButtons.spacing = 10
-        topButtons.alignment = .center
+        let trailingRow = UIStackView(arrangedSubviews: [tabs.episodesChip, aspectButton])
+        trailingRow.axis = .horizontal
+        trailingRow.spacing = 8
+        trailingRow.alignment = .center
+        let trailingGlass = UIView.glassContainer(wrapping: trailingRow, spacing: 8)
 
-        let titles = UIStackView(arrangedSubviews: [titleLabel, subtitleLabel])
-        titles.axis = .vertical
-        titles.spacing = 4
+        for subview in [leadingGlass, transportGlass, trailingGlass] {
+            subview.translatesAutoresizingMaskIntoConstraints = false
+            controlRow.addSubview(subview)
+        }
+        NSLayoutConstraint.activate([
+            // Transport satırın ortasında ve yüksekliği satırı belirliyor.
+            transportGlass.topAnchor.constraint(equalTo: controlRow.topAnchor),
+            transportGlass.bottomAnchor.constraint(equalTo: controlRow.bottomAnchor),
+            transportGlass.centerXAnchor.constraint(equalTo: controlRow.centerXAnchor),
+
+            leadingGlass.leadingAnchor.constraint(equalTo: controlRow.leadingAnchor),
+            leadingGlass.centerYAnchor.constraint(equalTo: transportGlass.centerYAnchor),
+            leadingGlass.trailingAnchor.constraint(lessThanOrEqualTo: transportGlass.leadingAnchor, constant: -16),
+
+            trailingGlass.trailingAnchor.constraint(equalTo: controlRow.trailingAnchor),
+            trailingGlass.centerYAnchor.constraint(equalTo: transportGlass.centerYAnchor),
+            trailingGlass.leadingAnchor.constraint(greaterThanOrEqualTo: transportGlass.trailingAnchor, constant: 16),
+        ])
+
+        bottomStack.axis = .vertical
+        bottomStack.spacing = 16
+        bottomStack.addArrangedSubview(titlesStack)
+        bottomStack.addArrangedSubview(sliderRow)
+        bottomStack.addArrangedSubview(controlRow)
+        bottomStack.addArrangedSubview(tabs.panel)
+        bottomStack.setCustomSpacing(10, after: titlesStack)
+        // Odaktaki kart kendi çerçevesinin dışına büyüyor; yığın kırpmamalı.
+        bottomStack.clipsToBounds = false
+
+        // Altyazı katmanı videonun üstünde, kontrollerin altında: kontroller
+        // solduğunda altyazı ekranda kalıyor.
+        subtitleOverlay.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(subtitleOverlay)
 
         controlsView.translatesAutoresizingMaskIntoConstraints = false
+        controlsView.clipsToBounds = false
         view.addSubview(controlsView)
-        for subview in [titles, topButtons, bar] {
+        for subview in [bottomScrim, bottomStack] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             controlsView.addSubview(subview)
         }
+        // Karartma en altta: yazı ve butonlar üstünde kalıyor.
+        controlsView.sendSubviewToBack(bottomScrim)
+
+        #if os(tvOS)
+        // Yığına konmuyor: yığının boşluğu görünür bir aralık açardı. Görünmez
+        // ve bir punto yüksekliğinde, yalnızca odak için var.
+        focusSentinel.translatesAutoresizingMaskIntoConstraints = false
+        focusSentinel.onFocus = { [weak self] in
+            guard let self, !tabs.isPanelOpen else { return }
+            tabs.open(.info)
+        }
+        controlsView.addSubview(focusSentinel)
+        NSLayoutConstraint.activate([
+            focusSentinel.topAnchor.constraint(equalTo: controlRow.bottomAnchor),
+            focusSentinel.leadingAnchor.constraint(equalTo: controlRow.leadingAnchor),
+            focusSentinel.trailingAnchor.constraint(equalTo: controlRow.trailingAnchor),
+            focusSentinel.heightAnchor.constraint(equalToConstant: 1),
+        ])
+        #endif
 
         spinner.translatesAutoresizingMaskIntoConstraints = false
         spinner.color = .white
         spinner.startAnimating()
         view.addSubview(spinner)
 
-        for btn in [aspectButton, audioTracksButton, subtitlesButton, closeButton] {
-            btn.widthAnchor.constraint(equalToConstant: 40).isActive = true
-            btn.heightAnchor.constraint(equalToConstant: 40).isActive = true
-        }
-
+        let inset = Self.edgeInset
         NSLayoutConstraint.activate([
+            subtitleOverlay.topAnchor.constraint(equalTo: view.topAnchor),
+            subtitleOverlay.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            subtitleOverlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            subtitleOverlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+
             controlsView.topAnchor.constraint(equalTo: view.topAnchor),
             controlsView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             controlsView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             controlsView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 
-            titles.topAnchor.constraint(equalTo: controlsView.safeAreaLayoutGuide.topAnchor, constant: 12),
-            titles.leadingAnchor.constraint(equalTo: controlsView.leadingAnchor, constant: 20),
-            titles.trailingAnchor.constraint(lessThanOrEqualTo: topButtons.leadingAnchor, constant: -12),
+            bottomScrim.leadingAnchor.constraint(equalTo: controlsView.leadingAnchor),
+            bottomScrim.trailingAnchor.constraint(equalTo: controlsView.trailingAnchor),
+            bottomScrim.bottomAnchor.constraint(equalTo: controlsView.bottomAnchor),
+            bottomScrim.topAnchor.constraint(equalTo: bottomStack.topAnchor, constant: -inset * 2),
 
-            topButtons.topAnchor.constraint(equalTo: controlsView.safeAreaLayoutGuide.topAnchor, constant: 12),
-            topButtons.trailingAnchor.constraint(equalTo: controlsView.trailingAnchor, constant: -20),
-
-            bar.leadingAnchor.constraint(equalTo: controlsView.leadingAnchor, constant: 20),
-            bar.trailingAnchor.constraint(equalTo: controlsView.trailingAnchor, constant: -20),
-            bar.bottomAnchor.constraint(equalTo: controlsView.safeAreaLayoutGuide.bottomAnchor, constant: -20),
-
-            scrubberRow.topAnchor.constraint(equalTo: bar.topAnchor, constant: 12),
-            scrubberRow.bottomAnchor.constraint(equalTo: bar.bottomAnchor, constant: -12),
-            scrubberRow.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 16),
-            scrubberRow.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -16),
+            bottomStack.leadingAnchor.constraint(equalTo: controlsView.safeAreaLayoutGuide.leadingAnchor, constant: inset),
+            bottomStack.trailingAnchor.constraint(equalTo: controlsView.safeAreaLayoutGuide.trailingAnchor, constant: -inset),
+            bottomStack.bottomAnchor.constraint(equalTo: controlsView.safeAreaLayoutGuide.bottomAnchor, constant: -inset),
 
             spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor),
         ])
+
+        #if os(iOS)
+        for subview in [topScrim, closeButton] {
+            subview.translatesAutoresizingMaskIntoConstraints = false
+            controlsView.addSubview(subview)
+        }
+        controlsView.sendSubviewToBack(topScrim)
+        NSLayoutConstraint.activate([
+            topScrim.topAnchor.constraint(equalTo: controlsView.topAnchor),
+            topScrim.leadingAnchor.constraint(equalTo: controlsView.leadingAnchor),
+            topScrim.trailingAnchor.constraint(equalTo: controlsView.trailingAnchor),
+            topScrim.bottomAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: inset),
+
+            closeButton.topAnchor.constraint(equalTo: controlsView.safeAreaLayoutGuide.topAnchor, constant: 10),
+            closeButton.trailingAnchor.constraint(equalTo: controlsView.safeAreaLayoutGuide.trailingAnchor, constant: -inset),
+        ])
+        #endif
     }
 
-    private func makeThumbImage() -> UIImage {
+    /// Oynatıcının simge butonu — uygulamanın her yerindeki cam buton, kare
+    /// oranlı. Sembol `preferredSymbolConfigurationForImage`'a bağlanıyor:
+    /// `setSymbol` yalnızca resmi değiştirdiği için ölçü resme gömülseydi
+    /// oynat/duraklat geçişinde kaybolurdu.
+    private func style(
+        _ button: UIButton,
+        symbol: String,
+        pointSize: CGFloat? = nil,
+        accessibility: String? = nil
+    ) {
+        var config = UIButton.Configuration.appGlass(
+            horizontalInset: Self.iconInset,
+            verticalInset: Self.iconInset
+        )
+        config.image = UIImage(systemName: symbol)
+        config.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
+            pointSize: pointSize ?? Self.iconPointSize,
+            weight: .semibold
+        )
+        button.configuration = config
+        button.accessibilityLabel = accessibility
+        button.addSpringPressFeedback(scale: 0.92)
+    }
+
+    private static let thumbImage: UIImage = {
         let size = CGSize(width: 14, height: 14)
-        let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { context in
+        return UIGraphicsImageRenderer(size: size).image { context in
             UIColor.white.setFill()
             context.cgContext.fillEllipse(in: CGRect(origin: .zero, size: size))
         }
-    }
+    }()
 
-    private func makeAspectMenu() -> UIMenu {
-        let fit = UIAction(title: L10n.aspectFit, image: UIImage(systemName: "arrow.down.right.and.arrow.up.left")) { [weak self] _ in
-            self?.videoView?.contentMode = .scaleAspectFit
-            self?.playerLayer?.player.view?.contentMode = .scaleAspectFit
-        }
-        let fill = UIAction(title: L10n.aspectFill, image: UIImage(systemName: "arrow.up.left.and.arrow.down.right")) { [weak self] _ in
-            self?.videoView?.contentMode = .scaleAspectFill
-            self?.playerLayer?.player.view?.contentMode = .scaleAspectFill
-        }
-        let stretch = UIAction(title: L10n.aspectStretch, image: UIImage(systemName: "rectangle.arrowtriangle.2.outward")) { [weak self] _ in
-            self?.videoView?.contentMode = .scaleToFill
-            self?.playerLayer?.player.view?.contentMode = .scaleToFill
-        }
-        return UIMenu(title: L10n.aspectRatio, children: [fit, fill, stretch])
-    }
+    // MARK: - Sekmeler
 
-    private func updateTrackMenus() {
-        guard let player = playerLayer?.player else { return }
-
-        // Ses parçaları
-        let audioTracks = player.tracks(mediaType: .audio)
-        if !audioTracks.isEmpty {
-            let actions = audioTracks.map { track in
-                let isSelected = (self.selectedAudioTrackID == track.trackID) || (self.selectedAudioTrackID == nil && track.isEnabled)
-                let name = track.name.isEmpty ? "\(L10n.audioTracks) \(track.trackID)" : track.name
-                return UIAction(title: name, state: isSelected ? .on : .off) { [weak self] _ in
-                    self?.playerLayer?.player.select(track: track)
-                    self?.selectedAudioTrackID = track.trackID
-                    self?.updateTrackMenus()
-                }
+    private func wireTabs() {
+        tabs.styleChip = { [weak self] button, tab, isSelected in
+            self?.styleChip(button, tab: tab, isSelected: isSelected)
+        }
+        tabs.onPanelVisibilityChanged = { [weak self] isOpen in
+            guard let self else { return }
+            // Panel denetim satırının altına ekleniyor ve yığın alta bağlı
+            // olduğu için künye, ilerleme ve denetimler olduğu gibi yukarı
+            // kayıyor — hiçbiri gizlenmiyor.
+            //
+            // Kullanıcı listeye bakıyor olabilir; kontroller kendiliğinden
+            // gizlenmiyor.
+            if isOpen {
+                hideControlsWork?.cancel()
+            } else {
+                scheduleControlsHide()
             }
-            audioTracksButton.menu = UIMenu(title: L10n.audioTracks, children: actions)
-            audioTracksButton.isHidden = false
-        } else {
+            UIView.animate(withDuration: 0.25) { self.view.layoutIfNeeded() }
+            #if os(tvOS)
+            // Panel açıkken durak odağı yutmamalı; aşağı basınca panelin
+            // içine inilsin.
+            focusSentinel.isHidden = isOpen
+            // Yalnızca açılırken: panel kapanırken odağı taşımak kullanıcıyı
+            // çipten alıp oynat/duraklat'a atıyordu.
+            if isOpen {
+                setNeedsFocusUpdate()
+                updateFocusIfNeeded()
+            }
+            #endif
+        }
+        tabs.onSeek = { [weak self] time in
+            self?.seek(to: time)
+        }
+        tabs.onRestart = { [weak self] in
+            guard let self else { return }
+            tabs.close()
+            seek(to: 0)
+        }
+        tabs.onNextEpisode = { [weak self] in
+            guard let self else { return }
+            tabs.close()
+            playNextEpisode()
+        }
+        tabs.onPlay = { [weak self] context in
+            self?.restart(with: context)
+        }
+    }
+
+    /// Çipler yanlarındaki simge butonlarıyla aynı boyda: "Bilgi" yalnızca
+    /// simge, "Bölümler" yazılı. Seçili çip dolu beyaz — `appChip`'in her
+    /// yerdeki davranışı.
+    private func styleChip(_ button: UIButton, tab: PlayerTabsController.Tab, isSelected: Bool) {
+        switch tab {
+        case .info:
+            var config = UIButton.Configuration.appChip(
+                isSelected: isSelected,
+                horizontalInset: Self.iconInset,
+                verticalInset: Self.iconInset
+            )
+            config.image = UIImage(systemName: "info.circle")
+            config.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
+                pointSize: Self.iconPointSize,
+                weight: .semibold
+            )
+            button.configuration = config
+            button.accessibilityLabel = L10n.info
+
+        case .episodes:
+            var config = UIButton.Configuration.appChip(
+                isSelected: isSelected,
+                horizontalInset: Self.chipInset,
+                verticalInset: Self.chipVerticalInset,
+                fontSize: Self.chipFontSize
+            )
+            config.title = tab.title
+            button.configuration = config
+        }
+    }
+
+    // MARK: - Menüler
+
+    /// Menüler durumdan türüyor: seçili parça ve altyazı ayarları her açılışta
+    /// taze kurulan menüde işaretli geliyor.
+    private func wireMenus() {
+        subtitles.onMenuChanged = { [weak self] in
+            guard let self else { return }
+            subtitlesButton.menu = subtitles.makeMenu()
+        }
+        subtitlesButton.menu = subtitles.makeMenu()
+    }
+
+    /// Ses parçası menüsü. Altyazınınki `PlayerSubtitleController`'da.
+    private func refreshTrackMenus() {
+        subtitlesButton.menu = subtitles.makeMenu()
+
+        guard let player = playerLayer?.player else {
             audioTracksButton.isHidden = true
+            return
         }
-
-        // Altyazı parçaları
-        let subTracks = player.tracks(mediaType: .subtitle)
-        if !subTracks.isEmpty {
-            var subActions: [UIAction] = [
-                UIAction(title: L10n.subtitlesOff, state: self.selectedSubtitleID == -1 ? .on : .off) { [weak self] _ in
-                    self?.selectedSubtitleID = -1
-                    // Altyazı kapatma
-                    self?.updateTrackMenus()
-                }
-            ]
-            subActions += subTracks.map { track in
-                let isSelected = self.selectedSubtitleID == track.trackID
-                let name = track.name.isEmpty ? "\(L10n.subtitles) \(track.trackID)" : track.name
-                return UIAction(title: name, state: isSelected ? .on : .off) { [weak self] _ in
-                    self?.playerLayer?.player.select(track: track)
-                    self?.selectedSubtitleID = track.trackID
-                    self?.updateTrackMenus()
-                }
+        let tracks = player.tracks(mediaType: .audio)
+        // Tek ses parçasında menünün seçecek bir şeyi yok.
+        guard tracks.count > 1 else {
+            audioTracksButton.isHidden = true
+            return
+        }
+        let actions = tracks.map { track in
+            let isSelected = selectedAudioTrackID == track.trackID
+                || (selectedAudioTrackID == nil && track.isEnabled)
+            let name = track.name.isEmpty ? "\(L10n.audioTracks) \(track.trackID)" : track.name
+            return UIAction(title: name, state: isSelected ? .on : .off) { [weak self] _ in
+                guard let self else { return }
+                playerLayer?.player.select(track: track)
+                selectedAudioTrackID = track.trackID
+                refreshTrackMenus()
             }
-            subtitlesButton.menu = UIMenu(title: L10n.subtitles, children: subActions)
-            subtitlesButton.isHidden = false
-        } else {
-            subtitlesButton.isHidden = true
         }
+        audioTracksButton.menu = UIMenu(title: L10n.audioTracks, children: actions)
+        audioTracksButton.isHidden = false
     }
 
     // MARK: - Aksiyonlar
@@ -575,27 +1159,123 @@ final class PlayerViewController: UIViewController {
     @objc private func togglePlayPause() {
         isPlaying.toggle()
         isPlaying ? playerLayer?.play() : playerLayer?.pause()
-        playPauseButton.setImage(UIImage(systemName: isPlaying ? "pause.fill" : "play.fill"), for: .normal)
+        playPauseButton.setSymbol(isPlaying ? "pause.fill" : "play.fill")
         isPlaying ? scheduleControlsHide() : showControls()
     }
 
+    /// Sığdır ↔ doldur. Simge yapılacak işi gösteriyor: sığdırılmışken
+    /// "büyüt", doldurulmuşken "küçült".
+    @objc private func toggleAspect() {
+        let isFit = videoContentMode == .scaleAspectFit
+        videoContentMode = isFit ? .scaleAspectFill : .scaleAspectFit
+        videoView?.contentMode = videoContentMode
+        playerLayer?.player.view?.contentMode = videoContentMode
+
+        aspectButton.setSymbol(isFit ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+        aspectButton.accessibilityLabel = isFit ? L10n.aspectFit : L10n.aspectFill
+        showControls()
+    }
+
     @objc private func seekBackward() {
-        seek(by: -15)
+        seek(to: currentTime - 15)
     }
 
     @objc private func seekForward() {
-        seek(by: 15)
+        seek(to: currentTime + 15)
     }
 
-    private func seek(by seconds: Double) {
+    private func seek(to seconds: Double) {
         guard duration > 0 else { return }
-        let target = max(0, min(duration, currentTime + seconds))
+        let target = max(0, min(duration, seconds))
         currentTime = target
-        currentTimeLabel.text = Self.timeText(target)
+        applyTimeText(for: target)
         slider.value = Float(target / duration)
+        // Sarma sonrası eski satır ekranda asılı kalmasın.
+        subtitles.flush()
         playerLayer?.seek(time: target, autoPlay: isPlaying, completion: { _ in })
         showControls()
     }
+
+    #if os(tvOS)
+    /// Arayüz kapalıyken sağ/sol basıldı: arayüz açılıyor, odak çubuğa
+    /// gidiyor ve sarma o basışla başlıyor.
+    private func beginScrubFromHidden(direction: Int) {
+        pendingFocusTarget = slider
+        showControls()
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
+        pendingFocusTarget = nil
+        slider.startScrubbing(direction: direction)
+    }
+
+    /// Tutamaç gezdirilmeye başlandı: görüntü duruyor.
+    ///
+    /// Duraklatma `isPlaying`'e dokunmuyor — o kullanıcının oynat/duraklat
+    /// tercihi ve sarma bittiğinde oynatma ona göre sürüyor.
+    private func beginScrub() {
+        guard duration > 0 else { return }
+        pendingScrubTime = currentTime
+        scrubStepCount = 0
+        isScrubbing = true
+        hideControlsWork?.cancel()
+        playerLayer?.pause()
+        applyTimeText(for: currentTime)
+    }
+
+    /// Sağ/sol tuşuyla hedefi gezdirir; atlama tıklamayla oluyor.
+    private func scrubStep(_ direction: Int) {
+        guard duration > 0, let current = pendingScrubTime else { return }
+        scrubStepCount += 1
+        // Basılı tutuldukça adım büyüyor: iki saatlik bir filmde 10'ar
+        // saniyeyle ilerlemek dakikalar sürüyor.
+        let step: Double = scrubStepCount > 24 ? 60 : (scrubStepCount > 10 ? 30 : 10)
+        applyScrubTarget(current + Double(direction) * step)
+    }
+
+    /// Dokunmatik yüzeyden gelen doğrudan konum.
+    private func scrub(toFraction fraction: Float) {
+        guard duration > 0 else { return }
+        applyScrubTarget(Double(fraction) * duration)
+    }
+
+    private func applyScrubTarget(_ seconds: Double) {
+        let target = max(0, min(duration, seconds))
+        pendingScrubTime = target
+        slider.value = Float(target / duration)
+        applyTimeText(for: target)
+    }
+
+    private func finishScrub(commit: Bool) {
+        defer {
+            pendingScrubTime = nil
+            scrubStepCount = 0
+            isScrubbing = false
+            scheduleControlsHide()
+        }
+        guard commit, let target = pendingScrubTime else {
+            // Vazgeçildi: çubuk ve süreler oynatılan ana geri dönüyor, görüntü
+            // durduğu yerden akmaya devam ediyor.
+            refreshTimeLabels()
+            if isPlaying { playerLayer?.play() }
+            return
+        }
+        currentTime = target
+        subtitles.flush()
+        playerLayer?.seek(time: target, autoPlay: isPlaying, completion: { _ in })
+    }
+
+    /// Çubuktan **yalnızca** yatay odak hareketi kapalı: sağ/sol sarma demek.
+    /// Yukarı ve aşağı her zaman açık — sarma sürerken bile kullanıcı alttaki
+    /// butonlara inebilmeli, yoksa çubukta kilitli kalıyordu.
+    override func shouldUpdateFocus(in context: UIFocusUpdateContext) -> Bool {
+        if context.previouslyFocusedItem === slider,
+           context.focusHeading == .left || context.focusHeading == .right
+        {
+            return false
+        }
+        return super.shouldUpdateFocus(in: context)
+    }
+    #endif
 
     @objc private func sliderTouchDown() {
         isScrubbing = true
@@ -604,24 +1284,73 @@ final class PlayerViewController: UIViewController {
 
     @objc private func sliderValueChanged() {
         guard duration > 0 else { return }
-        let targetTime = Double(slider.value) * duration
-        currentTimeLabel.text = Self.timeText(targetTime)
+        applyTimeText(for: Double(slider.value) * duration)
     }
 
     @objc private func sliderTouchUp() {
         guard duration > 0 else { isScrubbing = false; return }
-        let targetTime = Double(slider.value) * duration
-        currentTime = targetTime
-        playerLayer?.seek(time: targetTime, autoPlay: isPlaying, completion: { _ in })
+        let target = Double(slider.value) * duration
+        currentTime = target
+        subtitles.flush()
+        playerLayer?.seek(time: target, autoPlay: isPlaying, completion: { _ in })
         isScrubbing = false
         scheduleControlsHide()
     }
+
+    #if os(iOS)
+    /// Aşağı kaydırmak bilgi panelini getiriyor; tvOS'ta bu işi odak durağı
+    /// yapıyor.
+    @objc private func swipedDown() {
+        guard isControlsVisible else {
+            showControls()
+            return
+        }
+        guard !tabs.isPanelOpen else { return }
+        tabs.open(.info)
+    }
+
+    @objc private func swipedUp() {
+        tabs.close()
+    }
+    #else
+    /// Kapalı arayüzü geri getiren kaydırmalar. Açıkken delege bu jestleri
+    /// hiç başlatmıyor.
+    @objc private func swipedWhileHidden() {
+        guard !isControlsVisible else { return }
+        showControls()
+    }
+
+    /// Geri tuşu adım adım geri çıkıyor: önce yarım kalan sarma, sonra açık
+    /// panel, sonra arayüz — oynatıcı ancak ekranda video dışında hiçbir şey
+    /// yokken kapanıyor.
+    @objc private func menuPressed() {
+        if slider.isScrubbingActive {
+            slider.cancelScrubbing()
+        } else if tabs.isPanelOpen {
+            tabs.close()
+        } else if isControlsVisible {
+            hideControls()
+        } else {
+            close()
+        }
+    }
+    #endif
+
+    // MARK: - Kontrollerin görünürlüğü
 
     @objc private func toggleControls() {
         isControlsVisible ? hideControls() : showControls()
     }
 
     private var isControlsVisible: Bool { controlsView.alpha > 0 }
+
+    /// Kontroller açıkken altyazının yükseleceği miktar: alt sütunun kapladığı
+    /// alan artı bir nefeslik boşluk.
+    private var raisedSubtitleInset: CGFloat {
+        guard bottomStack.bounds.height > 0 else { return 0 }
+        let safeBottom = view.safeAreaLayoutGuide.layoutFrame.maxY
+        return max(0, safeBottom - bottomStack.frame.minY + 12)
+    }
 
     private func showControls() {
         // Kontroller gizliyken etiketler güncellenmiyor; görünür olurken
@@ -632,14 +1361,26 @@ final class PlayerViewController: UIViewController {
     }
 
     private func refreshTimeLabels() {
-        currentTimeLabel.text = Self.timeText(currentTime)
-        durationLabel.text = Self.timeText(duration)
+        guard !context.isLive else { return }
+        applyTimeText(for: currentTime)
         guard duration > 0 else { return }
         slider.value = Float(currentTime / duration)
     }
 
+    /// Solda geçen, sağda kalan süre.
+    private func applyTimeText(for elapsed: Double) {
+        currentTimeLabel.text = Self.timeText(elapsed)
+        remainingLabel.text = "-" + Self.timeText(max(0, duration - elapsed))
+    }
+
     private func hideControls() {
+        // Açık bir sekme paneli varken dokunuş arayüzü kapatmıyor; önce panel
+        // kapanıyor.
         guard !isScrubbing else { return }
+        if tabs.isPanelOpen {
+            tabs.close()
+            return
+        }
         hideControlsWork?.cancel()
         setControlsVisible(false, duration: 0.2)
     }
@@ -648,24 +1389,35 @@ final class PlayerViewController: UIViewController {
     /// katman odak almaya devam ediyor ve kullanıcı boşlukta gezinmiş oluyor.
     /// Etkileşim kapatılınca içindeki butonlar odak sisteminden de düşüyor.
     private func setControlsVisible(_ visible: Bool, duration: TimeInterval) {
+        let wasVisible = isControlsVisible
         controlsView.isUserInteractionEnabled = visible
-        UIView.animate(withDuration: duration) { self.controlsView.alpha = visible ? 1 : 0 }
+        UIView.animate(withDuration: duration) {
+            self.controlsView.alpha = visible ? 1 : 0
+            self.subtitleOverlay.bottomInset = visible ? self.raisedSubtitleInset : 0
+            self.subtitleOverlay.layoutIfNeeded()
+        }
         #if os(tvOS)
-        if visible {
+        // Odak yalnızca arayüz kapalıyken açıldığında taşınıyor. Zaten
+        // açıkken taşımak, kullanıcıyı bastığı butondan alıp
+        // oynat/duraklat'a ışınlıyordu.
+        if visible, !wasVisible {
             setNeedsFocusUpdate()
             updateFocusIfNeeded()
         }
         #endif
     }
 
+    /// Bir sekme paneli açıkken kontroller kendiliğinden gizlenmiyor:
+    /// kullanıcı listeye bakıyor olabilir.
     private func scheduleControlsHide() {
         hideControlsWork?.cancel()
+        guard !tabs.isPanelOpen else { return }
         let work = DispatchWorkItem { [weak self] in
-            guard let self, self.isPlaying, !self.isScrubbing else { return }
+            guard let self, self.isPlaying, !self.isScrubbing, !self.tabs.isPanelOpen else { return }
             setControlsVisible(false, duration: 0.25)
         }
         hideControlsWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.controlsHideDelay, execute: work)
     }
 
     private static func timeText(_ seconds: Double) -> String {
@@ -681,9 +1433,25 @@ final class PlayerViewController: UIViewController {
 }
 
 extension PlayerViewController: UIGestureRecognizerDelegate {
+    /// tvOS'ta aşağı kaydırma yalnızca gidilecek başka yer yokken paneli
+    /// açıyor: panel açıkken odak panele inmeli, ilerleme çubuğu odaktayken de
+    /// aşağı inmek denetim satırına geçmek demek.
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        #if os(tvOS)
+        if revealSwipes.contains(where: { $0 === gestureRecognizer }) {
+            return !isControlsVisible
+        }
+        #endif
+        return true
+    }
+
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        // Kontrol butonlarına veya slider'a dokunurken ekran jestinin araya girmesini engelle
+        // Kontrol butonlarına, slider'a ya da sekme paneline dokunurken ekran
+        // jestinin araya girmesini engelle.
         if touch.view is UIControl || touch.view?.superview is UIControl {
+            return false
+        }
+        if let touched = touch.view, touched.isDescendant(of: tabs.panel) {
             return false
         }
         return true
@@ -693,9 +1461,14 @@ extension PlayerViewController: UIGestureRecognizerDelegate {
 extension PlayerViewController: KSPlayerLayerDelegate {
     func player(layer: KSPlayerLayer, state: KSPlayerState) {
         switch state {
-        case .readyToPlay, .bufferFinished:
+        case .readyToPlay:
             spinner.stopAnimating()
-            updateTrackMenus()
+            refreshTrackMenus()
+            subtitles.playerBecameReady(layer)
+            tabs.setChapters(layer.player.chapters)
+        case .bufferFinished:
+            spinner.stopAnimating()
+            refreshTrackMenus()
         case .buffering, .preparing, .initialized:
             spinner.startAnimating()
         case .error:
@@ -707,9 +1480,14 @@ extension PlayerViewController: KSPlayerLayerDelegate {
     }
 
     func player(layer: KSPlayerLayer, currentTime: TimeInterval, totalTime: TimeInterval) {
+        // Altyazı kontrollerden bağımsız: sarma sırasında ve arayüz kapalıyken
+        // de akmaya devam ediyor.
+        subtitles.update(currentTime: currentTime)
+
         guard !isScrubbing else { return }
         self.currentTime = currentTime
         duration = totalTime.isFinite && totalTime > 0 ? totalTime : 0
+        tabs.currentTime = currentTime
 
         // Uygulama sonlandırılırsa kaldığı yer kaybolmasın.
         if Date().timeIntervalSince(lastProgressSave) >= Self.progressSaveInterval {

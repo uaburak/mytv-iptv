@@ -1,26 +1,5 @@
 import UIKit
 
-/// `layerClass`'ı `CAGradientLayer` olan yerel UIKit gradient bileşeni.
-private final class HeroGradientView: UIView {
-    override class var layerClass: AnyClass { CAGradientLayer.self }
-    var gradientLayer: CAGradientLayer { layer as! CAGradientLayer }
-
-    var colors: [UIColor] = [] {
-        didSet { gradientLayer.colors = colors.map(\.cgColor) }
-    }
-
-    var locations: [NSNumber]? {
-        get { gradientLayer.locations }
-        set { gradientLayer.locations = newValue }
-    }
-
-    /// Varsayılan dikey; tvOS'ta soldan sağa karartma için yatay kullanılıyor.
-    func setDirection(start: CGPoint, end: CGPoint) {
-        gradientLayer.startPoint = start
-        gradientLayer.endPoint = end
-    }
-}
-
 /// Detay ekranının üst bloğu: arka plan görseli, üzerindeki karartma/blur
 /// katmanı ve içerik (logo ya da başlık, butonlar, künye satırı).
 ///
@@ -42,7 +21,6 @@ final class DetailHeroView: UIView {
     let genreLabel = UILabel()
     let plotLabel = UILabel()
     let metaLabel = UILabel()
-    let moreButton = UIButton(type: .system)
     let playButton = UIButton(configuration: .filled())
     let watchlistButton = UIButton(configuration: .filled())
     /// Favori yalnızca tvOS'ta burada; iOS'ta navigasyon çubuğunda duruyor.
@@ -206,9 +184,14 @@ final class DetailHeroView: UIView {
         genreLabel.textColor = UIColor.white.withAlphaComponent(0.85)
         genreLabel.textAlignment = .center
 
-        // Oynat butonu ikincillerden yazı kalınlığı ve genişlikle ayrışıyor;
-        // malzeme ikisinde de aynı tonsuz cam.
+        // tvOS'ta oynat butonu ikincillerden yazı kalınlığı ve genişlikle
+        // ayrışıyor; malzeme hepsinde aynı tonsuz cam. Telefonda ise cam
+        // buton görselin üstünde siliniyor — ana aksiyon dolu beyaz.
+        #if os(tvOS)
         var playConfig = UIButton.Configuration.appGlass(horizontalInset: 24, fontSize: 16)
+        #else
+        var playConfig = UIButton.Configuration.appProminent(horizontalInset: 24, fontSize: 16)
+        #endif
         playConfig.image = UIImage(systemName: "play.fill")
         playButton.configuration = playConfig
         playButton.addSpringPressFeedback()
@@ -256,16 +239,9 @@ final class DetailHeroView: UIView {
         plotLabel.textColor = UIColor.white.withAlphaComponent(0.92)
         plotLabel.numberOfLines = 2
         plotLabel.textAlignment = .center
-
-        var moreConfig = UIButton.Configuration.appGlass(
-            horizontalInset: 14, verticalInset: 7, fontSize: 12
-        )
-        moreConfig.title = L10n.more
-        moreConfig.image = UIImage(systemName: "chevron.down")
-        moreConfig.imagePlacement = .trailing
-        moreConfig.imagePadding = 6
-        moreButton.configuration = moreConfig
-        moreButton.addSpringPressFeedback(scale: 0.93)
+        // Özetin tamamını okumak için ayrı bir buton yok: metnin kendisine
+        // dokunmak açıp kapatıyor. Dokunmayı `DetailViewController` bağlıyor.
+        plotLabel.isUserInteractionEnabled = true
 
         metaLabel.font = .systemFont(ofSize: 13, weight: .medium)
         metaLabel.textColor = UIColor.white.withAlphaComponent(0.75)
@@ -291,11 +267,10 @@ final class DetailHeroView: UIView {
         genreLabel.font = .systemFont(ofSize: 24)
         metaLabel.font = .systemFont(ofSize: 22, weight: .medium)
         logoView.contentMode = .scaleAspectFit
-        moreButton.isHidden = true
         logoView.heightAnchor.constraint(lessThanOrEqualToConstant: 180).isActive = true
         #else
         contentStack.alignment = .center
-        [logoView, titleLabel, taglineLabel, genreLabel, buttonsGlass, plotLabel, moreButton, metaLabel]
+        [logoView, titleLabel, taglineLabel, genreLabel, buttonsGlass, plotLabel, metaLabel]
             .forEach(contentStack.addArrangedSubview)
         // Logo genişliği ekranı aşmasın, yüksekliği sınırlı kalsın.
         logoView.heightAnchor.constraint(lessThanOrEqualToConstant: 96).isActive = true
