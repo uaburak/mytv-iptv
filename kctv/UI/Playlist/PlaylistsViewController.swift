@@ -9,7 +9,7 @@ final class PlaylistsViewController: UIViewController {
     #else
     private let tableView = UITableView(frame: .zero, style: .grouped)
     #endif
-    private let emptyLabel = UILabel()
+    private var emptyState: EmptyStateView!
 
     init(model: AppModel) {
         self.model = model
@@ -21,7 +21,6 @@ final class PlaylistsViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = AppPalette.background
-        updateLocalizedTexts()
 
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             image: UIImage(systemName: "plus"),
@@ -41,12 +40,10 @@ final class PlaylistsViewController: UIViewController {
         installLongPressActions()
         #endif
 
-        emptyLabel.numberOfLines = 0
-        emptyLabel.textAlignment = .center
-        emptyLabel.textColor = AppPalette.secondaryText
-        emptyLabel.font = .systemFont(ofSize: 15)
-        emptyLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(emptyLabel)
+        emptyState = EmptyStateView.installed(in: view)
+        // Metinler boş durum görünümü kurulduktan sonra: başlık ve boş durum
+        // aynı yerden besleniyor.
+        updateLocalizedTexts()
 
         NSLayoutConstraint.activate([
             // Güvenli alana değil ekranın tepesine: içerik navigation bar'ın
@@ -57,10 +54,6 @@ final class PlaylistsViewController: UIViewController {
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-
-            emptyLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            emptyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            emptyLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 32),
         ])
 
         NotificationCenter.default.addObserver(
@@ -78,9 +71,16 @@ final class PlaylistsViewController: UIViewController {
 
     private func updateLocalizedTexts() {
         title = L10n.tabPlaylists
-        emptyLabel.text = AppLanguage.current.effectiveLanguageCode == "tr"
-            ? "Henüz bir listen yok.\nSağ üstteki artıdan ekleyebilirsin."
-            : "No playlists yet.\nTap plus icon to add one."
+        // Boş ekran yalnızca durumu anlatmıyor, çözümü de sunuyor: kullanıcı
+        // "sağ üstteki artı"yı aramak zorunda kalmadan listesini ekliyor.
+        emptyState?.configure(
+            symbol: "list.bullet.rectangle",
+            title: L10n.noPlaylistsTitle,
+            message: L10n.noPlaylistsSubtitle,
+            actionTitle: L10n.addPlaylist
+        ) { [weak self] in
+            self?.addPlaylist()
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -89,7 +89,7 @@ final class PlaylistsViewController: UIViewController {
     }
 
     private func reload() {
-        emptyLabel.isHidden = !model.playlists.playlists.isEmpty
+        emptyState.isHidden = !model.playlists.playlists.isEmpty
         tableView.reloadData()
     }
 
@@ -135,15 +135,15 @@ final class PlaylistsViewController: UIViewController {
 
     @objc private func addPlaylist() {
         present(
-            UINavigationController(rootViewController: AddPlaylistViewController(model: model)),
+            UINavigationController.app(root: AddPlaylistViewController(model: model)),
             animated: true
         )
     }
 
     private func edit(_ playlist: Playlist) {
         present(
-            UINavigationController(
-                rootViewController: AddPlaylistViewController(model: model, editing: playlist)
+            UINavigationController.app(
+                root: AddPlaylistViewController(model: model, editing: playlist)
             ),
             animated: true
         )
@@ -157,9 +157,18 @@ extension PlaylistsViewController: UITableViewDataSource, UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         guard !model.playlists.playlists.isEmpty else { return nil }
-        return AppLanguage.current.effectiveLanguageCode == "tr"
+        // Yönerge platforma göre değişiyor: tvOS'ta kaydırma diye bir
+        // etkileşim yok, düzenleme ve silme odaklı satıra uzun basınca açılıyor.
+        let isTurkish = AppLanguage.current.effectiveLanguageCode == "tr"
+        #if os(tvOS)
+        return isTurkish
+            ? "Seçili listeyi değiştirmek için üstüne bas. Düzenlemek ya da silmek için basılı tut."
+            : "Press to select the active playlist. Press and hold to edit or delete."
+        #else
+        return isTurkish
             ? "Seçili listeyi değiştirmek için üstüne dokun. Düzenlemek ya da silmek için sola kaydır."
             : "Tap to select active playlist. Swipe left to edit or delete."
+        #endif
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {

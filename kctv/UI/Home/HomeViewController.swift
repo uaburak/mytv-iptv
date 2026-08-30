@@ -21,9 +21,8 @@ final class HomeViewController: UIViewController {
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private let spinner = UIActivityIndicatorView(style: .large)
     /// Liste yüklenemediğinde gösterilen açıklama ve yeniden deneme.
-    private let statusStack = UIStackView()
-    private let statusLabel = UILabel()
-    private let retryButton = UIButton(configuration: .appGlass())
+    /// Boş durum görünümü uygulamanın her ekranında ortak.
+    private var statusView: EmptyStateView!
 
     /// Ekrandaki banner. Otomatik geçişi hücre kendisi yürütüyor; burada
     /// yalnızca ekran arkaya düşünce durdurulup geri gelince sürdürülüyor.
@@ -154,22 +153,7 @@ final class HomeViewController: UIViewController {
         spinner.color = .white
         view.addSubview(spinner)
 
-        statusLabel.textColor = AppPalette.secondaryText
-        statusLabel.textAlignment = .center
-        statusLabel.numberOfLines = 0
-        retryButton.configuration?.title = L10n.retry
-        retryButton.addSpringPressFeedback()
-        retryButton.addAction(UIAction { [weak self] _ in
-            Task { await self?.model.library.reload(force: true) }
-        }, for: .primaryActionTriggered)
-
-        statusStack.axis = .vertical
-        statusStack.spacing = 16
-        statusStack.alignment = .center
-        statusStack.isHidden = true
-        statusStack.translatesAutoresizingMaskIntoConstraints = false
-        [statusLabel, retryButton].forEach(statusStack.addArrangedSubview)
-        view.addSubview(statusStack)
+        statusView = EmptyStateView.installed(in: view)
 
         NSLayoutConstraint.activate([
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -179,12 +163,6 @@ final class HomeViewController: UIViewController {
 
             spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-
-            statusStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            statusStack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            statusStack.leadingAnchor.constraint(
-                greaterThanOrEqualTo: view.leadingAnchor, constant: 40
-            ),
         ])
     }
 
@@ -457,6 +435,11 @@ final class HomeViewController: UIViewController {
             )
         }
 
+        // Ana kartlar yalnızca telefon ve tablette. Apple TV'de "Canlı / Film
+        // / Dizi" kenar çubuğunda duruyor ve her ekrandan bir tuş uzakta;
+        // anasayfada ikinci kez göstermek hem yer kaplıyor hem de kullanıcıyı
+        // aynı yere iki ayrı yoldan götürüyordu.
+        #if os(iOS)
         snapshot.appendSections([.mainCards])
         let mainCards = MediaKind.allCases.map(Item.mainCard)
         snapshot.appendItems(mainCards, toSection: .mainCards)
@@ -468,6 +451,7 @@ final class HomeViewController: UIViewController {
         if !refreshable.isEmpty {
             snapshot.reconfigureItems(refreshable)
         }
+        #endif
 
         // İzleme listesi: detaydaki "+" ile eklenen içerikler. Kimlik olarak
         // saklandığı için katalogdan çözülüyor; karşılığı kalmayanlar
@@ -498,18 +482,30 @@ final class HomeViewController: UIViewController {
 
         dataSource.apply(snapshot, animatingDifferences: animated)
 
-        // Ana kartlar her zaman var; onlardan başka bir şey yoksa içerik boş.
+        // Ana kartlar dışında hiçbir şey yoksa içerik boş. Apple TV'de kart da
+        // olmadığı için ölçü orada doğrudan sıfır.
+        #if os(iOS)
         let isEmpty = snapshot.numberOfItems == MediaKind.allCases.count
+        #else
+        let isEmpty = snapshot.numberOfItems == 0
+        #endif
         var didFail = false
         if case .failed = model.library.state { didFail = true }
 
         // Yükleme başarısızsa ekran sessizce boş kalmıyor: sebep yazılıyor ve
         // yeniden denemek için bir yol sunuluyor.
         if case let .failed(message) = model.library.state, isEmpty {
-            statusLabel.text = "\(L10n.libraryLoadFailed)\n\(message)"
-            statusStack.isHidden = false
+            statusView.configure(
+                symbol: "exclamationmark.triangle",
+                title: L10n.libraryLoadFailed,
+                message: message,
+                actionTitle: L10n.retry
+            ) { [weak self] in
+                Task { await self?.model.library.reload(force: true) }
+            }
+            statusView.isHidden = false
         } else {
-            statusStack.isHidden = true
+            statusView.isHidden = true
         }
 
         // Liste gelene kadar sayfa boş değil, kapalı duruyor: bölümler tek tek
@@ -539,7 +535,7 @@ final class HomeViewController: UIViewController {
 
     @objc private func openSettings() {
         let controller = SettingsViewController(model: model)
-        present(UINavigationController(rootViewController: controller), animated: true)
+        present(UINavigationController.app(root: controller), animated: true)
     }
 
     private func openDetail(_ item: MediaItem, sourceView: UIView? = nil) {

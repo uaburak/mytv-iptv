@@ -413,6 +413,20 @@ final class ContentLibrary {
         return itemsByCategory[kind]?[categoryID] ?? []
     }
 
+    /// Canlı kanallar, IPTV kullanıcısının beklediği sırayla: kanal numarası,
+    /// numarası olmayanlar alfabetik olarak sona. Rehber de oynatıcının kanal
+    /// çekmecesi de aynı sırayı gösteriyor.
+    func liveChannels() -> [MediaItem] {
+        items(kind: .live, categoryID: nil).sorted { first, second in
+            switch (first.channelNumber, second.channelNumber) {
+            case let (lhs?, rhs?): lhs < rhs
+            case (.some, .none): true
+            case (.none, .some): false
+            case (.none, .none): first.title.localizedCaseInsensitiveCompare(second.title) == .orderedAscending
+            }
+        }
+    }
+
     /// TMDB'den asenkron çekilen koleksiyon parçalarını kullanıcının kataloğuyla eşleştirir.
     func matchFranchiseEntries(parts: [TMDBCollectionPart], for item: MediaItem) -> [FranchiseEntry] {
         guard item.kind == .movie, !parts.isEmpty else { return [] }

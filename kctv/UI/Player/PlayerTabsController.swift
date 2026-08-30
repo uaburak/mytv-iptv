@@ -11,6 +11,10 @@ import UIKit
 /// Veri uygulamanın kendi katalogundan geliyor; yalnızca "Bölümler" iki
 /// kaynaklı: dizide gerçek bölümler, filmde dosyanın kendi bölüm işaretleri
 /// (`player.chapters`). İkisi de yoksa çip hiç görünmüyor.
+///
+/// Canlı yayında iki sekme de yok: kanalın anlatacak künyesi, bölümü ya da
+/// baştan oynatılacak bir başı yok. Solda "Bilgi"nin yerini
+/// `PlayerChannelsController`'ın "Kanallar" çipi alıyor.
 @MainActor
 final class PlayerTabsController {
     enum Tab: CaseIterable {
@@ -175,7 +179,9 @@ final class PlayerTabsController {
 
     private func availableTabs() -> [Tab] {
         var tabs: [Tab] = []
-        if item != nil { tabs.append(.info) }
+        // Canlıda "Bilgi" yok: paneldeki künye de "baştan oynat" da kanalda
+        // karşılıksız kalıyor.
+        if item != nil, context?.isLive != true { tabs.append(.info) }
         if !episodes.isEmpty || !chapters.isEmpty { tabs.append(.episodes) }
         return tabs
     }

@@ -493,10 +493,9 @@ final class DetailViewController: UIViewController {
     }
 
     /// Sezon çipleri arama ekranındaki süzgeç düğmeleriyle aynı görünüyor;
-    /// stil `UIButton.Configuration.appChip` içinde, tek yerde.
+    /// hem stil hem ölçü `UIButton.Configuration.appChip` içinde, tek yerde.
     private func applySeasonChipStyle(to button: UIButton, isSelected: Bool) {
         let title = button.configuration?.title
-        // Oynat butonuyla aynı ölçü; boyu da ona kısıtlanıyor.
         button.configuration = .appChip(isSelected: isSelected)
         button.configuration?.title = title
     }

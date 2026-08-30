@@ -13,6 +13,17 @@ final class RemoteImageView: UIView {
     /// Görselin ekranda kaplayacağı yaklaşık genişlik (punto).
     var displayWidth: CGFloat = 200
 
+    /// Görselin sığdırılma kuralı (`.scaleAspectFill` varsayılan, `.scaleAspectFit` oran koruyan logolar için).
+    var imageContentMode: UIView.ContentMode {
+        get { imageView.contentMode }
+        set { imageView.contentMode = newValue }
+    }
+
+    /// Arka planda degrade yer tutucunun gösterilip gösterilmeyeceği.
+    var showsPlaceholderBackground: Bool = true {
+        didSet { gradientLayer.isHidden = !showsPlaceholderBackground }
+    }
+
     /// Odaktaki büyüme payı; kartların ölçek katsayısıyla aynı.
     private static let focusHeadroom: CGFloat = 1.1
 
@@ -141,6 +152,12 @@ final class RemoteImageView: UIView {
     /// Başlıktan türetilen sabit renk. `hashValue` her süreçte değiştiği için
     /// kullanılmıyor; bu toplama her açılışta aynı sonucu veriyor.
     private func applyPlaceholder(title: String) {
+        guard showsPlaceholderBackground else {
+            gradientLayer.isHidden = true
+            initialsLabel.text = ""
+            return
+        }
+        gradientLayer.isHidden = false
         guard showsInitials else {
             initialsLabel.text = ""
             gradientLayer.colors = [

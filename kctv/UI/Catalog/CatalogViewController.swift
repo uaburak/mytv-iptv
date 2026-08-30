@@ -20,6 +20,7 @@ final class CatalogViewController: UIViewController {
     /// Tek seferde çizilen satır sayısı; katalogda 14 binden fazla kayıt olabiliyor.
     private var visibleCount = pageSize
     private static let pageSize = 120
+    private static let categoryBarHeight: CGFloat = AppChipSize.regular.height + 12
     private static let categoryBarTopSpacing: CGFloat = 8
     private static let categoryBarBottomSpacing: CGFloat = 4
     /// tvOS'ta odaklanan kart büyüyor; ilk satır navigasyon çubuğunun altında
@@ -35,7 +36,7 @@ final class CatalogViewController: UIViewController {
     private let categoryBar = UIScrollView()
     private let categoryStack = UIStackView()
     private var collectionView: UICollectionView!
-    private let emptyLabel = UILabel()
+    private var emptyState: EmptyStateView!
 
     /// Varsayılan görünüm poster kart.
     private var displayMode: CatalogItemCell.DisplayMode = .grid
@@ -280,6 +281,9 @@ final class CatalogViewController: UIViewController {
 
     private func buildLayout() {
         categoryStack.axis = .horizontal
+        // Çipler kendi doğal boylarında kalıyor: şerit onlardan yüksek ve
+        // hizalama gerdirmeden ortalıyor.
+        categoryStack.alignment = .center
         categoryStack.spacing = 10
         categoryStack.translatesAutoresizingMaskIntoConstraints = false
         categoryBar.addSubview(categoryStack)
@@ -320,7 +324,9 @@ final class CatalogViewController: UIViewController {
             ),
             categoryBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             categoryBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            categoryBar.heightAnchor.constraint(equalToConstant: 44),
+            // Şerit ortak çip ölçüsünden çıkıyor; tvOS'ta çipler 44pt'lik
+            // bir şeride sığmıyordu.
+            categoryBar.heightAnchor.constraint(equalToConstant: Self.categoryBarHeight),
 
             categoryStack.topAnchor.constraint(equalTo: categoryBar.contentLayoutGuide.topAnchor),
             categoryStack.bottomAnchor.constraint(equalTo: categoryBar.contentLayoutGuide.bottomAnchor),
@@ -338,18 +344,8 @@ final class CatalogViewController: UIViewController {
             collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
 
-        emptyLabel.text = L10n.categoryEmpty
-        emptyLabel.textColor = AppPalette.secondaryText
-        emptyLabel.textAlignment = .center
-        emptyLabel.numberOfLines = 0
-        emptyLabel.isHidden = true
-        emptyLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(emptyLabel)
-        NSLayoutConstraint.activate([
-            emptyLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            emptyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            emptyLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 40),
-        ])
+        emptyState = EmptyStateView.installed(in: view)
+        emptyState.configure(symbol: "tray", title: L10n.categoryEmpty)
 
         // Şerit listenin üstünde kalmalı; ikisi de `view`'ın alt görünümü.
         view.bringSubviewToFront(categoryBar)
@@ -394,17 +390,7 @@ final class CatalogViewController: UIViewController {
         // okunur bırakıyor hem de listeden ayrışmasını sağlıyor. Stil arama
         // ekranındaki süzgeç ve detaydaki sezon çipleriyle ortak: seçili olan
         // beyaz zemin + siyah metin.
-        #if os(tvOS)
-        var configuration = UIButton.Configuration.appChip(
-            isSelected: selectedCategoryID == id,
-            horizontalInset: 34, verticalInset: 18, fontSize: 26
-        )
-        #else
-        var configuration = UIButton.Configuration.appChip(
-            isSelected: selectedCategoryID == id,
-            horizontalInset: 16, verticalInset: 8, fontSize: 14
-        )
-        #endif
+        var configuration = UIButton.Configuration.appChip(isSelected: selectedCategoryID == id)
         configuration.title = title
 
         let button = UIButton(configuration: configuration)
@@ -423,7 +409,8 @@ final class CatalogViewController: UIViewController {
         items = fixedItems ?? model.library.items(kind: kind, categoryID: selectedCategoryID)
         collectionView.reloadData()
         // Kategoride içerik yoksa ekran tamamen boş kalmasın.
-        emptyLabel.isHidden = !items.isEmpty
+        emptyState.configure(symbol: "tray", title: L10n.categoryEmpty)
+        emptyState.isHidden = !items.isEmpty
     }
 
     private var visibleItems: ArraySlice<MediaItem> {

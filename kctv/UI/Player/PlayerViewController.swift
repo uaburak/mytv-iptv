@@ -291,6 +291,12 @@ final class PlayerFocusSentinel: UIView {
 ///
 /// Sütun alta bağlı: bir sekme açıldığında panel en alta ekleniyor ve
 /// üstündeki her şey olduğu gibi yukarı kayıyor. Hiçbir satır gizlenmiyor.
+///
+/// Canlıda satırlar değişiyor: ilerleme yerine "CANLI" rozeti, sarma
+/// butonları olmadan tek bir oynat/duraklat ve soldaki ⟨i⟩ yerine
+/// [Kanallar] çipi. Kanal listesi alta değil sola açılıyor
+/// (`PlayerChannelsController`): ekranın sol kenarına sıfır oturan bir
+/// yüzey ve sütunun tamamı onun genişliği kadar sağa kayıyor.
 final class PlayerViewController: UIViewController {
     /// Bölüm geçişinde yerine sıradakinin bağlamı konuyor.
     private var context: PlaybackContext
@@ -313,6 +319,7 @@ final class PlayerViewController: UIViewController {
     private let infoLabel = UILabel()
 
     private let aspectButton = UIButton()
+    private let addToListButton = UIButton()
     private let audioTracksButton = UIButton()
     private let subtitlesButton = UIButton()
 
@@ -331,9 +338,15 @@ final class PlayerViewController: UIViewController {
     private let subtitleOverlay = SubtitleOverlayView()
     private lazy var subtitles = PlayerSubtitleController(overlay: subtitleOverlay)
     private let tabs = PlayerTabsController()
+    /// Canlı yayında "Bilgi"nin yerini alan kanal çekmecesi.
+    private let channels = PlayerChannelsController()
 
     /// Alt sütunun tamamı. Altyazının ne kadar yükseleceği buradan ölçülüyor.
     private let bottomStack = UIStackView()
+    /// Kanal çekmecesi açılınca künye/denetim sütunu ve altyazı onun genişliği
+    /// kadar sağa kayıyor; kayma bu iki kısıtın sabitinden geliyor.
+    private var bottomStackLeading: NSLayoutConstraint!
+    private var subtitleLeading: NSLayoutConstraint!
     /// Çipler, transport ve simge butonlarının bulunduğu satır. Aşağı tuşunun
     /// ne yapacağı odağın burada olup olmamasına bakıyor.
     private let controlRow = UIView()
@@ -343,6 +356,10 @@ final class PlayerViewController: UIViewController {
     #if os(iOS)
     private let closeButton = UIButton()
     private let topScrim = HeroGradientView()
+    /// Kanal çekmecesini geldiği yöne kaydırıp kapatan jest. Listenin
+    /// üstünde de çalışması gerekiyor, bu yüzden dokunuş süzgecinde ayrı
+    /// tutuluyor.
+    private weak var drawerDismissSwipe: UISwipeGestureRecognizer?
     #endif
 
     // MARK: - Durum
@@ -406,6 +423,9 @@ final class PlayerViewController: UIViewController {
     private static let chipInset: CGFloat = 26
     private static let chipVerticalInset: CGFloat = 15
     private static let chipFontSize: CGFloat = 26
+    /// Denetim satırının sığdığı en dar genişlik: kanal listesi sütunu ancak
+    /// geriye bu kadarı kalıyorsa itiyor.
+    private static let minControlsWidth: CGFloat = 900
     #else
     private static let edgeInset: CGFloat = 20
     private static let iconInset: CGFloat = 11
@@ -418,6 +438,7 @@ final class PlayerViewController: UIViewController {
     private static let chipInset: CGFloat = 16
     private static let chipVerticalInset: CGFloat = 10
     private static let chipFontSize: CGFloat = 15
+    private static let minControlsWidth: CGFloat = 360
     #endif
 
     init(context: PlaybackContext, model: AppModel) {
@@ -441,6 +462,7 @@ final class PlayerViewController: UIViewController {
         buildControls()
         wireMenus()
         wireTabs()
+        wireChannels()
         startPlayback()
         scheduleControlsHide()
 
@@ -461,6 +483,13 @@ final class PlayerViewController: UIViewController {
         down.direction = .down
         down.delegate = self
         view.addGestureRecognizer(down)
+
+        // Çekmece geldiği yöne kaydırılınca kapanıyor.
+        let left = UISwipeGestureRecognizer(target: self, action: #selector(swipedLeft))
+        left.direction = .left
+        left.delegate = self
+        view.addGestureRecognizer(left)
+        drawerDismissSwipe = left
         #endif
 
         #if os(tvOS)
@@ -498,6 +527,7 @@ final class PlayerViewController: UIViewController {
 
         if context.isLive {
             loadLiveEPG()
+            updateAddToListButton()
         }
         refreshNextEpisode()
     }
@@ -580,6 +610,11 @@ final class PlayerViewController: UIViewController {
 
         startPlayback()
         refreshNextEpisode()
+        // Kanal değişti: künyenin ince satırındaki anlık program da değişiyor.
+        if context.isLive {
+            loadLiveEPG()
+            updateAddToListButton()
+        }
         showControls()
     }
 
@@ -591,6 +626,7 @@ final class PlayerViewController: UIViewController {
     /// inmiyor, kullanıcı aşağı basınca iniyor.
     override var preferredFocusEnvironments: [UIFocusEnvironment] {
         if let pendingFocusTarget { return [pendingFocusTarget] }
+        if channels.isOpen { return channels.focusEnvironments }
         return tabs.isPanelOpen ? tabs.focusEnvironments : [playPauseButton]
     }
 
@@ -625,6 +661,10 @@ final class PlayerViewController: UIViewController {
 
             case .upArrow:
                 guard !isControlsVisible else {
+                    if channels.isOpen {
+                        channels.close()
+                        return
+                    }
                     if tabs.isPanelOpen {
                         tabs.close()
                         setNeedsFocusUpdate()
@@ -677,6 +717,7 @@ final class PlayerViewController: UIViewController {
 
         subtitles.prepare(url: context.url)
         tabs.configure(context: context, model: model)
+        channels.configure(context: context, model: model)
 
         let layer = KSPlayerLayer(url: context.url, options: options, delegate: self)
         playerLayer = layer
@@ -789,6 +830,9 @@ final class PlayerViewController: UIViewController {
         style(aspectButton, symbol: "arrow.up.left.and.arrow.down.right", accessibility: L10n.aspectFill)
         aspectButton.addTarget(self, action: #selector(toggleAspect), for: .primaryActionTriggered)
 
+        style(addToListButton, symbol: "bookmark", accessibility: L10n.addToList)
+        addToListButton.addTarget(self, action: #selector(toggleAddToList), for: .primaryActionTriggered)
+
         style(audioTracksButton, symbol: "waveform", accessibility: L10n.audioTracks)
         audioTracksButton.showsMenuAsPrimaryAction = true
         audioTracksButton.isHidden = true
@@ -895,13 +939,24 @@ final class PlayerViewController: UIViewController {
 
         // Yan yana duran cam butonlar tek bir cam yüzeyde; birbirlerine
         // yaklaştıklarında malzeme akışkan biçimde birleşiyor.
-        let leadingRow = UIStackView(arrangedSubviews: [tabs.infoChip, subtitlesButton, audioTracksButton])
+        //
+        // Canlıda soldaki ilk çip "Bilgi" değil "Kanallar": kanalda gösterilecek
+        // künye yok, geçilecek kanal çok.
+        let leadingRow = UIStackView(
+            arrangedSubviews: context.isLive
+                ? [channels.chip, subtitlesButton, audioTracksButton]
+                : [tabs.infoChip, subtitlesButton, audioTracksButton]
+        )
         leadingRow.axis = .horizontal
         leadingRow.spacing = 8
         leadingRow.alignment = .center
         let leadingGlass = UIView.glassContainer(wrapping: leadingRow, spacing: 8)
 
-        let trailingRow = UIStackView(arrangedSubviews: [tabs.episodesChip, aspectButton])
+        let trailingRow = UIStackView(
+            arrangedSubviews: context.isLive
+                ? [addToListButton, aspectButton]
+                : [tabs.episodesChip, aspectButton]
+        )
         trailingRow.axis = .horizontal
         trailingRow.spacing = 8
         trailingRow.alignment = .center
@@ -953,20 +1008,36 @@ final class PlayerViewController: UIViewController {
 
         #if os(tvOS)
         // Yığına konmuyor: yığının boşluğu görünür bir aralık açardı. Görünmez
-        // ve bir punto yüksekliğinde, yalnızca odak için var.
-        focusSentinel.translatesAutoresizingMaskIntoConstraints = false
-        focusSentinel.onFocus = { [weak self] in
-            guard let self, !tabs.isPanelOpen else { return }
-            tabs.open(.info)
+        // ve bir punto yüksekliğinde, yalnızca odak için var. Canlıda açılacak
+        // bir panel olmadığı için hiç kurulmuyor: odağı yutup boşluğa
+        // götürürdü.
+        if !context.isLive {
+            focusSentinel.translatesAutoresizingMaskIntoConstraints = false
+            focusSentinel.onFocus = { [weak self] in
+                guard let self, !tabs.isPanelOpen else { return }
+                tabs.open(.info)
+            }
+            controlsView.addSubview(focusSentinel)
+            NSLayoutConstraint.activate([
+                focusSentinel.topAnchor.constraint(equalTo: controlRow.bottomAnchor),
+                focusSentinel.leadingAnchor.constraint(equalTo: controlRow.leadingAnchor),
+                focusSentinel.trailingAnchor.constraint(equalTo: controlRow.trailingAnchor),
+                focusSentinel.heightAnchor.constraint(equalToConstant: 1),
+            ])
         }
-        controlsView.addSubview(focusSentinel)
-        NSLayoutConstraint.activate([
-            focusSentinel.topAnchor.constraint(equalTo: controlRow.bottomAnchor),
-            focusSentinel.leadingAnchor.constraint(equalTo: controlRow.leadingAnchor),
-            focusSentinel.trailingAnchor.constraint(equalTo: controlRow.trailingAnchor),
-            focusSentinel.heightAnchor.constraint(equalToConstant: 1),
-        ])
         #endif
+
+        // Kanal çekmecesi ekranın sol 1/4'ünü kaplar: tam 4'te 1 oranında.
+        if context.isLive {
+            channels.drawer.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(channels.drawer)
+            NSLayoutConstraint.activate([
+                channels.drawer.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.25),
+                channels.drawer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                channels.drawer.topAnchor.constraint(equalTo: view.topAnchor),
+                channels.drawer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            ])
+        }
 
         spinner.translatesAutoresizingMaskIntoConstraints = false
         spinner.color = .white
@@ -974,10 +1045,14 @@ final class PlayerViewController: UIViewController {
         view.addSubview(spinner)
 
         let inset = Self.edgeInset
+        subtitleLeading = subtitleOverlay.leadingAnchor.constraint(equalTo: view.leadingAnchor)
+        bottomStackLeading = bottomStack.leadingAnchor.constraint(
+            equalTo: controlsView.safeAreaLayoutGuide.leadingAnchor, constant: inset
+        )
         NSLayoutConstraint.activate([
             subtitleOverlay.topAnchor.constraint(equalTo: view.topAnchor),
             subtitleOverlay.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
-            subtitleOverlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            subtitleLeading,
             subtitleOverlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 
             controlsView.topAnchor.constraint(equalTo: view.topAnchor),
@@ -990,7 +1065,7 @@ final class PlayerViewController: UIViewController {
             bottomScrim.bottomAnchor.constraint(equalTo: controlsView.bottomAnchor),
             bottomScrim.topAnchor.constraint(equalTo: bottomStack.topAnchor, constant: -inset * 2),
 
-            bottomStack.leadingAnchor.constraint(equalTo: controlsView.safeAreaLayoutGuide.leadingAnchor, constant: inset),
+            bottomStackLeading,
             bottomStack.trailingAnchor.constraint(equalTo: controlsView.safeAreaLayoutGuide.trailingAnchor, constant: -inset),
             bottomStack.bottomAnchor.constraint(equalTo: controlsView.safeAreaLayoutGuide.bottomAnchor, constant: -inset),
 
@@ -1098,16 +1173,88 @@ final class PlayerViewController: UIViewController {
         }
     }
 
+    // MARK: - Kanal çekmecesi
+
+    private func wireChannels() {
+        channels.styleChip = { [weak self] button, isSelected in
+            self?.styleChannelsChip(button, isSelected: isSelected)
+        }
+        channels.onVisibilityChanged = { [weak self] isOpen in
+            guard let self else { return }
+            // Künye, ilerleme satırı ve denetimler listenin genişliği kadar
+            // sağa kayıyor — liste videonun üstünü örtmüyor, ekranı bölüyor.
+            // Yalnızca sabitler değişiyor: yerleşimi çekmece kendi
+            // animasyonunun içinde yürütüyor, ikisi tek eğride ilerlesin.
+            // Dar ekranda (telefon dikeyken) itecek yer yok: orada liste
+            // denetimlerin üstüne biniyor, sütun yerinde kalıyor.
+            let drawerWidth = channels.drawer.bounds.width
+            let canPush = view.bounds.width - drawerWidth >= Self.minControlsWidth
+            let shift = isOpen && canPush ? drawerWidth : 0
+            // Çekmece ekranın kenarına sıfır oturuyor, alt sütun ise güvenli
+            // alandan başlıyor; kayma ikisinin farkı kadar.
+            bottomStackLeading.constant = Self.edgeInset + max(0, shift - view.safeAreaInsets.left)
+            subtitleLeading.constant = shift
+
+            // Kullanıcı listeye bakıyor olabilir; kontroller kendiliğinden
+            // gizlenmiyor.
+            if isOpen {
+                hideControlsWork?.cancel()
+            } else {
+                scheduleControlsHide()
+            }
+            #if os(tvOS)
+            // Açılırken odak listeye iniyor; kapanırken çipte kalıyor.
+            setNeedsFocusUpdate()
+            updateFocusIfNeeded()
+            #endif
+        }
+        // Kanal geçişinde oynatıcı kapanıp yeniden açılmıyor; bölüm
+        // geçişindeki gibi aynı ekranda katman değişiyor.
+        channels.onSelect = { [weak self] channel in
+            Task { [weak self] in
+                guard let self else { return }
+                guard let newContext = try? await model.library.playback(for: channel) else { return }
+                await MainActor.run { self.restart(with: newContext) }
+            }
+        }
+        channels.onOpenListEditor = { [weak self] in
+            guard let self else { return }
+            let editor = PlayerListEditorViewController(model: self.model)
+            editor.onSave = { [weak self] in
+                self?.channels.refreshListemData()
+                self?.updateAddToListButton()
+            }
+            let nav = UINavigationController.app(root: editor)
+            self.present(nav, animated: true)
+        }
+    }
+
+    /// "Kanallar" çipi "Bölümler" ile aynı: yazılı ve seçiliyken dolu beyaz.
+    /// İkisi denetim satırının iki ucunda simetrik duruyor.
+    private func styleChannelsChip(_ button: UIButton, isSelected: Bool) {
+        var config = UIButton.Configuration.appChip(
+            isSelected: isSelected,
+            horizontalInset: Self.chipInset,
+            verticalInset: Self.chipVerticalInset,
+            fontSize: Self.chipFontSize
+        )
+        config.title = L10n.channels
+        button.configuration = config
+        button.accessibilityLabel = L10n.channels
+    }
+
     /// Çipler yanlarındaki simge butonlarıyla aynı boyda: "Bilgi" yalnızca
     /// simge, "Bölümler" yazılı. Seçili çip dolu beyaz — `appChip`'in her
     /// yerdeki davranışı.
     private func styleChip(_ button: UIButton, tab: PlayerTabsController.Tab, isSelected: Bool) {
         switch tab {
         case .info:
+            // Simge butonunda yazı yok; punto yalnızca imza gereği veriliyor.
             var config = UIButton.Configuration.appChip(
                 isSelected: isSelected,
                 horizontalInset: Self.iconInset,
-                verticalInset: Self.iconInset
+                verticalInset: Self.iconInset,
+                fontSize: Self.chipFontSize
             )
             config.image = UIImage(systemName: "info.circle")
             config.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
@@ -1181,6 +1328,33 @@ final class PlayerViewController: UIViewController {
         isPlaying ? playerLayer?.play() : playerLayer?.pause()
         playPauseButton.setSymbol(isPlaying ? "pause.fill" : "play.fill")
         isPlaying ? scheduleControlsHide() : showControls()
+    }
+
+    private var currentMediaItem: MediaItem? {
+        guard let decoded = AppModel.decode(contextID: context.id) else { return nil }
+        return model.library.item(for: decoded.mediaID)
+    }
+
+    private func updateAddToListButton() {
+        guard context.isLive, let current = currentMediaItem else {
+            addToListButton.isHidden = true
+            return
+        }
+        addToListButton.isHidden = false
+        let isSaved = model.activity.isFavorite(current)
+        addToListButton.setSymbol(isSaved ? "bookmark.fill" : "bookmark")
+        addToListButton.accessibilityLabel = isSaved ? L10n.removeFromList : L10n.addToList
+    }
+
+    @objc private func toggleAddToList() {
+        guard let current = currentMediaItem else { return }
+        model.activity.toggleFavorite(current)
+        updateAddToListButton()
+        channels.refreshListemData()
+        #if os(iOS)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        #endif
+        showControls()
     }
 
     /// Sığdır ↔ doldur. Simge yapılacak işi gösteriyor: sığdırılmışken
@@ -1327,6 +1501,13 @@ final class PlayerViewController: UIViewController {
         tabs.open(.info)
     }
 
+    #if os(iOS)
+    /// Sola kaydırmak açık kanal çekmecesini kapatıyor.
+    @objc private func swipedLeft() {
+        channels.close()
+    }
+    #endif
+
     /// Yukarı kaydırmak veya yukarı tuşuna basmak açık olan bilgi panelini kapatıyor.
     @objc private func swipedUp() {
         guard tabs.isPanelOpen else { return }
@@ -1351,6 +1532,10 @@ final class PlayerViewController: UIViewController {
     @objc private func menuPressed() {
         if slider.isScrubbingActive {
             slider.cancelScrubbing()
+        } else if channels.isOpen {
+            if !channels.handleBack() {
+                channels.close()
+            }
         } else if tabs.isPanelOpen {
             tabs.close()
         } else if isControlsVisible {
@@ -1399,9 +1584,13 @@ final class PlayerViewController: UIViewController {
     }
 
     private func hideControls() {
-        // Açık bir sekme paneli varken dokunuş arayüzü kapatmıyor; önce panel
-        // kapanıyor.
+        // Açık bir sekme paneli ya da kanal çekmecesi varken dokunuş arayüzü
+        // kapatmıyor; önce onlar kapanıyor.
         guard !isScrubbing else { return }
+        if channels.isOpen {
+            channels.close()
+            return
+        }
         if tabs.isPanelOpen {
             tabs.close()
             return
@@ -1432,13 +1621,14 @@ final class PlayerViewController: UIViewController {
         #endif
     }
 
-    /// Bir sekme paneli açıkken kontroller kendiliğinden gizlenmiyor:
-    /// kullanıcı listeye bakıyor olabilir.
+    /// Bir sekme paneli ya da kanal çekmecesi açıkken kontroller kendiliğinden
+    /// gizlenmiyor: kullanıcı listeye bakıyor olabilir.
     private func scheduleControlsHide() {
         hideControlsWork?.cancel()
-        guard !tabs.isPanelOpen else { return }
+        guard !tabs.isPanelOpen, !channels.isOpen else { return }
         let work = DispatchWorkItem { [weak self] in
-            guard let self, self.isPlaying, !self.isScrubbing, !self.tabs.isPanelOpen else { return }
+            guard let self, self.isPlaying, !self.isScrubbing,
+                  !self.tabs.isPanelOpen, !self.channels.isOpen else { return }
             setControlsVisible(false, duration: 0.25)
         }
         hideControlsWork = work
@@ -1463,6 +1653,9 @@ extension PlayerViewController: UIGestureRecognizerDelegate {
     /// aşağı inmek denetim satırına geçmek demek.
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         #if os(tvOS)
+        // Çekmece açıkken kaydırma odak gezinmesinin ve listenin kendi
+        // kaydırmasının işi; ekran jestleri araya girmemeli.
+        if channels.isOpen { return false }
         if revealSwipes.contains(where: { $0 === gestureRecognizer }) {
             return !isControlsVisible
         }
@@ -1484,7 +1677,14 @@ extension PlayerViewController: UIGestureRecognizerDelegate {
         if touch.view is UIControl || touch.view?.superview is UIControl {
             return false
         }
-        if let touched = touch.view, touched.isDescendant(of: tabs.panel) {
+        if let touched = touch.view,
+           touched.isDescendant(of: tabs.panel) || touched.isDescendant(of: channels.drawer)
+        {
+            #if os(iOS)
+            // Kapatma jesti çekmecenin kendi üstünde de çalışıyor; listenin
+            // dikey kaydırmasıyla çakışmıyor.
+            if gestureRecognizer === drawerDismissSwipe { return channels.isOpen }
+            #endif
             return false
         }
         return true

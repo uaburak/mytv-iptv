@@ -116,6 +116,21 @@ enum L10n {
     static var myWatchlist: String { isTurkish ? "İzleme Listem" : "My Watchlist" }
     static var liveTV: String { isTurkish ? "Canlı Yayın" : "Live TV" }
     static var guide: String { isTurkish ? "Rehber" : "Guide" }
+    static var myList: String { isTurkish ? "Listem" : "My List" }
+    static var addToList: String { isTurkish ? "Listeye Ekle" : "Add to List" }
+    static var removeFromList: String { isTurkish ? "Listeden Çıkar" : "Remove from List" }
+    static var editList: String { isTurkish ? "Listeyi Düzenle" : "Edit List" }
+    static var manageMyList: String { isTurkish ? "Listemi Düzenle" : "Manage My List" }
+    static var inMyList: String { isTurkish ? "Listemdeki Kanallar" : "In My List" }
+    static var allChannels: String { isTurkish ? "Tüm Kanallar" : "All Channels" }
+    static var done: String { isTurkish ? "Bitti" : "Done" }
+    static var categories: String { isTurkish ? "Kategoriler" : "Categories" }
+    static var back: String { isTurkish ? "Geri" : "Back" }
+    static var emptyMyList: String { isTurkish ? "Listeniz boş" : "Your list is empty" }
+    static var emptyMyListSubtitle: String {
+        isTurkish ? "Listeye eklediğiniz canlı kanallar burada görünür. 'Listem' butonuna basılı tutarak kanalları düzenleyebilirsiniz." : "Live channels you add will appear here. Long press 'My List' to manage channels."
+    }
+    static var channels: String { isTurkish ? "Kanallar" : "Channels" }
     static var nextUp: String { isTurkish ? "Sonra" : "Next" }
     static var noProgramInfo: String { isTurkish ? "Program bilgisi yok" : "No programme info" }
     static var noChannels: String { isTurkish ? "Kanal bulunamadı" : "No channels found" }

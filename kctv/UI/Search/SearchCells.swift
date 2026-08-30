@@ -12,20 +12,10 @@ import UIKit
 final class SearchChipCell: UICollectionViewCell {
     static let reuseID = "SearchChipCell"
 
-    /// Stil detay ekranındaki çiplerin aynısı; ölçü platforma göre değişiyor.
-    /// tvOS'ta kullanıcı ekrana 3 metre uzaktan bakıyor ve düğmeye kumandayla
-    /// geliyor: aynı puntolar orada okunmuyor, hedef de küçük kalıyor.
-    #if os(tvOS)
-    static let height: CGFloat = 68
-    private static let horizontalInset: CGFloat = 34
-    private static let verticalInset: CGFloat = 18
-    private static let fontSize: CGFloat = 26
-    #else
-    static let height: CGFloat = 44
-    private static let horizontalInset: CGFloat = 24
-    private static let verticalInset: CGFloat = 12
-    private static let fontSize: CGFloat = 16
-    #endif
+    /// Ölçü uygulamanın ortak çip ölçüsü (`AppChipSize`): katalog şeridi,
+    /// sezon seçici ve buradaki süzgeç aynı boyda duruyor. Düzen sabit bir
+    /// yükseklik istediği için hesap burada da okunuyor.
+    static let height: CGFloat = AppChipSize.regular.height
 
     private let button = UIButton(type: .system)
     private var onTap: (() -> Void)?
@@ -75,12 +65,7 @@ final class SearchChipCell: UICollectionViewCell {
         isSelected: Bool,
         onTap: @escaping () -> Void
     ) {
-        var configuration = UIButton.Configuration.appChip(
-            isSelected: isSelected,
-            horizontalInset: Self.horizontalInset,
-            verticalInset: Self.verticalInset,
-            fontSize: Self.fontSize
-        )
+        var configuration = UIButton.Configuration.appChip(isSelected: isSelected)
         configuration.title = title
         configuration.image = symbol.flatMap { UIImage(systemName: $0) }
         button.configuration = configuration
@@ -209,21 +194,9 @@ final class SearchSuggestionCell: UICollectionViewCell {
 final class SearchSectionHeaderView: UICollectionReusableView {
     static let reuseID = "SearchSectionHeaderView"
 
-    #if os(tvOS)
-    private static let actionFontSize: CGFloat = 24
-    private static let actionInset: CGFloat = 22
-    #else
-    private static let actionFontSize: CGFloat = 13
-    private static let actionInset: CGFloat = 14
-    #endif
-
     private let titleLabel = UILabel()
-    private let actionButton = UIButton(configuration: .appChip(
-        isSelected: false,
-        horizontalInset: SearchSectionHeaderView.actionInset,
-        verticalInset: SearchSectionHeaderView.actionInset * 0.4,
-        fontSize: SearchSectionHeaderView.actionFontSize
-    ))
+    /// Başlık yanındaki ikincil eylem; ortak çipin küçük ölçüsü.
+    private let actionButton = UIButton(configuration: .appChip(isSelected: false, size: .small))
 
     var onAction: (() -> Void)?
 

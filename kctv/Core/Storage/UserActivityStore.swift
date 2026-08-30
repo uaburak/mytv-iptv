@@ -43,6 +43,7 @@ final class UserActivityStore {
     // MARK: - Favoriler
 
     func isFavorite(_ item: MediaItem) -> Bool { favoriteIDs.contains(item.id) }
+    func isFavorite(id: MediaID) -> Bool { favoriteIDs.contains(id) }
 
     func toggleFavorite(_ item: MediaItem) {
         if let index = favoriteIDs.firstIndex(of: item.id) {
@@ -50,6 +51,11 @@ final class UserActivityStore {
         } else {
             favoriteIDs.insert(item.id, at: 0)
         }
+        persist()
+    }
+
+    func setFavorites(_ ids: [MediaID]) {
+        favoriteIDs = ids
         persist()
     }
 

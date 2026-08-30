@@ -217,3 +217,457 @@ final class PlayerChapterCell: UICollectionViewCell {
         accessibilityLabel = "\(title), \(timeText)"
     }
 }
+
+/// Kanal çekmecesindeki tek satır: numara, logo, kanal adı ve o an yayında
+/// olan program.
+///
+/// Rehberdeki satırın dar çekmeceye sığan hâli — sıradaki program ve ilerleme
+/// çubuğu buraya sığmıyor, onların yerine oynayan kanalın yanında bir dalga
+/// simgesi duruyor. Yükseklik sabit: program adı ağdan sonradan geliyor ve
+/// satırların o sırada yeniden ölçülmesi listeyi kaydırıyordu.
+final class PlayerChannelCell: UITableViewCell {
+    static let reuseID = "PlayerChannelCell"
+
+    #if os(tvOS)
+    private static let logoWidth: CGFloat = 80
+    private static let logoHeight: CGFloat = 56
+    private static let nameSize: CGFloat = 28
+    private static let programSize: CGFloat = 22
+    #else
+    private static let logoWidth: CGFloat = 54
+    private static let logoHeight: CGFloat = 36
+    private static let nameSize: CGFloat = 17
+    private static let programSize: CGFloat = 13
+    #endif
+
+    private let numberLabel = UILabel()
+    private let logo = RemoteImageView()
+    private let nameLabel = UILabel()
+    private let programLabel = UILabel()
+    private let playingIcon = UIImageView()
+
+    private var isHovered = false
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        build()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func build() {
+        backgroundColor = .clear
+        selectionStyle = .none
+
+        preservesSuperviewLayoutMargins = false
+        contentView.preservesSuperviewLayoutMargins = false
+        layoutMargins = .zero
+        contentView.layoutMargins = .zero
+        directionalLayoutMargins = .zero
+        contentView.directionalLayoutMargins = .zero
+
+        contentView.layer.cornerRadius = 10
+        contentView.layer.cornerCurve = .continuous
+        contentView.clipsToBounds = true
+
+        // Numaralar doğrudan soldan başlasın
+        numberLabel.font = .monospacedDigitSystemFont(ofSize: Self.programSize, weight: .bold)
+        numberLabel.textAlignment = .left
+        numberLabel.setContentHuggingPriority(.required, for: .horizontal)
+        numberLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        // Logoları kırpmadan, orijinal oranını koruyarak göster
+        logo.imageContentMode = .scaleAspectFit
+        logo.showsPlaceholderBackground = false
+        logo.showsInitials = false
+        logo.backgroundColor = .clear
+        logo.clipsToBounds = false
+
+        nameLabel.font = .systemFont(ofSize: Self.nameSize, weight: .semibold)
+        nameLabel.numberOfLines = 1
+        nameLabel.lineBreakMode = .byTruncatingTail
+
+        programLabel.font = .systemFont(ofSize: Self.programSize, weight: .regular)
+        programLabel.numberOfLines = 1
+        programLabel.lineBreakMode = .byTruncatingTail
+
+        playingIcon.image = UIImage(systemName: "waveform")
+        playingIcon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(
+            pointSize: Self.programSize + 2, weight: .semibold
+        )
+        playingIcon.contentMode = .center
+        playingIcon.setContentHuggingPriority(.required, for: .horizontal)
+        playingIcon.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let texts = UIStackView(arrangedSubviews: [nameLabel, programLabel])
+        texts.axis = .vertical
+        texts.spacing = 3
+
+        let row = UIStackView(arrangedSubviews: [numberLabel, logo, texts, playingIcon])
+        row.axis = .horizontal
+        row.spacing = 10
+        row.alignment = .center
+        row.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(row)
+
+        NSLayoutConstraint.activate([
+            row.topAnchor.constraint(equalTo: contentView.topAnchor),
+            row.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            row.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 14),
+            row.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -14),
+
+            numberLabel.widthAnchor.constraint(equalToConstant: 28),
+            logo.widthAnchor.constraint(equalToConstant: Self.logoWidth),
+            logo.heightAnchor.constraint(equalToConstant: Self.logoHeight),
+        ])
+
+        #if os(iOS)
+        let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover(_:)))
+        addGestureRecognizer(hover)
+        #endif
+
+        updateVisualState(isActive: false)
+    }
+
+    #if os(iOS)
+    @objc private func handleHover(_ recognizer: UIHoverGestureRecognizer) {
+        switch recognizer.state {
+        case .began, .changed:
+            isHovered = true
+        case .ended, .cancelled:
+            isHovered = false
+        default:
+            break
+        }
+        updateVisualState(isActive: isHovered || isHighlighted || isSelected)
+    }
+    #endif
+
+    #if os(tvOS)
+    override func didUpdateFocus(
+        in context: UIFocusUpdateContext,
+        with coordinator: UIFocusAnimationCoordinator
+    ) {
+        super.didUpdateFocus(in: context, with: coordinator)
+        coordinator.addCoordinatedAnimations {
+            self.updateVisualState(isActive: self.isFocused)
+        }
+    }
+    #endif
+
+    override func setHighlighted(_ highlighted: Bool, animated: Bool) {
+        super.setHighlighted(highlighted, animated: animated)
+        updateVisualState(isActive: isFocused || isHovered || highlighted || isSelected)
+    }
+
+    override func setSelected(_ selected: Bool, animated: Bool) {
+        super.setSelected(selected, animated: animated)
+        updateVisualState(isActive: isFocused || isHovered || isHighlighted || selected)
+    }
+
+    private func updateVisualState(isActive: Bool) {
+        if isActive {
+            contentView.backgroundColor = .white
+            numberLabel.textColor = UIColor.black.withAlphaComponent(0.65)
+            nameLabel.textColor = .black
+            programLabel.textColor = UIColor.black.withAlphaComponent(0.75)
+            playingIcon.tintColor = .black
+        } else {
+            contentView.backgroundColor = .clear
+            numberLabel.textColor = UIColor.white.withAlphaComponent(0.5)
+            nameLabel.textColor = .white
+            programLabel.textColor = UIColor.white.withAlphaComponent(0.6)
+            playingIcon.tintColor = .white
+        }
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        logo.prepareForReuse()
+        isHovered = false
+        updateVisualState(isActive: false)
+    }
+
+    func configure(channel: MediaItem, program: String?, isPlaying: Bool) {
+        numberLabel.text = channel.channelNumber.map(String.init) ?? "—"
+        nameLabel.text = channel.title
+        playingIcon.isHidden = !isPlaying
+        logo.configure(url: channel.posterURL, title: channel.title, displayWidth: Self.logoWidth)
+        setProgram(program)
+
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+        accessibilityLabel = isPlaying
+            ? "\(channel.title), \(L10n.nowPlayingBadge)"
+            : channel.title
+        updateVisualState(isActive: isFocused || isHovered || isHighlighted || isSelected)
+    }
+
+    func setProgram(_ program: String?) {
+        programLabel.text = program ?? " "
+    }
+}
+
+/// Çekmecedeki kategori satırı.
+final class PlayerCategoryCell: UITableViewCell {
+    static let reuseID = "PlayerCategoryCell"
+
+    #if os(tvOS)
+    private static let titleSize: CGFloat = 28
+    private static let countSize: CGFloat = 22
+    private static let iconSize: CGFloat = 24
+    #else
+    private static let titleSize: CGFloat = 17
+    private static let countSize: CGFloat = 15
+    private static let iconSize: CGFloat = 18
+    #endif
+
+    private let iconView = UIImageView()
+    private let titleLabel = UILabel()
+    private let countLabel = UILabel()
+    private let chevronView = UIImageView()
+    private var isHovered = false
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        build()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func build() {
+        backgroundColor = .clear
+        selectionStyle = .none
+
+        preservesSuperviewLayoutMargins = false
+        contentView.preservesSuperviewLayoutMargins = false
+        layoutMargins = .zero
+        contentView.layoutMargins = .zero
+        directionalLayoutMargins = .zero
+        contentView.directionalLayoutMargins = .zero
+
+        contentView.layer.cornerRadius = 10
+        contentView.layer.cornerCurve = .continuous
+        contentView.clipsToBounds = true
+
+        iconView.image = UIImage(systemName: "tv")
+        iconView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(
+            pointSize: Self.iconSize, weight: .medium
+        )
+        iconView.contentMode = .center
+        iconView.setContentHuggingPriority(.required, for: .horizontal)
+        iconView.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        titleLabel.font = .systemFont(ofSize: Self.titleSize, weight: .semibold)
+        titleLabel.numberOfLines = 1
+        titleLabel.lineBreakMode = .byTruncatingTail
+
+        countLabel.font = .monospacedDigitSystemFont(ofSize: Self.countSize, weight: .regular)
+        countLabel.setContentHuggingPriority(.required, for: .horizontal)
+        countLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        chevronView.image = UIImage(systemName: "chevron.right")
+        chevronView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(
+            pointSize: Self.countSize - 1, weight: .semibold
+        )
+        chevronView.contentMode = .center
+        chevronView.setContentHuggingPriority(.required, for: .horizontal)
+        chevronView.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let row = UIStackView(arrangedSubviews: [iconView, titleLabel, countLabel, chevronView])
+        row.axis = .horizontal
+        row.spacing = 10
+        row.alignment = .center
+        row.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(row)
+
+        NSLayoutConstraint.activate([
+            row.topAnchor.constraint(equalTo: contentView.topAnchor),
+            row.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            row.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 14),
+            row.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -14),
+        ])
+
+        #if os(iOS)
+        let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover(_:)))
+        addGestureRecognizer(hover)
+        #endif
+
+        updateVisualState(isActive: false)
+    }
+
+    #if os(iOS)
+    @objc private func handleHover(_ recognizer: UIHoverGestureRecognizer) {
+        switch recognizer.state {
+        case .began, .changed:
+            isHovered = true
+        case .ended, .cancelled:
+            isHovered = false
+        default:
+            break
+        }
+        updateVisualState(isActive: isHovered || isHighlighted || isSelected)
+    }
+    #endif
+
+    #if os(tvOS)
+    override func didUpdateFocus(
+        in context: UIFocusUpdateContext,
+        with coordinator: UIFocusAnimationCoordinator
+    ) {
+        super.didUpdateFocus(in: context, with: coordinator)
+        coordinator.addCoordinatedAnimations {
+            self.updateVisualState(isActive: self.isFocused)
+        }
+    }
+    #endif
+
+    override func setHighlighted(_ highlighted: Bool, animated: Bool) {
+        super.setHighlighted(highlighted, animated: animated)
+        updateVisualState(isActive: isFocused || isHovered || highlighted || isSelected)
+    }
+
+    override func setSelected(_ selected: Bool, animated: Bool) {
+        super.setSelected(selected, animated: animated)
+        updateVisualState(isActive: isFocused || isHovered || isHighlighted || selected)
+    }
+
+    private func updateVisualState(isActive: Bool) {
+        if isActive {
+            contentView.backgroundColor = .white
+            iconView.tintColor = .black
+            titleLabel.textColor = .black
+            countLabel.textColor = UIColor.black.withAlphaComponent(0.7)
+            chevronView.tintColor = .black
+        } else {
+            contentView.backgroundColor = .clear
+            iconView.tintColor = UIColor.white.withAlphaComponent(0.6)
+            titleLabel.textColor = .white
+            countLabel.textColor = UIColor.white.withAlphaComponent(0.5)
+            chevronView.tintColor = UIColor.white.withAlphaComponent(0.4)
+        }
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        isHovered = false
+        updateVisualState(isActive: false)
+    }
+
+    func configure(title: String, count: Int) {
+        titleLabel.text = title
+        countLabel.text = String(count)
+        updateVisualState(isActive: isFocused || isHovered || isHighlighted || isSelected)
+    }
+}
+
+/// "Listem" sekmesi için henüz içerik yokken gösterilen boş durum görünümü.
+final class PlayerEmptyListPlaceholderView: UIView {
+    private let iconView = UIImageView()
+    private let titleLabel = UILabel()
+    private let subtitleLabel = UILabel()
+    let editButton = UIButton()
+
+    var onEditTapped: (() -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        build()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func build() {
+        iconView.image = UIImage(systemName: "bookmark")
+        iconView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 32, weight: .medium)
+        iconView.tintColor = UIColor.white.withAlphaComponent(0.4)
+        iconView.contentMode = .center
+
+        titleLabel.text = L10n.emptyMyList
+        titleLabel.font = .systemFont(ofSize: 16, weight: .semibold)
+        titleLabel.textColor = .white
+        titleLabel.textAlignment = .center
+
+        subtitleLabel.text = L10n.emptyMyListSubtitle
+        subtitleLabel.font = .systemFont(ofSize: 13)
+        subtitleLabel.textColor = UIColor.white.withAlphaComponent(0.55)
+        subtitleLabel.textAlignment = .center
+        subtitleLabel.numberOfLines = 0
+
+        var editConfig = UIButton.Configuration.appGlass(horizontalInset: 16, verticalInset: 8, fontSize: 14)
+        editConfig.title = L10n.editList
+        editConfig.image = UIImage(systemName: "pencil")
+        editConfig.imagePadding = 6
+        editButton.configuration = editConfig
+        editButton.addSpringPressFeedback()
+        editButton.addAction(UIAction { [weak self] _ in self?.onEditTapped?() }, for: .primaryActionTriggered)
+
+        let stack = UIStackView(arrangedSubviews: [iconView, titleLabel, subtitleLabel, editButton])
+        stack.axis = .vertical
+        stack.spacing = 12
+        stack.alignment = .center
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -20),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+        ])
+    }
+}
+
+/// Geriye uyumluluk için bölüm başlığı.
+final class PlayerChannelSectionHeader: UITableViewHeaderFooterView {
+    static let reuseID = "PlayerChannelSectionHeader"
+
+    #if os(tvOS)
+    private static let titleSize: CGFloat = 22
+    #else
+    private static let titleSize: CGFloat = 12
+    #endif
+
+    private let titleLabel = UILabel()
+    private let countLabel = UILabel()
+
+    override init(reuseIdentifier: String?) {
+        super.init(reuseIdentifier: reuseIdentifier)
+        build()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func build() {
+        var background = UIBackgroundConfiguration.clear()
+        background.backgroundColor = UIColor(white: 0.07, alpha: 0.94)
+        backgroundConfiguration = background
+
+        titleLabel.font = .systemFont(ofSize: Self.titleSize, weight: .semibold)
+        titleLabel.textColor = UIColor.white.withAlphaComponent(0.75)
+        titleLabel.numberOfLines = 1
+
+        countLabel.font = .monospacedDigitSystemFont(ofSize: Self.titleSize, weight: .regular)
+        countLabel.textColor = UIColor.white.withAlphaComponent(0.4)
+        countLabel.setContentHuggingPriority(.required, for: .horizontal)
+        countLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let row = UIStackView(arrangedSubviews: [titleLabel, countLabel])
+        row.axis = .horizontal
+        row.spacing = 8
+        row.alignment = .center
+        row.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(row)
+
+        NSLayoutConstraint.activate([
+            row.topAnchor.constraint(equalTo: contentView.topAnchor),
+            row.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            row.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 10),
+            row.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+        ])
+    }
+
+    func configure(title: String, count: Int) {
+        titleLabel.text = title
+        countLabel.text = String(count)
+    }
+}

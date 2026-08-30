@@ -72,6 +72,6 @@ final class PlaylistOnboardingViewController: UIViewController {
 
     @objc private func addPlaylist() {
         let controller = AddPlaylistViewController(model: model)
-        present(UINavigationController(rootViewController: controller), animated: true)
+        present(UINavigationController.app(root: controller), animated: true)
     }
 }

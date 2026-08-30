@@ -10,7 +10,7 @@ import UIKit
 final class GuideViewController: UIViewController {
     private let model: AppModel
     private let tableView = UITableView(frame: .zero, style: .plain)
-    private let emptyLabel = UILabel()
+    private var emptyState: EmptyStateView!
 
     private var channels: [MediaItem] = []
     /// Uçuşta olan istekler; hücre yeniden kullanılınca iptal ediliyor.
@@ -44,14 +44,8 @@ final class GuideViewController: UIViewController {
         tableView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tableView)
 
-        emptyLabel.text = L10n.noChannels
-        emptyLabel.textColor = AppPalette.secondaryText
-        emptyLabel.textAlignment = .center
-        emptyLabel.font = .systemFont(ofSize: 15)
-        emptyLabel.numberOfLines = 0
-        emptyLabel.isHidden = true
-        emptyLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(emptyLabel)
+        emptyState = EmptyStateView.installed(in: view)
+        updateEmptyState()
 
         NSLayoutConstraint.activate([
             // İçerik navigation bar'ın ardından geçiyor; girintiyi
@@ -60,10 +54,6 @@ final class GuideViewController: UIViewController {
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-
-            emptyLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            emptyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            emptyLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 40),
         ])
 
         NotificationCenter.default.addObserver(
@@ -82,23 +72,19 @@ final class GuideViewController: UIViewController {
 
     @objc private func languageDidChange() {
         title = L10n.guide
-        emptyLabel.text = L10n.noChannels
+        updateEmptyState()
         tableView.reloadData()
     }
 
     @objc private func reload() {
-        // IPTV kullanıcısının beklediği sıra kanal numarası; numarası
-        // olmayanlar alfabetik olarak sona geliyor.
-        channels = model.library.items(kind: .live, categoryID: nil).sorted { first, second in
-            switch (first.channelNumber, second.channelNumber) {
-            case let (lhs?, rhs?): lhs < rhs
-            case (.some, .none): true
-            case (.none, .some): false
-            case (.none, .none): first.title.localizedCaseInsensitiveCompare(second.title) == .orderedAscending
-            }
-        }
-        emptyLabel.isHidden = !channels.isEmpty
+        channels = model.library.liveChannels()
+        updateEmptyState()
         tableView.reloadData()
+    }
+
+    private func updateEmptyState() {
+        emptyState.configure(symbol: "tv.slash", title: L10n.noChannels)
+        emptyState.isHidden = !channels.isEmpty
     }
 }
 

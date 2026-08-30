@@ -29,7 +29,7 @@ final class SearchViewController: UIViewController {
     private let model: AppModel
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
-    private let emptyLabel = UILabel()
+    private var emptyState: EmptyStateView!
 
     /// Arama çubuğunun sahibi platforma göre değişiyor: iOS'ta bu ekran kendi
     /// `UISearchController`'ını kurup navigasyona gömüyor, tvOS'ta ise çubuk
@@ -131,13 +131,13 @@ final class SearchViewController: UIViewController {
         navigationItem.hidesSearchBarWhenScrolling = false
         #endif
 
-        // Arama denetleyicisi bağlandıktan sonra: metinler onun da
-        // placeholder'ını kuruyor.
-        updateLocalizedTexts()
-
         setupCollectionView()
         setupDataSource()
-        setupEmptyLabel()
+        setupEmptyState()
+
+        // Metinler en sonda: hem arama denetleyicisinin placeholder'ını hem de
+        // boş durum görünümünü kuruyor, ikisi de o ana kadar hazır olmalı.
+        updateLocalizedTexts()
 
         reloadSuggestions()
         applySnapshot(animated: false)
@@ -215,19 +215,8 @@ final class SearchViewController: UIViewController {
         ])
     }
 
-    private func setupEmptyLabel() {
-        emptyLabel.textColor = AppPalette.secondaryText
-        emptyLabel.textAlignment = .center
-        emptyLabel.font = .systemFont(ofSize: 15)
-        emptyLabel.numberOfLines = 0
-        emptyLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(emptyLabel)
-
-        NSLayoutConstraint.activate([
-            emptyLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            emptyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            emptyLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 40),
-        ])
+    private func setupEmptyState() {
+        emptyState = EmptyStateView.installed(in: view)
     }
 
     private func setupDataSource() {
@@ -462,7 +451,7 @@ final class SearchViewController: UIViewController {
         // önce yazılıyor ki ilk düzen turu doğru bölümü görsün.
         visibleSections = snapshot.sectionIdentifiers
         dataSource.apply(snapshot, animatingDifferences: animated)
-        updateEmptyLabel()
+        updateEmptyState()
     }
 
     /// Tür çiplerinin kimliği seçiliyken de aynı kalıyor; fark motoru değişimi
@@ -524,14 +513,19 @@ final class SearchViewController: UIViewController {
     private func updateLocalizedTexts() {
         title = L10n.tabSearch
         activeSearchController?.searchBar.placeholder = L10n.searchPlaceholder
-        updateEmptyLabel()
+        updateEmptyState()
     }
 
-    private func updateEmptyLabel() {
-        emptyLabel.text = isSearching ? L10n.noSearchResults : L10n.searchPrompt
-        emptyLabel.isHidden = isSearching
-            ? !results.isEmpty
-            : !(recentSearches.queries.isEmpty && suggestions.isEmpty)
+    private func updateEmptyState() {
+        // Boşta ekranda hazır kartlar duruyor; boş durum yalnızca liste
+        // gerçekten boşken görünüyor.
+        if isSearching {
+            emptyState.configure(symbol: "magnifyingglass", title: L10n.noSearchResults)
+            emptyState.isHidden = !results.isEmpty
+        } else {
+            emptyState.configure(symbol: "magnifyingglass", title: L10n.searchPrompt)
+            emptyState.isHidden = !(recentSearches.queries.isEmpty && suggestions.isEmpty)
+        }
     }
 
     /// Sonuca ulaşan aramalar kaydediliyor: kullanıcı bir içeriğe girdiğinde

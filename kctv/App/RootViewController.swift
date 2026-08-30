@@ -51,7 +51,14 @@ final class RootViewController: UIViewController {
         case .needsPlaylist:
             newVC = PlaylistOnboardingViewController(model: model)
         case .ready:
+            // Kabuk platforma göre değişiyor: telefonda sekme çubuğu, Apple
+            // TV'de kenar çubuğu. İkisi de aynı menü listesinden besleniyor
+            // (`AppDestination`).
+            #if os(tvOS)
+            newVC = SidebarViewController(model: model)
+            #else
             newVC = MainTabBarController(model: model)
+            #endif
         }
 
         if let existing = currentChild {

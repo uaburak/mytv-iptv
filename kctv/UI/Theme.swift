@@ -155,9 +155,9 @@ extension UIButton.Configuration {
     /// tepkisiz görünüyor.
     static func appChip(
         isSelected: Bool,
-        horizontalInset: CGFloat = 24,
-        verticalInset: CGFloat = 12,
-        fontSize: CGFloat = 16
+        horizontalInset: CGFloat,
+        verticalInset: CGFloat,
+        fontSize: CGFloat
     ) -> UIButton.Configuration {
         guard isSelected else {
             return .appGlass(
@@ -171,6 +171,96 @@ extension UIButton.Configuration {
             verticalInset: verticalInset,
             fontSize: fontSize
         )
+    }
+}
+
+/// Kapsül düğmelerin ölçüsü tek yerde.
+///
+/// Aynı çip arama süzgecinde, katalog şeridinde, detaydaki sezon seçicide ve
+/// oynatıcı denetimlerinde kullanılıyor. Ölçüler daha önce her ekranda ayrı
+/// yazıldığı için birbirinden ayrışmıştı — özellikle tvOS'ta: kullanıcı ekrana
+/// üç metre uzaktan bakıyor, telefon puntosu orada okunmuyor ve hedef de küçük
+/// kalıyor.
+enum AppChipSize {
+    /// Süzgeç ve seçici çipler.
+    case regular
+    /// Başlık yanındaki ikincil eylem — "Temizle" gibi.
+    case small
+
+    #if os(tvOS)
+    var horizontalInset: CGFloat { self == .regular ? 34 : 22 }
+    var verticalInset: CGFloat { self == .regular ? 18 : 10 }
+    var fontSize: CGFloat { self == .regular ? 26 : 24 }
+    #else
+    var horizontalInset: CGFloat { self == .regular ? 20 : 14 }
+    var verticalInset: CGFloat { self == .regular ? 11 : 6 }
+    var fontSize: CGFloat { self == .regular ? 15 : 13 }
+    #endif
+
+    /// Bir çipin toplam yüksekliği; düzenler sabit ölçü istiyor.
+    var height: CGFloat { (fontSize * 1.3).rounded() + verticalInset * 2 }
+}
+
+extension UIButton.Configuration {
+    /// Ölçüsü platformdan gelen çip. Çağıran taraf punto ve iç boşluk
+    /// seçmiyor: aynı çip her ekranda aynı boyda duruyor.
+    static func appChip(isSelected: Bool, size: AppChipSize = .regular) -> UIButton.Configuration {
+        appChip(
+            isSelected: isSelected,
+            horizontalInset: size.horizontalInset,
+            verticalInset: size.verticalInset,
+            fontSize: size.fontSize
+        )
+    }
+
+    /// Ölçüsü platformdan gelen birincil (dolu beyaz) buton.
+    static func appProminent(size: AppChipSize) -> UIButton.Configuration {
+        appProminent(
+            horizontalInset: size.horizontalInset,
+            verticalInset: size.verticalInset,
+            fontSize: size.fontSize
+        )
+    }
+
+    /// Ölçüsü platformdan gelen cam buton.
+    static func appGlass(size: AppChipSize) -> UIButton.Configuration {
+        appGlass(
+            horizontalInset: size.horizontalInset,
+            verticalInset: size.verticalInset,
+            fontSize: size.fontSize
+        )
+    }
+}
+
+extension UINavigationController {
+    /// Uygulamanın navigasyon yığını: saydam çubuk, beyaz başlık, vurgu rengi.
+    ///
+    /// Sekme çubuğu (iOS) ve kenar çubuğu (tvOS) aynı yığını kuruyor; görünüm
+    /// ayarları iki yerde tekrarlandığında platformlar arasında ayrışıyordu.
+    ///
+    /// `UIBarAppearance` ailesi tvOS başlıklarında tanımlı olduğu için
+    /// **derleniyor**, ama tvOS onu çalışma zamanında reddediyor:
+    /// "New Bar Appearance API is not supported on this version of tvOS."
+    /// Bu yüzden orada eski (legacy) özelleştirme kullanılıyor.
+    static func app(root: UIViewController) -> UINavigationController {
+        let nav = UINavigationController(rootViewController: root)
+
+        #if os(iOS)
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithTransparentBackground()
+        appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
+        appearance.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
+        nav.navigationBar.standardAppearance = appearance
+        nav.navigationBar.scrollEdgeAppearance = appearance
+        #else
+        nav.navigationBar.setBackgroundImage(UIImage(), for: .default)
+        nav.navigationBar.shadowImage = UIImage()
+        nav.navigationBar.isTranslucent = true
+        nav.navigationBar.titleTextAttributes = [.foregroundColor: UIColor.white]
+        #endif
+
+        nav.navigationBar.tintColor = AppPalette.accent
+        return nav
     }
 }
 
@@ -239,7 +329,15 @@ extension UICollectionView {
 ///
 /// tvOS'ta odaklanabiliyor ve odak geri bildirimi veriyor; iOS'ta düz bir
 /// `UIControl`'den farkı yok.
-final class FocusableControl: UIControl {
+class FocusableControl: UIControl {
+    /// Odakta uygulanan büyüme. Alt sınıflar kendi ölçüsünü verebiliyor.
+    var focusScale: CGFloat { 1.04 }
+
+    /// Odakla birlikte değişen renk/dolgu gibi süsler. Ortak animasyonun
+    /// **içinde** çağrılıyor: alt sınıf kendi geçişini kurmak zorunda kalmıyor
+    /// ve süs ile ölçek aynı eğriyle hareket ediyor.
+    func applyFocusStyle(isFocused: Bool) {}
+
     #if os(tvOS)
     override var canBecomeFocused: Bool { true }
 
@@ -255,7 +353,11 @@ final class FocusableControl: UIControl {
         with coordinator: UIFocusAnimationCoordinator
     ) {
         super.didUpdateFocus(in: context, with: coordinator)
-        updateFocusAppearance(isFocused: isFocused, using: coordinator, scale: 1.04)
+        updateFocusAppearance(isFocused: isFocused, using: coordinator, scale: focusScale) {
+            [weak self] in
+            guard let self else { return }
+            applyFocusStyle(isFocused: self.isFocused)
+        }
     }
 
     /// `UIButton` seçildiğinde `.primaryActionTriggered` gönderiyor ama özel
