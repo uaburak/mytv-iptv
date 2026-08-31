@@ -13,6 +13,9 @@ final class HomeViewController: UIViewController {
         /// bağlı değil.
         case hero
         case mainCard(MediaKind)
+        /// Kategori raylarının başındaki kart: rayın kısayolu, kategorinin
+        /// kendi sayfasını açıyor.
+        case category(rowID: String, kind: MediaKind, categoryID: String, title: String)
         case poster(rowID: String, item: MediaItem)
     }
 
@@ -28,7 +31,18 @@ final class HomeViewController: UIViewController {
     /// yalnızca ekran arkaya düşünce durdurulup geri gelince sürdürülüyor.
     private weak var heroCell: HeroCell?
     /// "İzlemeye devam et" rayının kimliği; düzeni ve hücresi diğerlerinden farklı.
-    private static let continueRowID = "continue" 
+    private static let continueRowID = "continue"
+
+    /// Banner'ın anlık durumu (bkz. `FeaturedStore`).
+    ///
+    /// Seçim TMDB'ye çıkıyor ve zaman alıyor; ama sonuç diskte saklandığı ve
+    /// katalog hazır olur olmaz arkada çözüldüğü için burada neredeyse her
+    /// zaman dolu geliyor. Dolu değilse bile bölüm **yer ayırıyor**:
+    /// `expectsBanner` true olduğu sürece hücre kuruluyor, içerik geldiğinde
+    /// aynı yükseklikte yerine oturuyor ve sayfa zıplamıyor.
+    private var featuredSnapshot = FeaturedStore.Snapshot(items: [], isResolving: false)
+    private var featured: [MediaItem] { featuredSnapshot.items }
+    private var expectsBanner: Bool { featuredSnapshot.expectsBanner }
 
     private var metrics: AppMetrics {
         AppMetrics.metrics(for: view.bounds.width)
@@ -52,6 +66,7 @@ final class HomeViewController: UIViewController {
         #endif
         setupCollectionView()
         setupDataSource()
+        refreshFeatured()
         applySnapshot(animated: false)
 
         NotificationCenter.default.addObserver(
@@ -76,16 +91,45 @@ final class HomeViewController: UIViewController {
             name: .appModelFavoritesDidChange,
             object: nil
         )
+
+        // Banner seçimi arkada tamamlandığında hücre içeriğini alıyor.
+        // Bölüm zaten yerinde olduğu için sayfa yerinden oynamıyor.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(featuredDidChange),
+            name: .featuredDidChange,
+            object: nil
+        )
     }
 
     /// Ekran boyu değişince (dönme, bölünmüş pencere) görselin taşma payı da
     /// değişiyor; hücre yeniden kurulmadığı için buradan güncelleniyor.
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        updateContentInset()
+        // Ön ısıtmanın da aynı çözünürlüğü kullanması için ölçü bildiriliyor;
+        // farklı ölçü, görsel önbelleğinde ikinci bir kayıt demek olurdu.
+        FeaturedStore.artworkDisplayWidth = metrics.heroImageWidth
         guard let heroCell, collectionView.bounds.height > 0 else { return }
-        heroCell.artworkOverhang = Self.heroOverhang(
+        heroCell.artworkOverhang = HeroSectionMetrics.overhang(
             container: collectionView.bounds.size, metrics: metrics
         )
+    }
+
+    /// Banner varken içerik ekranın tepesinden başlıyor — görsel navigasyon
+    /// çubuğunun altına kadar uzanıyor. Banner **yokken** o payı elle vermek
+    /// gerekiyor: kaydırma görünümünün kendi güvenli alan ayarı kapalı ve ilk
+    /// ray çubuğun altında kalıyordu.
+    ///
+    /// Banner seçimi asenkron (TMDB) olduğu için bu sayfa açıldıktan sonra da
+    /// değişebiliyor; fark kadar kaydırılmazsa sayfa girinti kadar zıplıyor.
+    private func updateContentInset() {
+        let top = expectsBanner ? 0 : view.safeAreaInsets.top
+        let delta = top - collectionView.contentInset.top
+        guard delta != 0 else { return }
+        collectionView.contentInset.top = top
+        collectionView.verticalScrollIndicatorInsets.top = top
+        collectionView.contentOffset.y -= delta
     }
 
     // MARK: - Kurulum
@@ -132,6 +176,9 @@ final class HomeViewController: UIViewController {
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
         collectionView.backgroundColor = .clear
         collectionView.delegate = self
+        // Kart ekrana girmeden görseli ve künyesi hazırlanıyor (bkz. `MediaPrefetch`).
+        collectionView.prefetchDataSource = self
+        collectionView.isPrefetchingEnabled = true
         collectionView.showsVerticalScrollIndicator = false
         collectionView.contentInsetAdjustmentBehavior = .never
         collectionView.applyNativeScrollEdges()
@@ -139,6 +186,7 @@ final class HomeViewController: UIViewController {
         collectionView.register(HeroCell.self, forCellWithReuseIdentifier: HeroCell.reuseID)
         collectionView.register(MainCardCell.self, forCellWithReuseIdentifier: MainCardCell.reuseID)
         collectionView.register(PosterCell.self, forCellWithReuseIdentifier: PosterCell.reuseID)
+        collectionView.register(CategoryCardCell.self, forCellWithReuseIdentifier: CategoryCardCell.reuseID)
         collectionView.register(MediaClipCell.self, forCellWithReuseIdentifier: MediaClipCell.reuseID)
         collectionView.register(
             RowHeaderView.self,
@@ -209,65 +257,14 @@ final class HomeViewController: UIViewController {
     private func heroSection(metrics: AppMetrics, container: CGSize) -> NSCollectionLayoutSection {
         let size = NSCollectionLayoutSize(
             widthDimension: .fractionalWidth(1),
-            heightDimension: .absolute(Self.heroHeight(container: container, metrics: metrics))
+            heightDimension: .absolute(HeroSectionMetrics.height(container: container, metrics: metrics))
         )
         let item = NSCollectionLayoutItem(layoutSize: size)
         let group = NSCollectionLayoutGroup.horizontal(layoutSize: size, subitems: [item])
-        let section = NSCollectionLayoutSection(group: group)
-        // Banner ile sıradaki ray arasındaki boşluk. Açılış ekranında
-        // görünmüyor: görsel hücrenin altından taşıp bu boşluğun ve rayın
-        // arkasına geçiyor, ray banner'ın içinden çıkmış gibi duruyor.
-        // Kullanıcı aşağı indiğinde görsel geri çekiliyor ve boşluk ortaya
-        // çıkıyor.
-        section.contentInsets.bottom = Self.heroGap(metrics: metrics)
-        return section
-    }
-
-    /// Açılış ekranında sıradaki raydan görünen kadarı: başlığı, boşluğu ve
-    /// kartın bir bölümü. Sayfanın devamı olduğu ilk bakışta anlaşılıyor.
-    private static func heroPeek(metrics: AppMetrics) -> CGFloat {
-        metrics.rowHeaderHeight + metrics.rowHeaderGap
-            + metrics.clipCardWidth * (9.0 / 16.0) * 0.55
-    }
-
-    /// Banner ile sıradaki ray arasındaki boşluk. Aşağı inildiğinde görünür
-    /// hâle geliyor.
-    private static func heroGap(metrics: AppMetrics) -> CGFloat {
-        (metrics.rowSpacing * 0.5).rounded()
-    }
-
-    /// Banner hücresinin yüksekliği.
-    ///
-    /// İçerik bloğu bu hücrenin içinde duruyor; görsel ise altından taşıp
-    /// ekranın dibine kadar iniyor.
-    ///
-    /// tvOS'ta ekranın tamamı. Telefon ve tablette detay ekranıyla aynı kural
-    /// geçerli — ekranın yaklaşık %74'ü, en az 560pt — böylece iki ekranın
-    /// hero'su aynı boyda duruyor; sıradaki raya ayrılan yer düşüldükten sonra
-    /// kalan alan bundan küçükse o geçerli.
-    private static func heroHeight(container: CGSize, metrics: AppMetrics) -> CGFloat {
-        guard container.width > 0, container.height > 0 else { return metrics.heroHeight }
-        let visible = container.height - heroPeek(metrics: metrics) - heroGap(metrics: metrics)
-        #if os(tvOS)
-        return max(240, visible)
-        #else
-        return max(240, min(visible, max(560, container.height * 0.74)))
-        #endif
-    }
-
-    /// Görselin hücrenin altından taşacağı miktar: açılışta ekranın dibine
-    /// kadar iniyor, ray ve aradaki boşluk onun üstünde duruyor.
-    ///
-    /// Yalnızca tvOS'ta. Telefonda banner sıradaki rayın altına uzanmıyor:
-    /// ekran zaten dar, bindirme okumayı zorlaştırmaktan başka bir şey
-    /// yapmıyor.
-    private static func heroOverhang(container: CGSize, metrics: AppMetrics) -> CGFloat {
-        #if os(tvOS)
-        let full = heroPeek(metrics: metrics) + heroGap(metrics: metrics)
-        return min(full, max(0, container.height - heroHeight(container: container, metrics: metrics)))
-        #else
-        return 0
-        #endif
+        // Bölüme alt boşluk verilmiyor: banner'ın kendi içindeki gösterge payı
+        // zaten sıradaki bölüme kadar olan boşluğu kuruyor ve üçü eşit kalıyor
+        // (bkz. `HeroSectionMetrics.spacing`).
+        return NSCollectionLayoutSection(group: group)
     }
 
     private func mainCardsSection(metrics: AppMetrics) -> NSCollectionLayoutSection {
@@ -320,10 +317,10 @@ final class HomeViewController: UIViewController {
                 cell.isFavorite = { [weak self] in self?.model.activity.isFavorite($0) ?? false }
                 cell.onDetails = { [weak self] in self?.openDetail($0) }
                 cell.onToggleFavorite = { [weak self] in self?.model.activity.toggleFavorite($0) }
-                cell.artworkOverhang = Self.heroOverhang(
+                cell.artworkOverhang = HeroSectionMetrics.overhang(
                     container: collectionView.bounds.size, metrics: metrics
                 )
-                cell.configure(items: model.library.spotlight, metrics: metrics)
+                cell.configure(items: featured, metrics: metrics)
                 heroCell = cell
                 return cell
 
@@ -332,6 +329,22 @@ final class HomeViewController: UIViewController {
                     withReuseIdentifier: MainCardCell.reuseID, for: indexPath
                 ) as! MainCardCell
                 cell.configure(kind: kind, count: model.library.catalog[kind]?.count ?? 0, metrics: metrics)
+                return cell
+
+            case let .category(_, kind, categoryID, title):
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: CategoryCardCell.reuseID, for: indexPath
+                ) as! CategoryCardCell
+                cell.configure(
+                    title: title,
+                    count: model.library.items(kind: kind, categoryID: categoryID).count,
+                    symbol: kind.symbol,
+                    metrics: metrics,
+                    cardWidth: metrics.cardWidth(for: kind),
+                    // Renk rayın sayfadaki sırasından: alt alta duran iki
+                    // kategori kartı aynı renge düşmüyor.
+                    colorIndex: indexPath.section
+                )
                 return cell
 
             case let .poster(rowID, media):
@@ -374,6 +387,13 @@ final class HomeViewController: UIViewController {
                 ofKind: kind, withReuseIdentifier: RowHeaderView.reuseID, for: indexPath
             ) as! RowHeaderView
             header.configure(title: title, font: metrics.rowTitleFont, showsChevron: categoryID != nil)
+            // Banner'ın hemen altındaki başlık sayfa tepedeyken gizli; hücre
+            // yeniden kullanıldığı için durum her seferinde tazeleniyor.
+            header.applyReveal(
+                self.isHeroHeader(at: indexPath)
+                    ? RowHeaderView.revealProgress(for: collectionView, metrics: metrics)
+                    : 1
+            )
             header.onTap = { [weak self] in
                 self?.openCatalog(kind: mediaKind, categoryID: categoryID, title: title)
             }
@@ -403,14 +423,35 @@ final class HomeViewController: UIViewController {
     }
 
     @objc private func libraryDidChange() {
+        refreshFeatured()
         applySnapshot(animated: true)
+    }
+
+    @objc private func featuredDidChange() {
+        let previous = featuredSnapshot.expectsBanner
+        refreshFeatured()
+        applySnapshot(animated: true)
+        // Banner beklenirken hiç çıkmadıysa (TMDB kapalı, uygun içerik yok)
+        // ayrılan yer geri veriliyor; bu yalnızca ilk kurulumda olabiliyor.
+        if previous != featuredSnapshot.expectsBanner { updateContentInset() }
+    }
+
+    /// Banner'ın güncel durumunu okur. Seçim `FeaturedStore` içinde; katalog
+    /// hazır olur olmaz orada başlıyor ve sonucu diskte saklanıyor.
+    private func refreshFeatured() {
+        featuredSnapshot = model.library.featured.snapshot(for: .home)
+    }
+
+    /// Bölüm 1'in başlığı banner'ın hemen altındaki başlık.
+    private func isHeroHeader(at indexPath: IndexPath) -> Bool {
+        expectsBanner && indexPath.section == 1
     }
 
     private func applySnapshot(animated: Bool) {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         let existing = dataSource.snapshot().itemIdentifiers
 
-        if !model.library.spotlight.isEmpty {
+        if expectsBanner {
             snapshot.appendSections([.hero])
             snapshot.appendItems([.hero], toSection: .hero)
             // Banner'ın kimliği içeriğe bağlı değil: öne çıkanlar değişince
@@ -469,26 +510,33 @@ final class HomeViewController: UIViewController {
         for row in model.library.rows {
             let section = Section.row(id: row.id, title: row.title, kind: row.kind, categoryID: row.categoryID)
             snapshot.appendSections([section])
+
+            // Rayın ilk kartı kategorinin kendisi. Yalnızca gerçek bir
+            // kategoriye karşılık gelen raylarda var: "yeni eklenenler" ya da
+            // izleme listesi bir kategori değil, açılacak bir sayfası da yok.
+            var items: [Item] = []
+            if let categoryID = row.categoryID {
+                items.append(
+                    .category(rowID: row.id, kind: row.kind, categoryID: categoryID, title: row.title)
+                )
+            }
+
             // Sağlayıcı listeleri her zaman temiz değil; aynı yayın iki kez
             // gelirse diffable data source çift kimlik görüp çöküyor.
             var seen = Set<MediaID>()
-            snapshot.appendItems(
-                row.items
-                    .filter { seen.insert($0.id).inserted }
-                    .map { Item.poster(rowID: row.id, item: $0) },
-                toSection: section
-            )
+            items += row.items
+                .filter { seen.insert($0.id).inserted }
+                .map { Item.poster(rowID: row.id, item: $0) }
+
+            snapshot.appendItems(items, toSection: section)
         }
 
         dataSource.apply(snapshot, animatingDifferences: animated)
+        collectionView.updateHeroHeaderReveal(hasHero: expectsBanner, metrics: metrics)
 
-        // Ana kartlar dışında hiçbir şey yoksa içerik boş. Apple TV'de kart da
-        // olmadığı için ölçü orada doğrudan sıfır.
-        #if os(iOS)
-        let isEmpty = snapshot.numberOfItems == MediaKind.allCases.count
-        #else
-        let isEmpty = snapshot.numberOfItems == 0
-        #endif
+        // Boşluk ölçüsü doğrudan katalogdan: banner bölümü içerik gelmeden
+        // de yer ayırdığı için hücre saymak artık yanıltıcı.
+        let isEmpty = model.library.rows.isEmpty && model.library.catalog.values.allSatisfy(\.isEmpty)
         var didFail = false
         if case .failed = model.library.state { didFail = true }
 
@@ -574,6 +622,15 @@ final class HomeViewController: UIViewController {
         }
     }
 
+    /// Kategorinin kendi sayfası: anasayfanın düzeni, tek kategorinin içeriği.
+    /// Raydaki kart 24 içerikte kesiliyor, orada kategorinin tamamı var.
+    private func openCategory(kind: MediaKind, categoryID: String, title: String) {
+        let controller = CategoryViewController(
+            kind: kind, categoryID: categoryID, title: title, model: model
+        )
+        navigationController?.pushViewController(controller, animated: true)
+    }
+
     private func openCatalog(kind: MediaKind, categoryID: String?, title: String) {
         let controller = CatalogViewController(kind: kind, model: model, categoryID: categoryID, title: title)
         navigationController?.pushViewController(controller, animated: true)
@@ -591,6 +648,7 @@ extension HomeViewController: UICollectionViewDelegate {
         for case let cell as HeroCell in collectionView.visibleCells {
             cell.applyScroll(offset: offset)
         }
+        collectionView.updateHeroHeaderReveal(hasHero: expectsBanner, metrics: metrics)
     }
 
     func collectionView(
@@ -635,8 +693,25 @@ extension HomeViewController: UICollectionViewDelegate {
                 ? GuideViewController(model: model)
                 : KindBrowseViewController(kind: kind, model: model)
             navigationController?.pushViewController(controller, animated: true)
+        case let .category(_, kind, categoryID, title):
+            openCategory(kind: kind, categoryID: categoryID, title: title)
         case .hero:
             break
         }
+    }
+}
+
+extension HomeViewController: UICollectionViewDataSourcePrefetching {
+    func collectionView(
+        _ collectionView: UICollectionView,
+        prefetchItemsAt indexPaths: [IndexPath]
+    ) {
+        let items = indexPaths.compactMap { indexPath -> MediaItem? in
+            guard case let .poster(_, media)? = dataSource.itemIdentifier(for: indexPath) else {
+                return nil
+            }
+            return media
+        }
+        MediaPrefetch.warm(items, posterWidth: metrics.posterWidth)
     }
 }

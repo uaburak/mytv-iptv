@@ -28,7 +28,7 @@ enum AppPalette {
     static let secondaryText = UIColor.white.withAlphaComponent(0.62)
     static let accent = UIColor(red: 0.16, green: 0.62, blue: 1.0, alpha: 1.0)
 
-    /// Hazır arama kartlarının zemin renkleri.
+    /// Kategori kartlarının zemin renkleri.
     ///
     /// Bu kartlarda afiş yok — kimliği renk veriyor. Her geçiş açık tondan koyu
     /// tona iniyor: kartın alt ucu koyulaştığı için başlık bulanık bir şeride
@@ -38,7 +38,7 @@ enum AppPalette {
     ///
     /// Renk kartın destedeki sırasından seçiliyor, adından değil: yan yana
     /// duran iki kart hiçbir zaman aynı renge düşmüyor.
-    static func suggestionGradient(at index: Int) -> [UIColor] {
+    static func categoryGradient(at index: Int) -> [UIColor] {
         let palette: [(UIColor, UIColor)] = [
             // kırmızı → koyu bordo
             (UIColor(red: 0.96, green: 0.42, blue: 0.38, alpha: 1), UIColor(red: 0.34, green: 0.04, blue: 0.10, alpha: 1)),

@@ -54,17 +54,21 @@ final class ContentLibrary {
     /// değiştiğinde yeniden indirmek yerine bundan türetiyoruz.
     private var rawSnapshot = CatalogSnapshot()
 
-    /// Anasayfanın öne çıkan içerikleri. Hesaplanmış özellik DEĞİL: katalog
-    /// 14 binden fazla kayıt tutuyor ve her `body` değerlendirmesinde yeniden
-    /// süzmek geçiş animasyonlarını kilitliyordu. Yalnızca katalog değişince
-    /// üretiliyor.
-    private(set) var spotlight: [MediaItem] = []
-
     /// Kimlik ve kategori aramalarını O(1) yapan indeksler.
     /// Bunlar olmadan her kart dokunuşu ve her detay açılışı tüm katalogda
     /// doğrusal tarama yapıyordu.
     private var itemsByID: [MediaID: MediaItem] = [:]
     private var itemsByCategory: [MediaKind: [String: [MediaItem]]] = [:]
+
+    /// Seri ve öneri eşleştirmesinin indeksleri.
+    ///
+    /// Eskiden her koleksiyon parçası için katalogdaki on binlerce film
+    /// baştan sona taranıyordu — sekiz parçalı bir seri sekiz tam tarama
+    /// demekti ve detay ekranı gözle görülür biçimde takılıyordu. Üçü de
+    /// katalog kurulurken bir kez hazırlanıyor, sorgular O(1).
+    private var moviesByTMDBID: [Int: MediaItem] = [:]
+    private var moviesByTitle: [String: [MediaItem]] = [:]
+    private var moviesByLooseTitle: [String: [MediaItem]] = [:]
 
     /// Detay yanıtları. Aynı içeriğe ikinci girişte ağ beklemesi olmasın diye.
     private var detailCache: [MediaID: MediaDetail] = [:]
@@ -80,6 +84,10 @@ final class ContentLibrary {
     private let activity: UserActivityStore
     /// Aynı anda birden fazla yenileme başlamasın.
     private var isReloading = false
+
+    /// Banner seçimlerinin belleği. Katalog hazır olur olmaz ısıtılıyor;
+    /// ekranlar açıldığında seçim çoktan yapılmış oluyor.
+    let featured = FeaturedStore()
 
     /// Anlık görüntü bundan eskiyse arka planda tazelenir.
     private let cacheLifetime: TimeInterval = 60 * 60 * 6
@@ -127,7 +135,11 @@ final class ContentLibrary {
 
         // Sürüm eki: MediaItem alanları değiştiğinde eski anlık görüntüler
         // çözümlenemez, boşuna denenmesin.
-        let cacheKey = (currentPlaylistID ?? provider.sourceID) + ".v3"
+        // Sürüm eki bilerek yükseltildi: `MediaItem.tmdbID` artık liste
+        // ucundan da geliyor ve eski anlık görüntülerde bu alan boş. Bir
+        // kereye mahsus tam indirme, seri eşleştirmesinin tam çalışması için
+        // gereken bedel.
+        let cacheKey = (currentPlaylistID ?? provider.sourceID) + ".v4"
         let isCacheFresh = !force && (cache.age(key: cacheKey).map { $0 < cacheLifetime } ?? false)
 
         if !force, let snapshot = await cachedSnapshot(key: cacheKey) {
@@ -146,16 +158,47 @@ final class ContentLibrary {
             return
         }
 
+        // Sürüm atlamasında ekran boş açılmasın: bir önceki biçimdeki anlık
+        // görüntü varsa onunla açılıyor, taze veri arkada iniyor. Bu olmadan
+        // güncellemeden sonraki ilk açılış tam bir indirme boyu bekliyordu.
+        if !force, let legacy = await legacySnapshot() {
+            apply(legacy)
+            state = .ready
+            refreshTask = Task { [weak self] in
+                await self?.refresh(from: provider, cacheKey: cacheKey)
+            }
+            return
+        }
+
         state = .loading
         await refresh(from: provider, cacheKey: cacheKey)
     }
 
+    /// Önceki sürüm eklerinin anlık görüntüsü. Yalnızca ilk açılışı doldurmak
+    /// için okunuyor; yerine tazesi geldiğinde bir daha bakılmıyor.
+    private func legacySnapshot() async -> CatalogSnapshot? {
+        let base = currentPlaylistID ?? sourceID
+        for suffix in Self.legacyCacheSuffixes {
+            if let snapshot = await cachedSnapshot(key: base + suffix) { return snapshot }
+        }
+        return nil
+    }
+
+    private static let legacyCacheSuffixes = [".v3", ".v2"]
+
     /// Sağlayıcıdan taze anlık görüntüyü çekip uygular.
     private func refresh(from provider: any ContentProvider, cacheKey: String) async {
         do {
-            // Abonelik durumu ve sunucunun izin verdiği yayın biçimi burada.
-            account = try await provider.validate()
-            let snapshot = try await fetchSnapshot(from: provider)
+            // Doğrulama ve katalog **birlikte** çekiliyor. Eskiden doğrulama
+            // bitmeden liste isteği başlamıyordu; ikisi arasında bir tam ağ
+            // turu boşa geçiyordu ve ilk açılış o kadar geç doluyordu.
+            // Doğrulamanın sonucu (abonelik durumu, yayın biçimi) listeyi
+            // çekmek için gerekmiyor.
+            async let accountTask = provider.validate()
+            async let snapshotTask = fetchSnapshot(from: provider)
+
+            account = try await accountTask
+            let snapshot = try await snapshotTask
             // Arkadaki tazeleme iptal edildiyse (liste değişti, çıkış yapıldı)
             // eldeki sonucu ekrana basmıyoruz.
             guard !Task.isCancelled else { return }
@@ -239,8 +282,33 @@ final class ContentLibrary {
         catalog = visible.items
         buildIndexes()
         rows = buildRows(from: visible)
-        spotlight = buildSpotlight()
+
+        // Banner seçimi ve künye ön yüklemesi katalogla birlikte başlıyor:
+        // kullanıcı Filmler/Diziler sayfasına vardığında iş bitmiş oluyor.
+        featured.catalogDidChange(
+            sourceKey: currentPlaylistID ?? sourceID,
+            catalog: catalog,
+            itemsByID: itemsByID
+        )
+        featured.prewarm()
+        prefetchMetadataForVisibleRows()
+
         notifyChange()
+    }
+
+    /// Anasayfa raylarının başındaki içeriklerin TMDB künyesini önceden çeker.
+    ///
+    /// Kullanıcının ilk göreceği ve büyük olasılıkla ilk dokunacağı kartlar
+    /// bunlar; detay ekranı açıldığında künye elde hazır oluyor ve ekran
+    /// yer tutucuyla değil dolu açılıyor.
+    private func prefetchMetadataForVisibleRows() {
+        guard TMDBService.isConfigured else { return }
+        var candidates: [MediaItem] = []
+        for row in rows.prefix(4) where row.kind != .live {
+            candidates.append(contentsOf: row.items.prefix(8))
+        }
+        guard !candidates.isEmpty else { return }
+        TMDBService.shared.prefetchMetadata(for: candidates)
     }
 
     /// Yetişkin içeriği ayıklar.
@@ -282,6 +350,9 @@ final class ContentLibrary {
     private func buildIndexes() {
         var byID: [MediaID: MediaItem] = [:]
         var byCategory: [MediaKind: [String: [MediaItem]]] = [:]
+        var byTMDBID: [Int: MediaItem] = [:]
+        var byTitle: [String: [MediaItem]] = [:]
+        var byLooseTitle: [String: [MediaItem]] = [:]
 
         byID.reserveCapacity(catalog.values.reduce(0) { $0 + $1.count })
         for (kind, items) in catalog {
@@ -291,12 +362,26 @@ final class ContentLibrary {
                 if let categoryID = item.categoryID {
                     grouped[categoryID, default: []].append(item)
                 }
+                guard kind == .movie else { continue }
+                if let tmdbID = item.tmdbID, byTMDBID[tmdbID] == nil {
+                    byTMDBID[tmdbID] = item
+                }
+                let key = Self.titleKey(item.title)
+                guard !key.isEmpty else { continue }
+                byTitle[key, default: []].append(item)
+                let loose = Self.looseTitleKey(item.title)
+                if loose != key, !loose.isEmpty {
+                    byLooseTitle[loose, default: []].append(item)
+                }
             }
             byCategory[kind] = grouped
         }
 
         itemsByID = byID
         itemsByCategory = byCategory
+        moviesByTMDBID = byTMDBID
+        moviesByTitle = byTitle
+        moviesByLooseTitle = byLooseTitle
     }
 
     /// Anasayfa raylarının ve katalogların yeniden çizilmesi gerektiğini bildirir.
@@ -366,26 +451,6 @@ final class ContentLibrary {
     /// Hero banner içeriği: görseli olan, en yüksek puanlı film ve diziler.
     /// Aday havuzu baştan sınırlanıyor; tüm katalogu süzüp sonra kırpmak
     /// on binlerce kaydın gereksiz kopyalanması demekti.
-    private func buildSpotlight() -> [MediaItem] {
-        func candidates(_ kind: MediaKind, limit: Int) -> [MediaItem] {
-            var picked: [MediaItem] = []
-            picked.reserveCapacity(limit)
-            for item in catalog[kind] ?? [] where item.backdropURL != nil || item.posterURL != nil {
-                picked.append(item)
-                if picked.count == limit { break }
-            }
-            return picked
-        }
-
-        // Katalogda aynı yayın iki kez bulunabiliyor (sağlayıcı listeleri
-        // temiz değil); banner'da tekrar eden kayıt hem yanlış görünüyor hem
-        // de diffable data source'u çökertiyor.
-        var seen = Set<MediaID>()
-        let pool = (candidates(.movie, limit: 40) + candidates(.series, limit: 20))
-            .filter { seen.insert($0.id).inserted }
-        return Array(pool.sorted { ($0.rating ?? 0) > ($1.rating ?? 0) }.prefix(8))
-    }
-
     /// İzleme kayıtlarını katalogdaki gerçek içerikle eşleştirir.
     ///
     /// İçerik başına tek kayıt dönüyor. İlerleme dizilerde **bölüm bazında**
@@ -427,147 +492,108 @@ final class ContentLibrary {
         }
     }
 
-    /// TMDB'den asenkron çekilen koleksiyon parçalarını kullanıcının kataloğuyla eşleştirir.
+    // MARK: - Seri filmler (TMDB koleksiyonları)
+
+    /// TMDB koleksiyonunun parçalarını kullanıcının kataloğuyla eşleştirir.
+    ///
+    /// Eşleştirme tamamen TMDB verisi üzerinden yürüyor; uygulamada seri
+    /// listesi, çeviri sözlüğü ya da başlık kalıbı gömülü değil:
+    ///
+    /// 1. **TMDB kimliği.** Sağlayıcı `tmdb_id` gönderiyorsa (Xtream
+    ///    panellerinin çoğu gönderiyor) eşleşme birebir ve yanılma payı yok.
+    /// 2. **Başlık.** Koleksiyon iki dilde birden çekildiği için her parçanın
+    ///    Türkçe, İngilizce ve orijinal adı elde. Sağlayıcı hangisini yazmış
+    ///    olursa olsun normalize edilmiş biçimi tutuyor.
+    /// 3. **Yıl destekli gevşek başlık.** Sondaki sıra numarası/rakam atılmış
+    ///    biçim, yalnızca yayın yılı da tutuyorsa kabul ediliyor.
+    ///
+    /// Katalogda karşılığı bulunamayan parçalar da listeleniyor — seri eksiksiz
+    /// görünüyor, listede olmayan filme dokunulduğunda uyarı çıkıyor.
     func matchFranchiseEntries(parts: [TMDBCollectionPart], for item: MediaItem) -> [FranchiseEntry] {
-        guard item.kind == .movie, !parts.isEmpty else { return [] }
-        let allMovies = catalog[.movie] ?? []
+        // Tek parçalı bir "koleksiyon" seri değil: TMDB kimi filmi tek başına
+        // bir koleksiyona koyuyor ve ekranda yalnızca filmin kendisini taşıyan
+        // bir "Seri Filmler" rayı çıkıyordu.
+        guard item.kind == .movie, parts.count >= 2 else { return [] }
+
         var entries: [FranchiseEntry] = []
-        var matchedCatalogIDs: Set<MediaID> = []
+        var usedCatalogIDs: Set<MediaID> = [item.id]
 
         for part in parts {
-            let normTR = normalizeForFranchise(part.title)
-            let normEN = part.originalTitle.map { normalizeForFranchise($0) } ?? ""
-            var possibleVariants: Set<String> = [normTR]
-            if !normEN.isEmpty { possibleVariants.insert(normEN) }
+            // Filmin kendisi rayda tekrar etmiyor: ray "serinin diğer
+            // filmleri" demek. Bu kontrol başta yapılmazsa parça katalogda
+            // eşleşemiyor (kendisi zaten dışlanmış) ve TMDB verisiyle sanal
+            // bir kart olarak yeniden çiziliyordu.
+            guard !isSameTitle(part, as: item) else { continue }
 
-            // Çeviri varyantlarını türet (örn: Endgame -> Son Oyun, Avengers -> Yenilmezler, Civil War -> İç Savaş)
-            for base in [normTR, normEN] where !base.isEmpty {
-                for (enKey, trList) in Self.commonSubtitleTranslations {
-                    if base.contains(enKey) {
-                        for tr in trList {
-                            let replaced = base.replacingOccurrences(of: enKey, with: tr)
-                            possibleVariants.insert(replaced)
-                            possibleVariants.insert(replaced.replacingOccurrences(of: "avengers", with: "yenilmezler"))
-                            possibleVariants.insert(replaced.replacingOccurrences(of: "yenilmezler", with: "avengers"))
-                            possibleVariants.insert(replaced.replacingOccurrences(of: "captain america", with: "kaptan amerika"))
-                            possibleVariants.insert(replaced.replacingOccurrences(of: "kaptan amerika", with: "captain america"))
-                        }
-                    }
-                }
-            }
+            let match = catalogMatch(for: part, excluding: usedCatalogIDs)
+            if let match { usedCatalogIDs.insert(match.id) }
 
-            var matchedItem: MediaItem?
-            for candidate in allMovies where !matchedCatalogIDs.contains(candidate.id) {
-                if let cid = candidate.tmdbID, cid == part.id {
-                    matchedItem = candidate
-                    break
-                }
-                let normCandidate = normalizeForFranchise(candidate.title)
-                if possibleVariants.contains(normCandidate) {
-                    matchedItem = candidate
-                    break
-                }
-                // Rakam farklılıklarını tolere et (örn: 'Thor 2: Karanlık Dünya' vs 'Thor: Karanlık Dünya')
-                let normCandidateNoNum = normCandidate.replacingOccurrences(of: #"\b\d+\b"#, with: "", options: .regularExpression)
-                    .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                if possibleVariants.contains(normCandidateNoNum) {
-                    matchedItem = candidate
-                    break
-                }
-
-                // Yıl ve ana başlık kökü eşleşmesi (örn: 2019 + Avengers / Yenilmezler)
-                if let partYear = part.releaseYear, let cYear = candidate.year, String(cYear) == partYear {
-                    let isMockbuster = normCandidate.contains("reenactors") || normCandidate.contains("bikini") || normCandidate.contains("scavengers") || normCandidate.contains("making") || normCandidate.contains("behind")
-                    if !isMockbuster {
-                        let cStem = extractPrimaryFranchiseStem(from: candidate.title)
-                        let pStem = extractPrimaryFranchiseStem(from: part.title)
-                        if cStem == pStem || (cStem.count >= 4 && pStem.count >= 4 && (cStem.contains(pStem) || pStem.contains(cStem))) {
-                            matchedItem = candidate
-                            break
-                        }
-                        if (cStem.contains("avenger") || cStem.contains("yenilmez")) && (pStem.contains("avenger") || pStem.contains("yenilmez")) {
-                            matchedItem = candidate
-                            break
-                        }
-                    }
-                }
-            }
-
-            if let matchedItem {
-                matchedCatalogIDs.insert(matchedItem.id)
-                entries.append(FranchiseEntry(
-                    id: matchedItem.id.description,
-                    title: matchedItem.title,
+            entries.append(
+                FranchiseEntry(
+                    id: match.map { $0.id.description } ?? "tmdb-\(part.id)",
+                    title: match?.title ?? part.title,
                     originalTitle: part.originalTitle,
-                    year: matchedItem.year ?? Int(part.releaseYear ?? ""),
+                    year: match?.year ?? part.releaseYear.flatMap(Int.init),
                     releaseDate: part.releaseDate,
-                    posterURL: matchedItem.posterURL ?? part.posterURL,
-                    backdropURL: matchedItem.backdropURL ?? part.backdropURL,
-                    overview: matchedItem.plot ?? part.overview,
+                    // Görsel tercihen TMDB'den: sağlayıcı afişleri tutarsız ve
+                    // rayda yan yana duran kartların birbirini tutması gerekiyor.
+                    posterURL: part.posterURL ?? match?.posterURL,
+                    backdropURL: part.backdropURL ?? match?.backdropURL,
+                    overview: part.overview ?? match?.plot,
                     tmdbID: part.id,
-                    localItem: matchedItem
-                ))
-            } else {
-                // Kullanıcının listesinde YOK -> TMDB verisiyle sanal kart oluştur
-                entries.append(FranchiseEntry(
-                    id: "tmdb-\(part.id)",
-                    title: part.title,
-                    originalTitle: part.originalTitle,
-                    year: Int(part.releaseYear ?? ""),
-                    releaseDate: part.releaseDate,
-                    posterURL: part.posterURL,
-                    backdropURL: part.backdropURL,
-                    overview: part.overview,
-                    tmdbID: part.id,
-                    localItem: nil
-                ))
-            }
+                    localItem: match
+                )
+            )
         }
-
         return entries
     }
 
-    /// 1. Seriye ait tüm filmleri döner (kullanıcının listesinde olanlar + seriye dahil olup listede henüz bulunmayanlar).
+    /// Parça, detayı açık olan filmin kendisi mi.
+    ///
+    /// Sağlayıcı TMDB kimliği veriyorsa kimlik son söz: aynı serideki farklı
+    /// filmler benzer adlar taşıyabiliyor. Kimlik yoksa başlık varyantlarına
+    /// bakılıyor.
+    private func isSameTitle(_ part: TMDBCollectionPart, as item: MediaItem) -> Bool {
+        if let tmdbID = item.tmdbID { return tmdbID == part.id }
+        let itemKey = Self.titleKey(item.title)
+        guard !itemKey.isEmpty else { return false }
+        return part.titleVariants.contains { Self.titleKey($0) == itemKey }
+    }
+
+    /// Bir koleksiyon parçasının katalogdaki karşılığı.
+    private func catalogMatch(for part: TMDBCollectionPart, excluding used: Set<MediaID>) -> MediaItem? {
+        if let byID = moviesByTMDBID[part.id], !used.contains(byID.id) { return byID }
+
+        let partYear = part.releaseYear.flatMap(Int.init)
+
+        // 1) Tam başlık — üç dil varyantının herhangi biri.
+        for variant in part.titleVariants {
+            let key = Self.titleKey(variant)
+            guard !key.isEmpty, let candidates = moviesByTitle[key] else { continue }
+            if let exact = candidates.first(where: { !used.contains($0.id) && $0.year == partYear }) {
+                return exact
+            }
+            if let any = candidates.first(where: { !used.contains($0.id) }) { return any }
+        }
+
+        // 2) Sondaki sıra numarası atılmış biçim — yalnızca yıl da tutuyorsa.
+        // "Thor 2: Karanlık Dünya" ile "Thor: Karanlık Dünya" gibi sağlayıcı
+        // farklarını kapatıyor, alakasız filmleri seriye sokmuyor.
+        guard let partYear else { return nil }
+        for variant in part.titleVariants {
+            let key = Self.looseTitleKey(variant)
+            guard !key.isEmpty, let candidates = moviesByLooseTitle[key] else { continue }
+            if let match = candidates.first(where: { !used.contains($0.id) && $0.year == partYear }) {
+                return match
+            }
+        }
+        return nil
+    }
+
+    /// Seri filmleri. TMDB koleksiyonu yoksa seri de yok.
     func franchiseEntries(for item: MediaItem, tmdb: TMDBMetadata? = nil) -> [FranchiseEntry] {
-        if let tmdb, !tmdb.collectionParts.isEmpty {
-            let matched = matchFranchiseEntries(parts: tmdb.collectionParts, for: item)
-            if !matched.isEmpty { return matched }
-        }
-
-        // Çevrimdışı / TMDB'siz kesin kök eşleşmesi
-        guard item.kind == .movie else { return [] }
-        let allMovies = catalog[.movie] ?? []
-        var entries: [FranchiseEntry] = []
-        let targetStem = extractPrimaryFranchiseStem(from: item.title)
-        guard targetStem.count >= 3 else { return [] }
-
-        for candidate in allMovies {
-            let candidateStem = extractPrimaryFranchiseStem(from: candidate.title)
-            if targetStem == candidateStem {
-                entries.append(FranchiseEntry(
-                    id: candidate.id.description,
-                    title: candidate.title,
-                    originalTitle: nil,
-                    year: candidate.year,
-                    releaseDate: nil,
-                    posterURL: candidate.posterURL,
-                    backdropURL: candidate.backdropURL,
-                    overview: candidate.plot,
-                    tmdbID: candidate.tmdbID,
-                    localItem: candidate
-                ))
-            }
-        }
-
-        entries.sort { a, b in
-            if let ya = a.year, let yb = b.year, ya != yb {
-                return ya < yb
-            }
-            return a.title.localizedStandardCompare(b.title) == .orderedAscending
-        }
-
-        return entries
+        guard let tmdb else { return [] }
+        return matchFranchiseEntries(parts: tmdb.collectionParts, for: item)
     }
 
     /// Yalnızca kullanıcının listesinde var olan seri filmlerini döner.
@@ -577,352 +603,151 @@ final class ContentLibrary {
             .filter { $0.id != item.id }
     }
 
-    /// İçeriğin bir seriye (franchise) ait olup olmadığını kontrol eder.
-    func hasFranchise(for item: MediaItem, tmdb: TMDBMetadata? = nil) -> Bool {
-        let entries = franchiseEntries(for: item, tmdb: tmdb)
-        return entries.count > 1
-    }
+    // MARK: - Öneriler
 
-    /// 2. Detay ekranının en altındaki "Önerilen İçerikler" bölümü:
-    /// - Seri filmleri KESİNLİKLE İÇERMEZ (seri filmler üstte ayrı başlıkta gösterilir).
-    /// - TMDB izleyici alışkanlıkları ve öneri motoru (Recommendations API).
-    /// - Multiverse (Marvel, DC) & Sinematik Vibe (John Wick -> Nobody, Bullet Train, Equalizer, Extraction) Kümeleri.
-    /// - Oyuncu / Yönetmen eşleşmesi ve kategori tamamlayıcısı.
-    func recommendations(for item: MediaItem, tmdb: TMDBMetadata? = nil, limit: Int = 16) -> [MediaItem] {
+    /// Detay ekranının altındaki "Önerilen İçerikler".
+    ///
+    /// Sıra: TMDB'nin kendi öneri/benzer listesi → aynı yönetmen ve oyuncular
+    /// → aynı kategori → katalogun kalanı. Serinin filmleri buraya girmiyor;
+    /// onlar üstte kendi rayında duruyor.
+    ///
+    /// Daha önce burada elle yazılmış "sinematik evren" kümeleri vardı: Marvel,
+    /// DC, John Wick benzeri listeler ve bunları yakalayan düzenli ifadeler.
+    /// Kapsamı yazıldığı kadardı, dili Türkçeye sabitti ve TMDB'nin gerçek
+    /// izleyici verisiyle yarışamıyordu. Kaldırıldı.
+    func recommendations(
+        for item: MediaItem,
+        tmdb: TMDBMetadata? = nil,
+        franchise franchiseEntries: [FranchiseEntry]? = nil,
+        limit: Int = 16
+    ) -> [MediaItem] {
         var result: [MediaItem] = []
         var excludedIDs: Set<MediaID> = [item.id]
 
-        // Serideki tüm filmleri önerilerden KESİNLİKLE hariç tut (önerilerde seri tekrarlanmasın)
-        let franchiseMovies = franchise(for: item, tmdb: tmdb)
-        for fm in franchiseMovies {
-            excludedIDs.insert(fm.id)
+        // Serideki filmler önerilerde tekrar etmesin.
+        let seriesEntries = franchiseEntries ?? self.franchiseEntries(for: item, tmdb: tmdb)
+        for entry in seriesEntries {
+            if let local = entry.localItem { excludedIDs.insert(local.id) }
         }
 
-        let allMovies = catalog[.movie] ?? []
-        let normTitle = normalizeForFranchise(item.title)
+        let pool = catalog[item.kind] ?? []
 
-        // 1. TMDB'nin Gerçek İzleyici Davranışı Önerileri (Multiverse / Vibe Recommendations)
-        if let tmdb, !tmdb.recommendedMovieIDs.isEmpty || !tmdb.recommendedMovieTitles.isEmpty {
-            let recIDs = Set(tmdb.recommendedMovieIDs)
-            let recTitles = tmdb.recommendedMovieTitles.map { normalizeForFranchise($0) }
+        // 1) TMDB'nin öneri ve benzer listesi.
+        if let tmdb {
+            let recommendedIDs = tmdb.recommendedMovieIDs
+            for tmdbID in recommendedIDs {
+                guard let candidate = itemsByTMDBID(tmdbID, kind: item.kind),
+                      !excludedIDs.contains(candidate.id) else { continue }
+                result.append(candidate)
+                excludedIDs.insert(candidate.id)
+                if result.count >= limit { return result }
+            }
 
-            for candidate in allMovies where !excludedIDs.contains(candidate.id) {
-                if let cid = candidate.tmdbID, recIDs.contains(cid) {
-                    result.append(candidate)
-                    excludedIDs.insert(candidate.id)
-                    if result.count >= 8 { break }
-                } else {
-                    let normCandidate = normalizeForFranchise(candidate.title)
-                    if recTitles.contains(where: { $0 == normCandidate }) {
-                        result.append(candidate)
-                        excludedIDs.insert(candidate.id)
-                        if result.count >= 8 { break }
-                    }
-                }
+            // Kimlik tutmayan listelerde başlıktan eşleşme.
+            for title in tmdb.recommendedMovieTitles {
+                let key = Self.titleKey(title)
+                guard !key.isEmpty,
+                      let candidate = moviesByTitle[key]?.first(where: { !excludedIDs.contains($0.id) })
+                else { continue }
+                result.append(candidate)
+                excludedIDs.insert(candidate.id)
+                if result.count >= limit { return result }
             }
         }
 
-        // 2. Multiverse & Sinematik Tarz Kümeleri (Marvel MCU, DC, John Wick Gun-Fu / Revenge, Heist vb.)
-        if item.kind == .movie && result.count < limit {
-            if let matchedCluster = Self.cinematicVibeClusters.first(where: { cluster in
-                cluster.triggers.contains(where: { normTitle.contains($0) })
-            }) {
-                for recPattern in matchedCluster.recommendationPatterns {
-                    for candidate in allMovies where !excludedIDs.contains(candidate.id) {
-                        let normCandidate = normalizeForFranchise(candidate.title)
-                        if normCandidate.range(of: recPattern, options: .regularExpression) != nil {
-                            result.append(candidate)
-                            excludedIDs.insert(candidate.id)
-                            if result.count >= 12 { break }
-                        }
-                    }
-                    if result.count >= 12 { break }
-                }
-            }
-        }
+        // 2) Aynı yönetmen ya da başrol.
+        let director = (tmdb?.director ?? item.director)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty
+        let castList = (tmdb?.cast.nilIfEmptyList ?? item.cast)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.count >= 3 }
+            .prefix(3)
 
-        // 3. Oyuncu ve Yönetmen Eşleşmesi (Aynı aktör veya yönetmenin listedeki diğer filmleri)
-        let director = tmdb?.director ?? item.director?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let castList = (tmdb?.cast.nilIfEmptyList ?? item.cast).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { $0.count >= 3 }
-
-        if (director != nil || !castList.isEmpty) && result.count < limit {
-            for candidate in allMovies where !excludedIDs.contains(candidate.id) {
+        if director != nil || !castList.isEmpty {
+            for candidate in pool where !excludedIDs.contains(candidate.id) {
                 var matchesPerson = false
-                if let d = director, !d.isEmpty, let cd = candidate.director, cd.localizedCaseInsensitiveContains(d) {
+                if let director, let candidateDirector = candidate.director,
+                   candidateDirector.localizedCaseInsensitiveContains(director) {
                     matchesPerson = true
                 }
-                if !matchesPerson && !castList.isEmpty {
-                    for actor in castList.prefix(3) {
-                        if candidate.cast.contains(where: { $0.localizedCaseInsensitiveContains(actor) }) {
-                            matchesPerson = true
-                            break
-                        }
+                if !matchesPerson {
+                    matchesPerson = castList.contains { actor in
+                        candidate.cast.contains { $0.localizedCaseInsensitiveContains(actor) }
                     }
                 }
-                if matchesPerson {
-                    result.append(candidate)
-                    excludedIDs.insert(candidate.id)
-                    if result.count >= 14 { break }
-                }
-            }
-        }
-
-        // 4. Kategori / Tür Tamamlayıcısı
-        if result.count < limit, let categoryID = item.categoryID {
-            let siblings = itemsByCategory[item.kind]?[categoryID] ?? []
-            for candidate in siblings where !excludedIDs.contains(candidate.id) {
+                guard matchesPerson else { continue }
                 result.append(candidate)
                 excludedIDs.insert(candidate.id)
-                if result.count == limit { break }
+                if result.count >= limit { return result }
             }
         }
 
-        // 5. Genel Katalog Tamamlayıcısı
-        if result.count < limit {
-            let fallbackList = catalog[item.kind] ?? []
-            for candidate in fallbackList where !excludedIDs.contains(candidate.id) {
+        // 3) Aynı kategori.
+        if let categoryID = item.categoryID {
+            for candidate in itemsByCategory[item.kind]?[categoryID] ?? []
+            where !excludedIDs.contains(candidate.id) {
                 result.append(candidate)
                 excludedIDs.insert(candidate.id)
-                if result.count == limit { break }
+                if result.count >= limit { return result }
             }
         }
 
-        return Array(result.prefix(limit))
-    }
-
-    /// Geriye uyumluluk için alias
-    func related(to item: MediaItem, limit: Int = 16) -> [MediaItem] {
-        recommendations(for: item, limit: limit)
-    }
-
-    // MARK: - Popüler Altyazı ve Çeviri Varyantları
-
-    private static let commonSubtitleTranslations: [String: [String]] = [
-        "endgame": ["son oyun", "end game", "sonoyun"],
-        "end game": ["son oyun", "endgame"],
-        "infinity war": ["sonsuzluk savasi"],
-        "age of ultron": ["ultron cagi", "ultron"],
-        "the avengers": ["yenilmezler", "avengers"],
-        "avengers": ["yenilmezler"],
-        "civil war": ["ic savas", "kahramanlarin savasi"],
-        "winter soldier": ["kis askeri"],
-        "the first avenger": ["ilk yenilmez", "ilk avenger"],
-        "brave new world": ["cesur yeni dunya"],
-        "dark world": ["karanlik dunya"],
-        "love and thunder": ["ask ve gok gurultusu"],
-        "no way home": ["eve donus yok"],
-        "far from home": ["evden uzakta"],
-        "homecoming": ["eve donus"],
-        "dead reckoning": ["olumcul hesaplasma"],
-        "fallout": ["yansimalar"],
-        "ghost protocol": ["hayalet protokol"],
-        "rogue nation": ["gizli millet", "kacak ulus"],
-        "the two towers": ["iki kule"],
-        "the return of the king": ["kralin donusu"],
-        "the fellowship of the ring": ["yuzuk kardesligi"],
-        "an unexpected journey": ["beklenmedik bir yolculuk"],
-        "desolation of smaug": ["smaugun corak topraklari"],
-        "battle of the five armies": ["bes ordunun savasi"],
-        "reloaded": ["yeniden yuklendi"],
-        "revolutions": ["devrimler"],
-        "resurrections": ["yeniden dogus", "dirilis"],
-        "salvation": ["kurtulus"],
-        "genisys": ["yaratilis"],
-        "dark fate": ["kara kader"],
-        "judgement day": ["kiyamet gunu", "hesap gunu"]
-    ]
-
-    // MARK: - Sinematik Evrenler & Vibe Kümeleri
-
-    private struct CinematicVibeCluster: Sendable {
-        let name: String
-        let triggers: [String]
-        let recommendationPatterns: [String]
-    }
-
-    private static let cinematicVibeClusters: [CinematicVibeCluster] = [
-        // 1. Marvel / MCU Multiverse
-        CinematicVibeCluster(
-            name: "Marvel Multiverse",
-            triggers: [
-                "orumcek adam", "spider man", "iron man", "demir adam", "yenilmezler", "avengers",
-                "thor", "kaptan amerika", "captain america", "doctor strange", "doktor strange",
-                "black widow", "kara dul", "galaksinin koruyuculari", "guardians of the galaxy",
-                "ant man", "karinca adam", "black panther", "kara panter", "shang chi", "eternals",
-                "deadpool", "wolverine", "venom", "x men", "hulk", "daredevil", "blade", "loki", "morbius"
-            ],
-            recommendationPatterns: [
-                #"\bdeadpool\b"#, #"\bwolverine\b"#, #"\byenilmezler\b"#, #"\bavengers\b"#,
-                #"\bdemir adam\b"#, #"\biron man\b"#, #"\bdoktor strange\b"#, #"\bdoctor strange\b"#,
-                #"\bkaptan amerika\b"#, #"\bcaptain america\b"#, #"\borumcek adam\b"#, #"\bspider man\b"#,
-                #"\bgalaksinin koruyuculari\b"#, #"\bguardians of the galaxy\b"#, #"\bthor\b"#,
-                #"\bblack panther\b"#, #"\bkara panter\b"#, #"\bant man\b"#, #"\bvenom\b"#, #"\bx men\b"#, #"\bhulk\b"#
-            ]
-        ),
-        // 2. DC Multiverse
-        CinematicVibeCluster(
-            name: "DC Multiverse",
-            triggers: [
-                "batman", "kara sovalye", "dark knight", "superman", "adalet birligi", "justice league",
-                "aquaman", "wonder woman", "flash", "joker", "suicide squad", "intihar timi", "shazam", "black adam"
-            ],
-            recommendationPatterns: [
-                #"\bbatman\b"#, #"\bkara sovalye\b"#, #"\bjoker\b"#, #"\bsuperman\b"#,
-                #"\badalet birligi\b"#, #"\bjustice league\b"#, #"\baquaman\b"#, #"\bwonder woman\b"#,
-                #"\bflash\b"#, #"\bsuicide squad\b"#, #"\bshazam\b"#, #"\bblack adam\b"#
-            ]
-        ),
-        // 3. Gun-Fu / Assassin / Revenge Action (John Wick Vibe)
-        CinematicVibeCluster(
-            name: "Gun-Fu & Revenge Action",
-            triggers: [
-                "john wick", "nobody", "onemsiz biri", "equalizer", "adalet", "bullet train", "suikast treni",
-                "extraction", "tahliye", "the beekeeper", "beekeeper", "olumcul koruma", "atomic blonde",
-                "sarisin bomba", "the raid", "baskin", "taken", "96 saat", "sicario", "man on fire",
-                "gazap atesi", "sisu", "kill bill", "leon", "sevginin gucu", "wrath of man", "intikam vakti",
-                "polar", "peppermint", "monkey man", "hitman", "tetikci"
-            ],
-            recommendationPatterns: [
-                #"\bnobody\b"#, #"\bonemsiz biri\b"#, #"\bequalizer\b"#, #"\badalet\b(?!\s*birligi|\s*merkezi)"#,
-                #"\bbullet train\b"#, #"\bsuikast treni\b"#, #"\bextraction\b"#, #"\btahliye\b"#,
-                #"\bbeekeeper\b"#, #"\bolumcul koruma\b"#, #"\batomic blonde\b"#, #"\bsarisin bomba\b"#,
-                #"\bthe raid\b"#, #"\bbaskin\b"#, #"\btaken\b"#, #"\b96 saat\b"#, #"\bsicario\b"#,
-                #"\bman on fire\b"#, #"\bgazap atesi\b"#, #"\bsisu\b"#, #"\bkill bill\b"#, #"\bleon\b"#,
-                #"\bwrath of man\b"#, #"\bintikam vakti\b"#, #"\bhitman\b"#, #"\bpeppermint\b"#, #"\bmonkey man\b"#
-            ]
-        ),
-        // 4. Soygun & Zeka Oyunları (Heist & Crime)
-        CinematicVibeCluster(
-            name: "Heist & Crime",
-            triggers: [
-                "ocean", "la casa de papel", "baby driver", "the town", "hirsizlar sehri", "heat",
-                "buyuk hesaplasma", "now you see me", "sihirbazlar cetesi", "den of thieves", "red notice", "inside man"
-            ],
-            recommendationPatterns: [
-                #"\bocean\b"#, #"\bbaby driver\b"#, #"\bthe town\b"#, #"\bhirsizlar sehri\b"#,
-                #"\bheat\b"#, #"\bbuyuk hesaplasma\b"#, #"\bnow you see me\b"#, #"\bsihirbazlar cetesi\b"#,
-                #"\bden of thieves\b"#, #"\bred notice\b"#, #"\binside man\b"#
-            ]
-        ),
-        // 5. Bilim Kurgu Siberpunk & Zeka (Sci-Fi Cyberpunk)
-        CinematicVibeCluster(
-            name: "Sci-Fi Cyberpunk",
-            triggers: [
-                "matrix", "blade runner", "cyberpunk", "alita", "ghost in the shell", "minority report",
-                "azinlik raporu", "i robot", "ben robot", "total recall", "gercege cagri", "upgrade",
-                "inception", "baslangic", "tenet", "interstellar", "yildizlararasi"
-            ],
-            recommendationPatterns: [
-                #"\bmatrix\b"#, #"\bblade runner\b"#, #"\balita\b"#, #"\bghost in the shell\b"#,
-                #"\bminority report\b"#, #"\bazinlik raporu\b"#, #"\bi robot\b"#, #"\btotal recall\b"#,
-                #"\bupgrade\b"#, #"\binception\b"#, #"\bbaslangic\b"#, #"\btenet\b"#, #"\binterstellar\b"#
-            ]
-        )
-    ]
-
-    // MARK: - Evrensel Franchise / Seri Analiz Yardımcıları
-
-    private func extractPrimaryFranchiseStem(from title: String) -> String {
-        var cleaned = title.replacingOccurrences(
-            of: #"\s*[\(\[\{][^\)\]\}]*[\)\]\}]"#,
-            with: "",
-            options: .regularExpression
-        )
-        cleaned = cleaned.replacingOccurrences(
-            of: #"(?i)\b(4k|uhd|fhd|hd|1080p|720p|dual|multi|vostfr|sub|dub|extended|unrated|remastered|hevc)\b"#,
-            with: "",
-            options: .regularExpression
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let delimiters = CharacterSet(charactersIn: ":|•/\\")
-        let parts = cleaned.components(separatedBy: delimiters)
-        let firstSubpart = parts.first ?? cleaned
-        let dashParts = firstSubpart.components(separatedBy: " - ")
-        let primaryPart = (dashParts.first ?? firstSubpart).trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let strippedSuffix = primaryPart.replacingOccurrences(
-            of: #"(?i)\s+(bölüm|bolum|part|partie|teil|parte|kısım|kisim|chapter|chapitre|kapitel|vol|volume|ep|episode)?\s*(\d+(\.\d+)?|[ivx]+)$"#,
-            with: "",
-            options: .regularExpression
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
-
-        return normalizeForFranchise(strippedSuffix)
-    }
-
-    // MARK: - Evrensel Franchise / Seri Analiz Yardımcıları
-
-    private func extractFranchiseStems(from title: String) -> [String] {
-        // 1. Uluslararası M3U / IPTV format, kalite, yıl ve ses etiketlerini temizle:
-        // [4K], (FHD), [TR-EN], (VOSTFR), [Multi], [HEVC], (2024), [Extended], [1080p] vb.
-        var cleaned = title.replacingOccurrences(
-            of: #"\s*[\(\[\{][^\)\]\}]*[\)\]\}]"#,
-            with: "",
-            options: .regularExpression
-        )
-        cleaned = cleaned.replacingOccurrences(
-            of: #"(?i)\b(4k|uhd|fhd|hd|1080p|720p|dual|multi|vostfr|sub|dub|extended|unrated|remastered|hevc)\b"#,
-            with: "",
-            options: .regularExpression
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // 2. Bölüm / Alt başlık ayraçları: ":", "|", "•", " - ", " – ", " — ", "/", "\"
-        let delimiters = CharacterSet(charactersIn: ":|•/\\")
-        let parts = cleaned.components(separatedBy: delimiters)
-        let firstSubpart = parts.first ?? cleaned
-        let dashParts = firstSubpart.components(separatedBy: " - ")
-        let primaryPart = (dashParts.first ?? firstSubpart).trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // 3. Çok dilli bölüm / parça / roma rakamı temizleme (TR/EN/FR/DE/ES/IT):
-        // Part, Partie, Teil, Parte, Bölüm, Kısım, Chapter, Chapitre, Kapitel, Vol, Volume, Ep, Episode + Rakamlar
-        let strippedSuffix = primaryPart.replacingOccurrences(
-            of: #"(?i)\s+(bölüm|bolum|part|partie|teil|parte|kısım|kisim|chapter|chapitre|kapitel|vol|volume|ep|episode)?\s*(\d+(\.\d+)?|[ivx]+)$"#,
-            with: "",
-            options: .regularExpression
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
-
-        var stems: Set<String> = []
-        let normalizedPrimary = normalizeForFranchise(strippedSuffix)
-        if normalizedPrimary.count >= 3 {
-            stems.insert(normalizedPrimary)
+        // 4) Katalogun kalanı: ray hiçbir zaman boş kalmıyor.
+        for candidate in pool where !excludedIDs.contains(candidate.id) {
+            result.append(candidate)
+            excludedIDs.insert(candidate.id)
+            if result.count >= limit { break }
         }
 
-        // 4. Çok dilli bağlaçlar ile bağlanan seriler (" ve ", " and ", " und ", " et ", " e ", " y "):
-        // Örn: "Harry Potter et la Coupe de Feu" -> "Harry Potter"
-        // Örn: "Astérix et Obélix" -> "Astérix et Obélix"
-        let lower = primaryPart.lowercased()
-        for conj in [" ve ", " and ", " und ", " et ", " e ", " y "] {
-            if let range = lower.range(of: conj) {
-                let prefix = String(primaryPart[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-                let normPrefix = normalizeForFranchise(prefix)
-                if normPrefix.count >= 5 || normPrefix.split(separator: " ").count >= 2 {
-                    stems.insert(normPrefix)
-                }
-            }
-        }
-
-        // 5. İki kelimelik genel seri önekleri (örn: "Der Herr der Ringe", "The Matrix", "John Wick")
-        let words = normalizedPrimary.split(separator: " ")
-        if words.count >= 2 {
-            let twoWords = words.prefix(2).joined(separator: " ")
-            let stopPhrases: Set<String> = ["bir zamanlar", "son durak", "yeni bir", "once upon", "the last", "a very"]
-            if twoWords.count >= 5 && !stopPhrases.contains(twoWords) {
-                stems.insert(twoWords)
-            }
-        }
-
-        return Array(stems)
+        return result
     }
 
-    /// Evrensel metin normalizasyonu (Aksanları kaldırır, harf duyarlılığını siler, sembolleri temizler).
-    private func normalizeForFranchise(_ text: String) -> String {
-        // Swift'in diacriticInsensitive katmanı tüm dillerdeki aksanları (é, è, ü, ö, ş, ç, ğ, ñ, ø, å vs.) temel Latin harfine çevirir.
-        var str = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-        str = str.replacingOccurrences(of: "-", with: " ")
-        str = str.replacingOccurrences(of: "_", with: " ")
-        str = str.replacingOccurrences(of: "ı", with: "i")
-        str = str.replacingOccurrences(of: #"[^\w\s]"#, with: " ", options: .regularExpression)
-        str = str.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-        return str.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func itemsByTMDBID(_ tmdbID: Int, kind: MediaKind) -> MediaItem? {
+        kind == .movie ? moviesByTMDBID[tmdbID] : nil
+    }
+
+    // MARK: - Başlık normalizasyonu
+
+    /// Eşleştirme anahtarı.
+    ///
+    /// Sağlayıcı başlıkları kalite, dil ve kaynak etiketleriyle geliyor:
+    /// "Yenilmezler: Sonsuzluk Savaşı tr|en [4K] (2018)". Bunlar atılıp aksan,
+    /// harf durumu ve noktalama farkları siliniyor ki TMDB'den gelen başlıkla
+    /// aynı anahtara insin.
+    nonisolated static func titleKey(_ raw: String) -> String {
+        var text = raw
+        // Parantezli / köşeli etiketler.
+        text = text.replacingOccurrences(
+            of: #"\s*[\(\[\{][^\)\]\}]*[\)\]\}]"#, with: " ", options: .regularExpression
+        )
+        // "| tr", "|EN", "| 4K" gibi ekler ve sonrası.
+        if let pipe = text.firstIndex(of: "|") { text = String(text[..<pipe]) }
+        text = text.replacingOccurrences(
+            of: #"(?i)\b(4k|uhd|fhd|hd|sd|2160p|1080p|720p|dual|multi|vostfr|dublaj|remux|hevc|x264|x265|web-?dl|bluray|imax|extended|unrated|remastered)\b"#,
+            with: " ",
+            options: .regularExpression
+        )
+        var folded = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+        folded = folded.replacingOccurrences(of: "ı", with: "i")
+        let stripped = folded.unicodeScalars.map { scalar -> Character in
+            CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : " "
+        }
+        return String(stripped)
+            .replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    /// `titleKey`'in sondaki sıra numarası / roma rakamı atılmış hâli.
+    /// Yalnızca yıl da tuttuğunda kullanılıyor.
+    nonisolated static func looseTitleKey(_ raw: String) -> String {
+        titleKey(raw)
+            .replacingOccurrences(
+                of: #"\s+(bolum|part|partie|teil|parte|kisim|chapter|chapitre|kapitel|vol|volume)?\s*(\d{1,2}|[ivx]{1,4})$"#,
+                with: "",
+                options: .regularExpression
+            )
+            .trimmingCharacters(in: .whitespaces)
     }
 
     // MARK: - Detay & oynatma
@@ -1051,10 +876,13 @@ final class ContentLibrary {
         rows = []
         categories = [:]
         catalog = [:]
-        spotlight = []
         itemsByID = [:]
         itemsByCategory = [:]
+        moviesByTMDBID = [:]
+        moviesByTitle = [:]
+        moviesByLooseTitle = [:]
         detailCache = [:]
+        featured.reset()
         refreshTask?.cancel()
         refreshTask = nil
         state = .idle

@@ -191,8 +191,26 @@ final class AppModel {
         self.user = user
         isGuest = false
         self.sync = UserDataSync(uid: user.uid)
-        await pullRemoteData(for: user)
+
+        // Cihazda zaten bir liste varsa buluttan gelecek veri **beklenmiyor**.
+        // Yerel veri tam ve doğru; bulut yalnızca birleştirme yapıyor ve
+        // birleşme seçili listeyi değiştirmiyor. Beklemek her açılışa bir
+        // Firestore turu ekliyordu ve o süre boyunca ekranda yalnızca açılış
+        // göstergesi dönüyordu.
+        //
+        // Cihazda liste yoksa (yeni cihazda ilk giriş) bekliyoruz: aksi hâlde
+        // kullanıcı önce "liste ekle" ekranını görüp saniyeler sonra
+        // katalogla karşılaşırdı.
+        guard playlists.hasPlaylists else {
+            await pullRemoteData(for: user)
+            await refreshPhase()
+            return
+        }
+
         await refreshPhase()
+        Task { [weak self] in
+            await self?.pullRemoteData(for: user)
+        }
     }
 
     /// Uzaktaki listeleri/favorileri çekip yereldekiyle birleştirir.

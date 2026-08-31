@@ -87,9 +87,16 @@ struct XtreamStreamDTO: Decodable, Sendable {
     @LooseString var directSource: String?
     @LooseInt var tvArchive: Int?
     @LooseStringList var backdropPath: [String]
+    /// Paneller `get_vod_streams` yanıtında da TMDB kimliğini gönderiyor.
+    /// Bunu liste aşamasında okumak katalogun tamamına kimlik kazandırıyor:
+    /// künye eşleştirmesi isim benzerliğine hiç düşmüyor ve seri filmler
+    /// birebir eşleşiyor. Daha önce yalnızca `get_vod_info` yanıtından
+    /// okunuyordu — yani ancak bir içeriğin detayına girildiğinde.
+    @LooseInt var tmdbID: Int?
 
     enum CodingKeys: String, CodingKey {
         case num, name, cover, rating, added, plot, genre, year
+        case tmdbID = "tmdb_id"
         case streamID = "stream_id"
         case seriesID = "series_id"
         case streamIcon = "stream_icon"

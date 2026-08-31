@@ -1,14 +1,13 @@
+#if os(iOS)
 import UIKit
 
-/// Liste yönetimi: ekleme, seçme, düzenleme ve silme.
+/// Liste yönetimi: ekleme, seçme, düzenleme ve silme (telefon ve tablet).
+///
+/// Apple TV karşılığı `PlaylistsViewController+tvOS.swift` içinde: orada
+/// tablo yerine odaklanabilir kartlar var.
 final class PlaylistsViewController: UIViewController {
     private let model: AppModel
-    // `insetGrouped` tvOS'ta yok; orada düz gruplu stil kullanılıyor.
-    #if os(iOS)
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
-    #else
-    private let tableView = UITableView(frame: .zero, style: .grouped)
-    #endif
     private var emptyState: EmptyStateView!
 
     init(model: AppModel) {
@@ -36,9 +35,6 @@ final class PlaylistsViewController: UIViewController {
         tableView.applyNativeScrollEdges()
         tableView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tableView)
-        #if os(tvOS)
-        installLongPressActions()
-        #endif
 
         emptyState = EmptyStateView.installed(in: view)
         // Metinler boş durum görünümü kurulduktan sonra: başlık ve boş durum
@@ -93,46 +89,6 @@ final class PlaylistsViewController: UIViewController {
         tableView.reloadData()
     }
 
-    // MARK: - tvOS satır eylemleri
-
-    /// tvOS'ta satırı kaydırmak mümkün değil; düzenleme ve silme odaklı satıra
-    /// uzun basınca açılan eylem listesinden yapılıyor.
-    #if os(tvOS)
-    private func installLongPressActions() {
-        let recognizer = UILongPressGestureRecognizer(
-            target: self, action: #selector(handleLongPress)
-        )
-        tableView.addGestureRecognizer(recognizer)
-    }
-
-    @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-        guard gesture.state == .began,
-              let indexPath = tableView.indexPathForSelectedRow
-                  ?? tableView.indexPathsForVisibleRows?.first(where: {
-                      tableView.cellForRow(at: $0)?.isFocused == true
-                  }),
-              indexPath.row < model.playlists.playlists.count
-        else { return }
-
-        let playlist = model.playlists.playlists[indexPath.row]
-
-        let sheet = UIAlertController(title: playlist.name, message: nil, preferredStyle: .actionSheet)
-        sheet.addAction(UIAlertAction(title: L10n.edit, style: .default) { [weak self] _ in
-            guard let self else { return }
-            edit(playlist)
-        })
-        sheet.addAction(UIAlertAction(title: L10n.delete, style: .destructive) { [weak self] _ in
-            guard let self else { return }
-            Task {
-                await self.model.removePlaylist(playlist)
-                self.reload()
-            }
-        })
-        sheet.addAction(UIAlertAction(title: L10n.cancel, style: .cancel))
-        present(sheet, animated: true)
-    }
-    #endif
-
     @objc private func addPlaylist() {
         present(
             UINavigationController.app(root: AddPlaylistViewController(model: model)),
@@ -157,18 +113,10 @@ extension PlaylistsViewController: UITableViewDataSource, UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         guard !model.playlists.playlists.isEmpty else { return nil }
-        // Yönerge platforma göre değişiyor: tvOS'ta kaydırma diye bir
-        // etkileşim yok, düzenleme ve silme odaklı satıra uzun basınca açılıyor.
         let isTurkish = AppLanguage.current.effectiveLanguageCode == "tr"
-        #if os(tvOS)
-        return isTurkish
-            ? "Seçili listeyi değiştirmek için üstüne bas. Düzenlemek ya da silmek için basılı tut."
-            : "Press to select the active playlist. Press and hold to edit or delete."
-        #else
         return isTurkish
             ? "Seçili listeyi değiştirmek için üstüne dokun. Düzenlemek ya da silmek için sola kaydır."
             : "Tap to select active playlist. Swipe left to edit or delete."
-        #endif
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -234,10 +182,6 @@ extension PlaylistsViewController: UITableViewDataSource, UITableViewDelegate {
         present(alert, animated: true)
     }
 
-    /// Kaydırmalı satır eylemleri tvOS'ta yok — orada kumandayla kaydırma diye
-    /// bir etkileşim olmadığı için API'nin tamamı kullanılamıyor. tvOS'ta aynı
-    /// işi odaklı satıra uzun basmak açıyor (`playlistActions`).
-    #if os(iOS)
     func tableView(
         _ tableView: UITableView,
         trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath
@@ -259,5 +203,5 @@ extension PlaylistsViewController: UITableViewDataSource, UITableViewDelegate {
         edit.backgroundColor = AppPalette.accent
         return UISwipeActionsConfiguration(actions: [delete, edit])
     }
-    #endif
 }
+#endif

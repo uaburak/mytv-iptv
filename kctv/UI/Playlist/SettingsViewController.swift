@@ -1,6 +1,10 @@
+#if os(iOS)
 import UIKit
 
-/// Hesap, dil, listeler ve içerik yönetimi.
+/// Hesap, dil, listeler ve içerik yönetimi (telefon ve tablet).
+///
+/// Apple TV'nin karşılığı `SettingsViewController+tvOS.swift` içinde: orada
+/// tablo yerine odak diline uyan bir form var.
 final class SettingsViewController: UITableViewController {
     private enum Section: Int, CaseIterable {
         case account, language, content, developer
@@ -10,12 +14,7 @@ final class SettingsViewController: UITableViewController {
 
     init(model: AppModel) {
         self.model = model
-        // `insetGrouped` tvOS'ta yok; orada düz gruplu stil kullanılıyor.
-        #if os(iOS)
         super.init(style: .insetGrouped)
-        #else
-        super.init(style: .grouped)
-        #endif
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -25,14 +24,11 @@ final class SettingsViewController: UITableViewController {
         title = L10n.settingsTitle
         tableView.backgroundColor = AppPalette.background
         // Sekme olarak açıldığında kapat butonu anlamsız; yalnızca modalde.
-        // `.close` sistem öğesi tvOS'ta yok; orada Menu tuşu kapatıyor.
-        #if os(iOS)
         if presentingViewController != nil {
             navigationItem.rightBarButtonItem = UIBarButtonItem(
                 barButtonSystemItem: .close, target: self, action: #selector(close)
             )
         }
-        #endif
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
         tableView.applyNativeScrollEdges()
 
@@ -113,9 +109,6 @@ final class SettingsViewController: UITableViewController {
             switch indexPath.row {
             case 0:
                 configuration.text = L10n.hideAdultContent
-                // `UISwitch` tvOS'ta yok; durum orada onay imiyle gösteriliyor
-                // ve satırın kendisi seçilerek değiştiriliyor.
-                #if os(iOS)
                 let toggle = UISwitch()
                 toggle.isOn = AppSettings.hidesAdultContent
                 toggle.onTintColor = AppPalette.accent
@@ -127,9 +120,6 @@ final class SettingsViewController: UITableViewController {
                     for: .valueChanged
                 )
                 cell.accessoryView = toggle
-                #else
-                cell.accessoryType = AppSettings.hidesAdultContent ? .checkmark : .none
-                #endif
             case 1:
                 configuration.text = L10n.reloadPlaylist
                 configuration.textProperties.color = AppPalette.accent
@@ -233,3 +223,4 @@ final class SettingsViewController: UITableViewController {
         present(alert, animated: true)
     }
 }
+#endif

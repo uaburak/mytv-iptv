@@ -296,6 +296,8 @@ final class CatalogViewController: UIViewController {
         collectionView.backgroundColor = .clear
         collectionView.dataSource = self
         collectionView.delegate = self
+        collectionView.prefetchDataSource = self
+        collectionView.isPrefetchingEnabled = true
         collectionView.register(CatalogItemCell.self, forCellWithReuseIdentifier: CatalogItemCell.reuseID)
         collectionView.register(PosterCell.self, forCellWithReuseIdentifier: PosterCell.reuseID)
         collectionView.applyNativeScrollEdges()
@@ -556,5 +558,19 @@ final class CatalogHeroHeaderView: UICollectionReusableView {
     func configure(title: String, font: UIFont) {
         titleLabel.text = title
         titleLabel.font = font
+    }
+}
+
+extension CatalogViewController: UICollectionViewDataSourcePrefetching {
+    func collectionView(
+        _ collectionView: UICollectionView,
+        prefetchItemsAt indexPaths: [IndexPath]
+    ) {
+        let upcoming = indexPaths.compactMap { indexPath -> MediaItem? in
+            items.indices.contains(indexPath.item) ? items[indexPath.item] : nil
+        }
+        MediaPrefetch.warm(
+            upcoming, posterWidth: gridItemWidth(metrics: AppMetrics.metrics(for: view.bounds.width))
+        )
     }
 }

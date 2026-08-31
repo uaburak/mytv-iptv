@@ -28,6 +28,13 @@ final class DetailViewController: UIViewController {
     /// odak listenin başına düşerdi.
     private var seasonChipButtons: [Int: UIButton] = [:]
     private var episodeRowView: UIView?
+    /// Ekrandaki bölüm rayının neyi gösterdiği.
+    ///
+    /// Bölümler artık iki kez çiziliyor olabilir: sağlayıcıdan gelir gelmez
+    /// bir kez, yükleme turunun sonunda bir kez daha. Aynı veriyle ikinci kez
+    /// çizmek rayı baştan kurmak demek ve tvOS'ta odak kartın üstünden
+    /// düşüyordu; imza aynıysa çizim atlanıyor.
+    private var renderedEpisodeSignature: String?
 
     private var isPlotExpanded = false
     private var favoriteBarButton: UIBarButtonItem?
@@ -64,15 +71,64 @@ final class DetailViewController: UIViewController {
             object: nil
         )
 
-        // Detay daha önce açıldıysa ağ beklemeden dolu gelsin.
+        // Ekran **dolu** açılıyor: detay da TMDB künyesi de daha önce
+        // çözülmüşse ikisi de senkron okunuyor ve ilk karede yerinde oluyor.
+        // Anasayfa görünen kartların künyesini önceden çektiği için bu yol
+        // pratikte ana yol; ağ beklenen hâl istisna.
         detail = model.library.cachedDetail(for: item)
         selectedSeason = detail?.seasons.first?.number
-        hero.startLoadingAnimation()
+        adoptCachedMetadata()
+        adoptCachedFranchise()
+        related = model.library.recommendations(
+            for: detail?.item ?? item, tmdb: tmdbMetadata, franchise: franchiseItems, limit: 16
+        )
+        applyHeroArtwork()
+        if !hasReadyArtwork { hero.startLoadingAnimation() }
         render()
         Task { await load() }
     }
 
+    /// Elde hazır TMDB künyesini (ve logosunu) beklemeden alır.
+    private func adoptCachedMetadata() {
+        guard let metadata = TMDBService.cachedMetadata(for: detail?.item ?? item) else { return }
+        apply(metadata)
+        if let logoURL = metadata.logoURL,
+           let logo = ImageLoader.cachedImage(url: logoURL, maxPixelSize: 900) {
+            hero.logoView.image = logo
+            hero.logoView.isHidden = false
+        }
+    }
+
+    /// Daha önce çözülmüş seri filmleri beklemeden alır: aynı içeriğe ikinci
+    /// girişte ray ilk karede dolu geliyor.
+    private func adoptCachedFranchise() {
+        guard item.kind == .movie, let collectionID = tmdbMetadata?.collectionID,
+              let parts = TMDBService.cachedCollectionParts(for: collectionID)
+        else { return }
+        franchiseItems = model.library.matchFranchiseEntries(parts: parts, for: detail?.item ?? item)
+    }
+
+    /// Hero görselinin çözülmüş hâli elde mi. Yoksa nabız katmanı açılıyor.
+    private var hasReadyArtwork: Bool {
+        let current = detail?.item ?? item
+        guard let url = tmdbMetadata?.backdropURL ?? current.backdropURL else { return false }
+        return ImageLoader.cachedImage(
+            url: url,
+            maxPixelSize: RemoteImageView.pixelSize(
+                displayWidth: metrics.heroImageWidth,
+                scale: view.window?.windowScene?.screen.scale ?? traitCollection.displayScale
+            )
+        ) != nil
+    }
+
     @objc private func languageDidChange() {
+        // Künye ve seri dile bağlı; ikisi de baştan çözülüyor. Bölüm
+        // rozetleri de ("S1:B1" / "S1:E1") dile bağlı: ray yeniden kurulsun
+        // diye imza sıfırlanıyor.
+        tmdbMetadata = nil
+        franchiseItems = []
+        renderedEpisodeSignature = nil
+        adoptCachedMetadata()
         render()
         Task { await load() }
     }
@@ -88,6 +144,9 @@ final class DetailViewController: UIViewController {
         hero.updateBaseHeight(Self.heroHeight(forScreenHeight: view.bounds.height))
         // Hero içeriği alttaki bölümlerle aynı kenar payını kullanıyor.
         hero.updateHorizontalInset(metrics.screenPadding)
+        // Ölçüler ancak burada kesinleşiyor; görsel doğru çözünürlükte
+        // isteniyor (`viewDidLoad`'daki çağrı ekran boyu bilinmeden yapılıyor).
+        applyHeroArtwork()
 
         // Sekme çubuğu içeriğin üstünde duruyor; son satır altında kalmasın.
         let tabBarHeight = tabBarController?.tabBar.bounds.height ?? 0
@@ -254,6 +313,16 @@ final class DetailViewController: UIViewController {
     private var tmdbMetadata: TMDBMetadata?
 
     private func render() {
+        renderHero()
+        renderEpisodes()
+        renderCredits()
+        renderRelated()
+    }
+
+    /// Yalnızca üst blok. Gövde bölümlerinden ayrı duruyor: hero çapraz
+    /// erimeyle tazeleniyor, bölümler ise geldikleri anda — birinin gecikmesi
+    /// diğerini bekletmemeli.
+    private func renderHero() {
         let current = detail?.item ?? item
 
         // Logo varsa başlık gizli, yoksa başlık görünür.
@@ -310,10 +379,6 @@ final class DetailViewController: UIViewController {
         #if os(tvOS)
         hero.episodesButton.isHidden = !(detail?.hasEpisodes ?? false)
         #endif
-
-        renderEpisodes()
-        renderCredits()
-        renderRelated()
     }
 
     /// Dizide sürdürülecek bölümün neden seçildiği.
@@ -371,6 +436,13 @@ final class DetailViewController: UIViewController {
     }
 
     private func renderEpisodes() {
+        let signature = detail.flatMap { detail -> String? in
+            guard detail.hasEpisodes else { return nil }
+            return "\(detail.item.id.description)#\(selectedSeason ?? -1)#\(detail.seasons.count)"
+        }
+        guard signature != renderedEpisodeSignature else { return }
+        renderedEpisodeSignature = signature
+
         episodesSection.arrangedSubviews.forEach { $0.removeFromSuperview() }
         guard let detail, detail.hasEpisodes else {
             episodesSection.isHidden = true
@@ -385,13 +457,15 @@ final class DetailViewController: UIViewController {
         //
         // Sezonlar yan yana çipler. Bağlam menüsü kumandayla iki adım
         // demekti ve seçili sezon menüyü açmadan görünmüyordu.
-        if detail.seasons.count > 1 {
-            episodesSection.addArrangedSubview(makeSeasonChips(detail.seasons, selected: season))
-            // Boy kısıtı ancak çipler hiyerarşiye girdikten sonra kurulabiliyor;
-            // öncesinde Oynat butonuyla ortak ataları yok.
-            for chip in seasonChipButtons.values {
-                chip.heightAnchor.constraint(equalTo: hero.playButton.heightAnchor).isActive = true
-            }
+        //
+        // Tek sezonda da çip duruyor: bölüm rayının hangi sezona ait olduğunu
+        // söyleyen tek işaret o ve gizlendiğinde ray başlıksız, havada
+        // kalıyordu.
+        episodesSection.addArrangedSubview(makeSeasonChips(detail.seasons, selected: season))
+        // Boy kısıtı ancak çipler hiyerarşiye girdikten sonra kurulabiliyor;
+        // öncesinde Oynat butonuyla ortak ataları yok.
+        for chip in seasonChipButtons.values {
+            chip.heightAnchor.constraint(equalTo: hero.playButton.heightAnchor).isActive = true
         }
         episodeRowView = makeEpisodeRow(for: season, series: detail.item)
         episodesSection.addArrangedSubview(episodeRowView!)
@@ -408,6 +482,8 @@ final class DetailViewController: UIViewController {
         }
 
         guard let season = detail.seasons.first(where: { $0.number == number }) else { return }
+        renderedEpisodeSignature =
+            "\(detail.item.id.description)#\(number)#\(detail.seasons.count)"
         let newRow = makeEpisodeRow(for: season, series: detail.item)
         if let old = episodeRowView, let index = episodesSection.arrangedSubviews.firstIndex(of: old) {
             old.removeFromSuperview()
@@ -515,8 +591,8 @@ final class DetailViewController: UIViewController {
         let trailerURL = tmdbMetadata?.trailerURL ?? detail?.trailerURL ?? item.trailerURL
         let current = detail?.item ?? item
 
-        let hasAnyInfo = !franchiseItems.isEmpty || !castNames.isEmpty || director != nil || originalTitle != nil
-            || releaseDate != nil || trailerURL != nil
+        let hasAnyInfo = !franchiseItems.isEmpty || isFranchiseLoading || !castNames.isEmpty
+            || director != nil || originalTitle != nil || releaseDate != nil || trailerURL != nil
         guard hasAnyInfo else {
             creditsSection.isHidden = true
             return
@@ -741,120 +817,167 @@ final class DetailViewController: UIViewController {
 
     // MARK: - Yükleme
 
+    /// Ekran açıldıktan sonraki yükleme turu.
+    ///
+    /// Eskiden burada beş ayrı çizim vardı: önce sağlayıcı verisi, sonra
+    /// detay, sonra TMDB künyesi, sonra koleksiyon, sonra öneriler — her biri
+    /// bölüm ekleyip çıkardığı için ekran art arda yerinden oynuyordu.
+    ///
+    /// Şimdi iki çizim var ve ikisi ayrı kaynaklara bakıyor:
+    /// 1. **Bölümler**, sağlayıcıdan gelir gelmez. TMDB'yi beklemiyor.
+    /// 2. **Üst blok, künye ve öneriler**, TMDB turu bittiğinde tek seferde.
+    ///
+    /// Aynı veriyle ikinci kez çizim `renderEpisodes` içinde eleniyor.
     private func load() async {
-        let startTime = CACurrentMediaTime()
-
-        // Film ise arka planda seri sorgulanırken anında skeleton moduna geç
-        if item.kind == .movie {
-            isFranchiseLoading = true
-        }
-        related = model.library.recommendations(for: item, limit: 16)
-        render()
-        renderCredits()
-        renderRelated()
-
+        // Bölüm listesi (dizi) — önbellekte yoksa sağlayıcıdan.
+        //
+        // Geldiği anda çiziliyor, TMDB turu **beklenmiyor**: bölümler
+        // sağlayıcıdan geliyor ve künyeyle hiçbir ilgisi yok. Bir tek çizime
+        // toplanınca TMDB yavaş olduğunda bölümler saniyelerce görünmüyordu.
         if detail == nil {
             detail = try? await model.library.detail(for: item)
             selectedSeason = detail?.seasons.first?.number
-            render()
+            renderEpisodes()
+            hero.playButton.configuration?.title = playTitle(for: detail?.item ?? item)
             #if os(tvOS)
+            hero.episodesButton.isHidden = !(detail?.hasEpisodes ?? false)
             updateFavoriteButton()
             #else
             favoriteBarButton?.image = favoriteImage
             #endif
         }
 
-        await enrichWithTMDB(startTime: startTime)
-    }
-
-    /// TMDB'den sinematik görsel, şeffaf logo ve zengin bilgiler.
-    /// Yükleme süresince koyu blur/nabız animasyonu gösterilir ve TMDB tamamlandığında yumuşakça açılır.
-    private func enrichWithTMDB(startTime: Double) async {
+        // TMDB künyesi — `viewDidLoad` önbellekten almışsa ağa çıkılmıyor.
+        if tmdbMetadata == nil, TMDBService.isConfigured {
+            let lookupItem = detail?.item ?? item
+            if let metadata = await TMDBService.shared.metadata(for: lookupItem, language: AppLanguage.current) {
+                apply(metadata)
+            }
+        }
+        // Künye uygulandıktan **sonraki** hâl: seri ve öneriler bunun
+        // üzerinden hesaplanıyor.
         let current = detail?.item ?? item
 
-        if TMDBService.isConfigured, let metadata = await TMDBService.shared.metadata(for: current, language: AppLanguage.current) {
-            tmdbMetadata = metadata
+        // Seri filmler: yalnızca TMDB bir koleksiyon bildirdiyse aranıyor.
+        // Skeleton da bu yüzden yalnızca burada açılıyor — koleksiyonu
+        // olmayan filmlerde ekranda hiç belirip kaybolan bir ray olmuyor.
+        if let collectionID = tmdbMetadata?.collectionID, item.kind == .movie {
+            isFranchiseLoading = franchiseItems.isEmpty
+            renderCredits()
+            let parts = await TMDBService.shared.collectionParts(
+                for: collectionID, language: AppLanguage.current
+            )
+            franchiseItems = model.library.matchFranchiseEntries(parts: parts, for: current)
+        } else {
+            franchiseItems = []
+        }
+        isFranchiseLoading = false
 
-            if let backdropURL = metadata.backdropURL {
-                detail?.item.backdropURL = backdropURL
-                item.backdropURL = backdropURL
-            }
+        related = model.library.recommendations(
+            for: current, tmdb: tmdbMetadata, franchise: franchiseItems, limit: 16
+        )
 
-            if let logoURL = metadata.logoURL {
-                let image = await ImageLoader.shared.image(for: logoURL, maxPixelSize: 900)
-                if let image {
-                    hero.logoView.image = image
-                    hero.logoView.isHidden = false
-                    hero.titleLabel.isHidden = true
+        await loadLogoIfNeeded()
+        applyHeroArtwork()
+        prefetchRowArtwork()
+
+        // Gövde bölümleri yerine oturuyor; bölüm rayı bu noktada zaten
+        // çizilmişse imza sayesinde ikinci kez kurulmuyor.
+        //
+        // Hero bloğu çapraz erimeyle değişiyor: başlığın yerini logonun
+        // alması ya da özetin dolması yerinde bir kesme olarak görünüyordu.
+        // Düzen animasyona sokulmuyor — logolar farklı oranda ve blok
+        // birinden diğerine kayarak geçiyordu.
+        renderEpisodes()
+        renderCredits()
+        renderRelated()
+
+        if view.window != nil {
+            UIView.transition(
+                with: hero.contentStack,
+                duration: 0.3,
+                options: [.transitionCrossDissolve, .allowUserInteraction]
+            ) {
+                UIView.performWithoutAnimation {
+                    self.renderHero()
+                    self.hero.contentStack.layoutIfNeeded()
                 }
-            }
-
-            if let overview = metadata.overview, !overview.isEmpty {
-                detail?.item.plot = overview
-                item.plot = overview
-            }
-            if let rating = metadata.rating {
-                detail?.item.rating = rating
-                item.rating = rating
-            }
-            if let releaseYear = metadata.releaseYear.flatMap(Int.init) {
-                detail?.item.year = releaseYear
-                item.year = releaseYear
-            }
-            if let durationMin = metadata.runtimeMinutes {
-                let durationSec = durationMin * 60
-                detail?.item.durationSeconds = durationSec
-                item.durationSeconds = durationSec
-            }
-            if !metadata.genres.isEmpty {
-                detail?.item.genres = metadata.genres
-                item.genres = metadata.genres
-            }
-            if !metadata.cast.isEmpty {
-                detail?.cast = metadata.cast
-            }
-            if let director = metadata.director {
-                detail?.director = director
-            }
-            if let country = metadata.country {
-                detail?.country = country
-            }
-            if let trailerURL = metadata.trailerURL {
-                detail?.trailerURL = trailerURL
-            }
-
-            related = model.library.recommendations(for: item, tmdb: metadata, limit: 16)
-
-            // Aşama 2: Arka planda koleksiyon parçalarını asenkron yükle (etkileşim kilitlenmez)
-            if let collectionID = metadata.collectionID {
-                Task.detached(priority: .userInitiated) { [weak self, model, item] in
-                    let parts = await TMDBService.shared.collectionParts(for: collectionID, language: AppLanguage.current)
-                    let entries = model.library.matchFranchiseEntries(parts: parts, for: item)
-                    await MainActor.run {
-                        guard let self else { return }
-                        self.franchiseItems = entries
-                        self.isFranchiseLoading = false
-                        self.renderCredits()
-                        self.renderRelated()
-                    }
-                }
-            } else {
-                let localEntries = model.library.franchiseEntries(for: item)
-                franchiseItems = localEntries
-                isFranchiseLoading = false
             }
         } else {
-            let localEntries = model.library.franchiseEntries(for: item)
-            franchiseItems = localEntries
-            isFranchiseLoading = false
+            renderHero()
         }
+        hero.stopLoadingAnimation(animated: true)
+        #if os(tvOS)
+        updateFavoriteButton()
+        #else
+        favoriteBarButton?.image = favoriteImage
+        #endif
+    }
 
-        await MainActor.run {
-            self.applyHeroArtwork()
-            self.render()
-            self.renderCredits()
-            self.renderRelated()
-            self.hero.stopLoadingAnimation(animated: true)
+    /// TMDB künyesini ekranın kullandığı alanlara yazar.
+    ///
+    /// Sağlayıcı verisi eksik ve tutarsız; TMDB'den geleni üzerine yazmak
+    /// ekranın her yerini (özet, süre, puan, tür, künye, fragman) tek
+    /// hamlede düzeltiyor.
+    private func apply(_ metadata: TMDBMetadata) {
+        tmdbMetadata = metadata
+
+        if let backdropURL = metadata.backdropURL {
+            detail?.item.backdropURL = backdropURL
+            item.backdropURL = backdropURL
+        }
+        if let overview = metadata.overview, !overview.isEmpty {
+            detail?.item.plot = overview
+            item.plot = overview
+        }
+        if let rating = metadata.rating {
+            detail?.item.rating = rating
+            item.rating = rating
+        }
+        if let releaseYear = metadata.releaseYear.flatMap(Int.init) {
+            detail?.item.year = releaseYear
+            item.year = releaseYear
+        }
+        if let durationMin = metadata.runtimeMinutes {
+            detail?.item.durationSeconds = durationMin * 60
+            item.durationSeconds = durationMin * 60
+        }
+        if !metadata.genres.isEmpty {
+            detail?.item.genres = metadata.genres
+            item.genres = metadata.genres
+        }
+        if !metadata.cast.isEmpty { detail?.cast = metadata.cast }
+        if let director = metadata.director { detail?.director = director }
+        if let country = metadata.country { detail?.country = country }
+        if let trailerURL = metadata.trailerURL { detail?.trailerURL = trailerURL }
+    }
+
+    /// Şeffaf logo. Önbellekte varsa `viewDidLoad` zaten basmıştır.
+    private func loadLogoIfNeeded() async {
+        guard hero.logoView.image == nil, let logoURL = tmdbMetadata?.logoURL else { return }
+        guard let image = await ImageLoader.shared.image(for: logoURL, maxPixelSize: 900) else { return }
+        hero.logoView.image = image
+    }
+
+    /// Alttaki rayların görsellerini önden çözer: kullanıcı aşağı indiğinde
+    /// kartlar dolu geliyor, tek tek belirmiyor.
+    private func prefetchRowArtwork() {
+        let posterWidth = metrics.cardWidth(for: item.kind)
+        RemoteImageView.prefetch(
+            related.prefix(8).compactMap(\.posterURL), displayWidth: posterWidth
+        )
+        RemoteImageView.prefetch(
+            franchiseItems.prefix(8).compactMap(\.posterURL), displayWidth: posterWidth
+        )
+        if let members = tmdbMetadata?.castMembers.prefix(8) {
+            RemoteImageView.prefetch(
+                members.compactMap(\.profileURL), displayWidth: metrics.castPhotoWidth
+            )
+        }
+        if let episodes = detail?.seasons.first(where: { $0.number == selectedSeason })?.episodes.prefix(8) {
+            RemoteImageView.prefetch(
+                episodes.compactMap(\.stillURL), displayWidth: metrics.clipCardWidth
+            )
         }
     }
 

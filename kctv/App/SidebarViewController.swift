@@ -38,6 +38,7 @@ final class SidebarViewController: UIViewController {
     private var controllers: [AppDestination: UINavigationController] = [:]
 
     private var selected: AppDestination = .home
+    private var previousDestination: AppDestination = .home
     private var isPanelOpen = false
     private var scrollObservation: NSKeyValueObservation?
     private var rightPressRecognizer: UITapGestureRecognizer?
@@ -247,6 +248,10 @@ final class SidebarViewController: UIViewController {
             controllers[destination] = controller
         }
 
+        if destination == .search && selected != .search {
+            previousDestination = selected
+        }
+
         if selected != destination || children.isEmpty {
             let previousController = children.first as? UINavigationController
             if let previous = previousController, previous !== controller {
@@ -331,7 +336,8 @@ final class SidebarViewController: UIViewController {
         panel.isHidden = true
         panel.transform = .identity
         dimView.alpha = 0
-        sectionChip.alpha = 1
+        sectionChip.alpha = selected == .search ? 0 : 1
+        sectionChip.isHidden = selected == .search
 
         // Tetikleyicileri hemen değil, odak yeni ekrana güvenle yerleştikten sonra devreye sokuyoruz.
         edgeTrigger.isArmed = false
@@ -339,7 +345,7 @@ final class SidebarViewController: UIViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
             guard let self, !self.isPanelOpen else { return }
             self.edgeTrigger.isArmed = true
-            self.sectionChip.isArmed = true
+            self.sectionChip.isArmed = self.selected != .search
         }
 
         guard returningFocusToContent else { return }
@@ -361,7 +367,13 @@ final class SidebarViewController: UIViewController {
             return
         }
 
-        // 2. Kök ekrandayız: Sayfanın neresinde olursak olalım önce en tepeye yumuşak bir animasyonla scroll at
+        // 2. Arama ekranındayken geri tuşuna basıldığında: Sidebar açılmaz, gelinen sayfaya yönlendirilir
+        if selected == .search {
+            select(previousDestination, closingPanel: false)
+            return
+        }
+
+        // 3. Kök ekrandayız: Sayfanın neresinde olursak olalım önce en tepeye yumuşak bir animasyonla scroll at
         if let currentVC = (children.first as? UINavigationController)?.topViewController {
             if Self.scrollToTop(in: currentVC) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
@@ -374,7 +386,7 @@ final class SidebarViewController: UIViewController {
             }
         }
 
-        // 3. Zaten sayfanın en tepesindeyiz: Bir kez daha geri tuşuna basılınca sidebar açılır
+        // 4. Zaten sayfanın en tepesindeyiz: Bir kez daha geri tuşuna basılınca sidebar açılır
         openPanel()
     }
 
@@ -450,6 +462,12 @@ final class SidebarViewController: UIViewController {
         scrollObservation?.invalidate()
         scrollObservation = nil
 
+        guard selected != .search else {
+            sectionChip.isHidden = true
+            sectionChip.isArmed = false
+            return
+        }
+
         guard let scrollView = Self.findPrimaryScrollView(in: controller.view) else {
             sectionChip.isHidden = false
             return
@@ -464,6 +482,11 @@ final class SidebarViewController: UIViewController {
     }
 
     private func updateSectionChipVisibility(for scrollView: UIScrollView) {
+        guard selected != .search else {
+            sectionChip.isHidden = true
+            sectionChip.isArmed = false
+            return
+        }
         let top = -scrollView.adjustedContentInset.top
         sectionChip.isHidden = scrollView.contentOffset.y > top + 15
     }

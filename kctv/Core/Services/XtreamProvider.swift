@@ -275,7 +275,10 @@ actor XtreamProvider: ContentProvider {
             channelNumber: kind == .live ? dto.num : nil,
             cast: LooseParse.genres(dto.cast),
             director: dto.director,
-            trailerURL: Self.youtubeURL(dto.youtubeTrailer)
+            trailerURL: Self.youtubeURL(dto.youtubeTrailer),
+            // Liste ucundan gelen TMDB kimliği: künye ve seri eşleştirmesi
+            // isim benzerliğine hiç düşmesin diye baştan taşınıyor.
+            tmdbID: kind == .movie ? dto.tmdbID : nil
         )
     }
 

@@ -25,6 +25,11 @@ enum AppLanguage: String, CaseIterable, Sendable {
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: userDefaultsKey)
+            if newValue == .system {
+                UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+            } else {
+                UserDefaults.standard.set([newValue.effectiveLanguageCode], forKey: "AppleLanguages")
+            }
             cachedCurrent = newValue
             NotificationCenter.default.post(name: .appLanguageDidChange, object: nil)
         }
@@ -152,11 +157,21 @@ enum L10n {
     static var clearRecentSearches: String { isTurkish ? "Temizle" : "Clear" }
     /// Hazır arama kartlarının başlığı.
     static var discover: String { isTurkish ? "Keşfet" : "Discover" }
+    /// Arama kutusu boşken gösterilen ızgaranın başlığı.
+    static var trending: String { isTurkish ? "Trend Olanlar" : "Trending" }
+    /// Sonuç bulunamadığında ne yapılacağını söyleyen satır.
+    static var noSearchResultsHint: String {
+        isTurkish
+            ? "Yazımı kontrol edin veya yeni bir arama deneyin."
+            : "Check the spelling or try a new search."
+    }
 
 
     // MARK: - Favoriler (Favorites)
     static var favoritesEmptyTitle: String { isTurkish ? "Favori Listeniz Boş" : "No Favorites Yet" }
     static var favoritesEmptyMessage: String { isTurkish ? "İçerik detayındaki artı butonuna dokunarak favorilerinize ekleyebilirsiniz." : "Tap the plus button on any content detail to add it to your favorites." }
+    /// Favoriler ekranındaki tür süzgeci; kaç içerik olduğunu da yazıyor.
+    static func filterCount(_ title: String, _ count: Int) -> String { "\(title) (\(count))" }
 
     // MARK: - Ayarlar (Settings)
     static var settingsTitle: String { isTurkish ? "Ayarlar" : "Settings" }
@@ -169,6 +184,7 @@ enum L10n {
     static var demoModeNote: String { isTurkish ? "Demo modunda geziliyor" : "Browsing in demo mode" }
     static var signOut: String { isTurkish ? "Çıkış Yap" : "Sign Out" }
     static var reloadPlaylist: String { isTurkish ? "Listeyi Yenile" : "Reload Playlist" }
+    static var reloadingPlaylist: String { isTurkish ? "Yenileniyor…" : "Reloading…" }
     static var subscriptionExpires: String { isTurkish ? "Abonelik bitişi" : "Subscription expires" }
     static var activeConnections: String { isTurkish ? "Bağlantı" : "Connections" }
     static var sectionDeveloper: String { isTurkish ? "Geliştirici" : "Developer" }
@@ -191,6 +207,26 @@ enum L10n {
     static var noPlaylistsTitle: String { isTurkish ? "Henüz bir listen yok" : "No playlists yet" }
     static var noPlaylistsSubtitle: String { isTurkish ? "Xtream Codes hesabını ya da M3U bağlantını ekle;\ncanlı kanallar, filmler ve diziler burada görünsün." : "Add your Xtream Codes account or M3U link to browse live TV, movies and series." }
     static var playlistName: String { isTurkish ? "Liste Adı" : "Playlist Name" }
+    /// Apple TV liste kartlarındaki durum rozeti.
+    static var activePlaylist: String { isTurkish ? "Aktif" : "Active" }
+    static var passwordRequired: String { isTurkish ? "Şifre gerekli" : "Password required" }
+    static func expiresOn(_ date: String) -> String {
+        isTurkish ? "Bitiş \(date)" : "Expires \(date)"
+    }
+    /// Liste kartına basılı tutunca açılan eylem listesinin ipucu.
+    static var playlistCardHint: String {
+        isTurkish
+            ? "Listeyi seçmek için tıkla, düzenlemek ya da silmek için basılı tut."
+            : "Click to activate, press and hold to edit or delete."
+    }
+    static var deletePlaylistConfirmTitle: String {
+        isTurkish ? "Liste silinsin mi?" : "Delete playlist?"
+    }
+    static var deletePlaylistConfirmMessage: String {
+        isTurkish
+            ? "Liste bu cihazdan kaldırılacak. İçerik önbelleği de silinir."
+            : "The playlist will be removed from this device along with its cached content."
+    }
     static var serverURL: String { isTurkish ? "Sunucu Adresi (URL)" : "Server URL" }
     static var username: String { isTurkish ? "Kullanıcı Adı" : "Username" }
     static var password: String { isTurkish ? "Şifre" : "Password" }

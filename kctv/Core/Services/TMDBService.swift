@@ -41,15 +41,28 @@ struct TMDBMetadata: Codable, Sendable {
     var recommendedMovieTitles: [String] = []
 }
 
+/// Bir TMDB koleksiyonunun (seri) tek filmi.
+///
+/// Başlık üç biçimde tutuluyor: seçili dildeki, orijinal ve diğer dildeki.
+/// Kullanıcının listesindeki karşılığını bulmak için üçü de gerekiyor —
+/// sağlayıcılar aynı filmi kimi listede "Yenilmezler: Sonsuzluk Savaşı",
+/// kimi listede "Avengers: Infinity War" diye yazıyor.
 struct TMDBCollectionPart: Codable, Sendable, Hashable {
     var id: Int
     var title: String
     var originalTitle: String?
+    /// Diğer arayüz dilindeki başlık (TR seçiliyse EN, EN seçiliyse TR).
+    var alternateTitle: String?
     var posterPath: String?
     var backdropPath: String?
     var releaseDate: String?
     var releaseYear: String?
     var overview: String?
+
+    /// Eşleştirmede denenecek bütün başlıklar.
+    var titleVariants: [String] {
+        [title, originalTitle, alternateTitle].compactMap { $0 }
+    }
 
     var posterURL: URL? {
         TMDBService.imageURL(posterPath, size: "w500")
@@ -57,6 +70,83 @@ struct TMDBCollectionPart: Codable, Sendable, Hashable {
 
     var backdropURL: URL? {
         TMDBService.imageURL(backdropPath, size: "w1280")
+    }
+}
+
+/// Koleksiyon (seri) önbelleği. Künye önbelleğiyle aynı gerekçe: detay
+/// ekranı daha önce görülmüş bir serinin filmlerini ilk karede basabilsin.
+private final class TMDBCollectionCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [String: [TMDBCollectionPart]] = [:]
+
+    func value(_ key: String) -> [TMDBCollectionPart]? {
+        lock.lock(); defer { lock.unlock() }
+        return entries[key]
+    }
+
+    func set(_ value: [TMDBCollectionPart], for key: String) {
+        lock.lock(); defer { lock.unlock() }
+        entries[key] = value
+    }
+
+    func load(_ snapshot: [String: [TMDBCollectionPart]]) {
+        lock.lock(); defer { lock.unlock() }
+        for (key, value) in snapshot { entries[key] = value }
+    }
+
+    func snapshot() -> [String: [TMDBCollectionPart]] {
+        lock.lock(); defer { lock.unlock() }
+        return entries
+    }
+}
+
+/// Künye önbelleği.
+///
+/// Aktörün dışında duruyor ki detay ekranı ilk karede — hiçbir `await`
+/// olmadan — elindeki künyeyi basabilsin. Daha önce her açılış en az bir
+/// aktör turu bekliyordu ve ekran o süre boyunca yer tutucuyla açılıyordu.
+private final class TMDBMetadataCache: @unchecked Sendable {
+    private let lock = NSLock()
+    /// `nil` değer "aranmış ama bulunamamış" demek; anahtarın hiç olmaması
+    /// "henüz sorulmamış".
+    private var entries: [String: TMDBMetadata?] = [:]
+
+    func contains(_ key: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return entries.index(forKey: key) != nil
+    }
+
+    /// Dış katman için: bulunmuş künye ya da nil.
+    func value(_ key: String) -> TMDBMetadata? {
+        lock.lock(); defer { lock.unlock() }
+        return entries[key] ?? nil
+    }
+
+    /// Anahtar biliniyorsa `.some(...)`; hiç sorulmamışsa `nil`.
+    func entry(_ key: String) -> TMDBMetadata?? {
+        lock.lock(); defer { lock.unlock() }
+        return entries[key]
+    }
+
+    func set(_ value: TMDBMetadata?, for key: String) {
+        lock.lock(); defer { lock.unlock() }
+        entries[key] = value
+    }
+
+    func load(_ snapshot: [String: TMDBMetadata]) {
+        lock.lock(); defer { lock.unlock() }
+        for (key, value) in snapshot { entries[key] = value }
+    }
+
+    /// Diske yazılacak hâli; bulunamamış kayıtlar saklanmıyor.
+    func snapshot(limit: Int) -> [String: TMDBMetadata] {
+        lock.lock(); defer { lock.unlock() }
+        if entries.count > limit {
+            for key in entries.keys.prefix(entries.count - limit) {
+                entries.removeValue(forKey: key)
+            }
+        }
+        return entries.compactMapValues { $0 }
     }
 }
 
@@ -86,75 +176,222 @@ actor TMDBService {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 10
         configuration.requestCachePolicy = .returnCacheDataElseLoad
+        // Ön yükleme sırası ekrandaki isteği bekletmemeli: bağlantı payı,
+        // arkada süren en fazla iki ön yüklemenin (üçer istek) üstüne
+        // ekranın kendi isteklerine yer kalacak kadar geniş.
+        configuration.httpMaximumConnectionsPerHost = 12
         return URLSession(configuration: configuration)
     }()
 
     private let decoder = JSONDecoder()
     /// Başlık bazlı önbellek. Aynı içerik için ikinci kez arama isteği gitmiyor;
     /// eşleşme bulunamayanlar da hatırlanıyor.
-    private var cache: [String: TMDBMetadata?] = [:]
+    private static let cache = TMDBMetadataCache()
+    /// Süren istekler. İki ekran aynı içeriği aynı anda sorduğunda ikinci
+    /// çağrı birincinin sonucunu bekliyor — daha önce ikisi de ağa çıkıyordu.
+    private var inFlight: [String: Task<TMDBMetadata?, Never>] = [:]
     private let store = LocalStore(folder: "tmdb")
     private let cacheKey = "metadata_v2"
+    private let collectionCacheKey = "collections_v1"
+    private static let cacheLimit = 4_000
+
+    /// Diske yazma geciktirilmiş. Eskiden her tekil künye çözümünden sonra
+    /// binlerce kayıtlık sözlüğün tamamı JSON'a kodlanıp yazılıyordu: banner
+    /// için kırk sekiz aday sorgulamak kırk sekiz tam yazma demekti ve açılış
+    /// gözle görülür biçimde yavaşlıyordu.
+    private var persistTask: Task<Void, Never>?
+    private static let persistDelay: Duration = .seconds(4)
 
     private init() {
         if let saved = store.read([String: TMDBMetadata].self, key: cacheKey) {
-            cache = saved.mapValues { Optional($0) }
+            Self.cache.load(saved)
         }
+        if let savedCollections = store.read([String: [TMDBCollectionPart]].self, key: collectionCacheKey) {
+            Self.collections.load(savedCollections)
+        }
+    }
+
+    // MARK: - Önbellek anahtarı
+
+    /// Bir içeriğin önbellek anahtarı. Senkron erişim de aynı hesabı
+    /// kullanabilsin diye `nonisolated`.
+    nonisolated static func cacheKey(for item: MediaItem, language: AppLanguage) -> String {
+        let langCode = language.effectiveLanguageCode
+        // Sağlayıcı kimliği veriyorsa arama yapmıyoruz: isim eşleştirmesi
+        // "Kül" gibi kısa başlıklarda popülerlik sıralaması yüzünden yanlış
+        // filme ("Avatar: Ateş ve Kül") düşebiliyor.
+        if let tmdbID = item.tmdbID, item.kind != .series {
+            return "\(langCode)_movie_id_\(tmdbID)"
+        }
+        return cacheKey(title: item.title, isSeries: item.kind == .series, languageCode: langCode)
+    }
+
+    /// Elde hazır künye. Ağa çıkmıyor, beklemiyor; yoksa `nil`.
+    nonisolated static func cachedMetadata(
+        for item: MediaItem,
+        language: AppLanguage = AppLanguage.current
+    ) -> TMDBMetadata? {
+        guard item.kind != .live, isConfigured else { return nil }
+        return cache.value(cacheKey(for: item, language: language))
+    }
+
+    /// İçerik daha önce sorulmuş mu (bulunamamış olsa bile).
+    nonisolated static func isResolved(
+        _ item: MediaItem,
+        language: AppLanguage = AppLanguage.current
+    ) -> Bool {
+        guard item.kind != .live, isConfigured else { return true }
+        return cache.contains(cacheKey(for: item, language: language))
     }
 
     // MARK: - Genel arayüz
 
     func metadata(for item: MediaItem, language: AppLanguage = AppLanguage.current) async -> TMDBMetadata? {
         guard item.kind != .live, Self.apiKey != nil else { return nil }
+        let key = Self.cacheKey(for: item, language: language)
+        if let cached = Self.cache.entry(key) { return cached }
+        if let running = inFlight[key] { return await running.value }
+
         let isSeries = item.kind == .series
-        let langCode = language.effectiveLanguageCode
+        let usesID = item.tmdbID != nil && !isSeries
+        let tmdbID = item.tmdbID
+        let title = item.title
 
-        // Sağlayıcı kimliği veriyorsa arama yapmıyoruz: isim eşleştirmesi
-        // "Kül" gibi kısa başlıklarda popülerlik sıralaması yüzünden yanlış
-        // filme ("Avatar: Ateş ve Kül") düşebiliyor.
-        if let tmdbID = item.tmdbID, !isSeries {
-            let key = "\(langCode)_movie_id_\(tmdbID)"
-            if let cached = cache[key] { return cached }
-            let result = await fetchByID(tmdbID, mediaType: "movie", language: language)
-            cache[key] = result
-            persist()
-            return result
+        let task = Task<TMDBMetadata?, Never> { [weak self] in
+            guard let self else { return nil }
+            if usesID, let tmdbID {
+                return await fetchByID(tmdbID, mediaType: "movie", language: language)
+            }
+            return await fetch(title: title, isSeries: isSeries, language: language)
         }
+        inFlight[key] = task
+        let result = await task.value
+        inFlight[key] = nil
 
-        let key = Self.cacheKey(title: item.title, isSeries: isSeries, languageCode: langCode)
-        if let cached = cache[key] { return cached }
-
-        let result = await fetch(title: item.title, isSeries: isSeries, language: language)
-        cache[key] = result
-        persist()
+        Self.cache.set(result, for: key)
+        schedulePersist()
         return result
     }
 
-    private var collectionCache: [String: [TMDBCollectionPart]] = [:]
+    // MARK: - Ön yükleme
 
+    /// Ön yükleme sırası. Kullanıcının **göreceği** içeriklerin künyesi,
+    /// oraya varmadan çözülüyor: detay ekranı açıldığında elde hazır künye
+    /// oluyor ve hiçbir bekleme görünmüyor.
+    private var prefetchQueue: [MediaItem] = []
+    private var queuedKeys: Set<String> = []
+    private var activePrefetches = 0
+    /// Ekrandaki isteklerin önüne geçmesin diye dar tutuluyor.
+    private static let maxConcurrentPrefetches = 2
+    private static let maxQueuedPrefetches = 300
+
+    nonisolated func prefetchMetadata(for items: [MediaItem], language: AppLanguage = AppLanguage.current) {
+        guard Self.isConfigured, !items.isEmpty else { return }
+        Task { await enqueuePrefetch(items, language: language) }
+    }
+
+    private func enqueuePrefetch(_ items: [MediaItem], language: AppLanguage) {
+        for item in items where item.kind != .live {
+            guard prefetchQueue.count < Self.maxQueuedPrefetches else { break }
+            let key = Self.cacheKey(for: item, language: language)
+            guard !Self.cache.contains(key), inFlight[key] == nil,
+                  queuedKeys.insert(key).inserted
+            else { continue }
+            prefetchQueue.append(item)
+        }
+        drainPrefetchQueue(language: language)
+    }
+
+    private func drainPrefetchQueue(language: AppLanguage) {
+        while activePrefetches < Self.maxConcurrentPrefetches, !prefetchQueue.isEmpty {
+            let item = prefetchQueue.removeFirst()
+            activePrefetches += 1
+            Task { [weak self] in
+                guard let self else { return }
+                _ = await metadata(for: item, language: language)
+                await finishPrefetch(key: Self.cacheKey(for: item, language: language), language: language)
+            }
+        }
+    }
+
+    private func finishPrefetch(key: String, language: AppLanguage) {
+        activePrefetches -= 1
+        queuedKeys.remove(key)
+        drainPrefetchQueue(language: language)
+    }
+
+    // MARK: - Koleksiyonlar (seri filmler)
+
+    private static let collections = TMDBCollectionCache()
+
+    private nonisolated static func collectionKey(_ id: Int, language: AppLanguage) -> String {
+        "\(language.tmdbLanguageCode)_collection_\(id)"
+    }
+
+    /// Daha önce çözülmüş seri. Beklemeden, ağa çıkmadan.
+    nonisolated static func cachedCollectionParts(
+        for collectionID: Int,
+        language: AppLanguage = AppLanguage.current
+    ) -> [TMDBCollectionPart]? {
+        collections.value(collectionKey(collectionID, language: language))
+    }
+
+    /// Bir koleksiyonun bütün filmleri.
+    ///
+    /// İki dilde birden çekiliyor: kullanıcının listesindeki başlık TMDB'nin
+    /// Türkçe adıyla da İngilizce adıyla da yazılmış olabiliyor ve eşleşmeyi
+    /// bunlardan hangisi tutarsa o kuruyor. İki istek de bir kez atılıyor,
+    /// sonuç diske yazılıyor.
     func collectionParts(for collectionID: Int, language: AppLanguage = AppLanguage.current) async -> [TMDBCollectionPart] {
-        let key = "\(language.tmdbLanguageCode)_collection_\(collectionID)"
-        if let cached = collectionCache[key] { return cached }
+        let key = Self.collectionKey(collectionID, language: language)
+        if let cached = Self.collections.value(key) { return cached }
 
-        guard let response = await fetchCollection(id: collectionID, language: language),
-              let parts = response.parts
-        else { return [] }
+        let alternateLanguage: AppLanguage = language.effectiveLanguageCode == "tr" ? .english : .turkish
+        async let primaryTask = fetchCollection(id: collectionID, language: language)
+        async let alternateTask = fetchCollection(id: collectionID, language: alternateLanguage)
 
-        let result = parts.compactMap { p -> TMDBCollectionPart? in
-            guard let title = p.displayTitle else { return nil }
+        guard let primary = await primaryTask, let parts = primary.parts else { return [] }
+        let alternateTitles: [Int: String] = (await alternateTask)?.parts?
+            .reduce(into: [:]) { result, part in
+                if let title = part.displayTitle { result[part.id] = title }
+            } ?? [:]
+
+        let result = parts.compactMap { part -> TMDBCollectionPart? in
+            guard let title = part.displayTitle else { return nil }
             return TMDBCollectionPart(
-                id: p.id,
+                id: part.id,
                 title: title,
-                originalTitle: p.originalTitle,
-                posterPath: p.posterPath,
-                backdropPath: p.backdropPath,
-                releaseDate: p.releaseDate,
-                releaseYear: p.releaseYear,
-                overview: p.overview
+                originalTitle: part.originalTitle,
+                alternateTitle: alternateTitles[part.id],
+                posterPath: part.posterPath,
+                backdropPath: part.backdropPath,
+                releaseDate: part.releaseDate,
+                releaseYear: part.releaseYear,
+                overview: part.overview
             )
         }
-        collectionCache[key] = result
+        // Yayın sırası: seri kronolojik okunmalı.
+        .sorted { lhs, rhs in
+            switch (lhs.releaseDate, rhs.releaseDate) {
+            case let (left?, right?) where left != right: return left < right
+            case (.some, .none): return true
+            case (.none, .some): return false
+            default: return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+            }
+        }
+
+        Self.collections.set(result, for: key)
+        persistCollections()
         return result
+    }
+
+    private func persistCollections() {
+        let snapshot = Self.collections.snapshot()
+        let store = self.store
+        let key = collectionCacheKey
+        Task.detached(priority: .utility) {
+            store.write(snapshot, key: key)
+        }
     }
 
     /// Kimlik bilindiğinde doğrudan çekiyoruz; belirsizlik yok.
@@ -254,13 +491,23 @@ actor TMDBService {
         )
     }
 
-    private func persist() {
-        if cache.count > 1200 {
-            let keysToRemove = Array(cache.keys.prefix(300))
-            for key in keysToRemove { cache.removeValue(forKey: key) }
+    /// Yazmayı geciktirir; art arda gelen çözümler tek bir yazmada birleşiyor.
+    private func schedulePersist() {
+        guard persistTask == nil else { return }
+        persistTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.persistDelay)
+            await self?.persistNow()
         }
-        let snapshot = cache.compactMapValues { $0 }
-        store.write(snapshot, key: cacheKey)
+    }
+
+    private func persistNow() {
+        persistTask = nil
+        let snapshot = Self.cache.snapshot(limit: Self.cacheLimit)
+        let store = self.store
+        let key = cacheKey
+        Task.detached(priority: .utility) {
+            store.write(snapshot, key: key)
+        }
     }
 
     // MARK: - Arama ve görseller

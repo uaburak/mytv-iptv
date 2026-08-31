@@ -1,50 +1,57 @@
 import UIKit
 
-/// Kenar çubuğundan (tvOS) ya da ana karttan (iOS) açılan tür gezinme ekranı.
+/// Bir kategorinin kendi sayfası — anasayfanın düzeni, tek kategorinin içeriği.
 ///
-/// Anasayfanın düzeni, tek türün içeriği: tepede aynı banner (`HeroCell`,
-/// ölçüsü de `HeroSectionMetrics`'ten — üç sayfanın tepesi birebir aynı),
-/// altında kategorilere bölünmüş poster rayları. Her rayın ilk kartı
-/// kategorinin kendisi; oradan kategorinin kendi sayfası açılıyor.
+/// Anasayfadaki kategori rayının başındaki kart buraya açılıyor. Rayda
+/// kategorinin yalnızca ilk 24 içeriği var; burada tamamı.
 ///
-/// Sağ üstteki filtre tek bir kategoriye daraltıyor — daraltılınca banner da o
-/// kategorinin içeriğini gezdiriyor, sayfa bütünüyle o kategoriye dönüyor.
-final class KindBrowseViewController: UIViewController {
+/// Düzen anasayfayla aynı: tepede aynı banner (`HeroCell`, ölçüsü de
+/// `HeroSectionMetrics`'ten — iki sayfanın tepesi birebir aynı), altında afiş
+/// ızgarası. Banner'a kategorinin görseli olan en yüksek puanlı içerikleri
+/// çıkıyor; anasayfadaki öne çıkanların kategori ölçeğindeki karşılığı.
+///
+/// Canlı yayın kategorilerinde banner yok: kanalın afişi değil 16:9 logosu
+/// var, banner'ın içinde esnetilince tanınmıyor. O kategoriler doğrudan
+/// ızgarayla açılıyor.
+///
+/// Kategori listesi ve görünüm seçici burada yok — onlar `CatalogViewController`'da
+/// duruyor. Bu sayfanın işi tek bir kategoriyi anasayfa diliyle göstermek.
+final class CategoryViewController: UIViewController {
     private enum Section: Hashable {
         case hero
-        case category(id: String, title: String)
+        case items
     }
 
     private enum Item: Hashable {
         /// Banner tek hücre: bütün öne çıkanları o taşıyor, kimliği içeriğe
         /// bağlı değil.
         case hero
-        /// Rayın ilk kartı: kategorinin kendisi.
-        case category(categoryID: String, title: String)
-        case poster(categoryID: String, media: MediaItem)
+        case media(MediaItem)
     }
 
     private let model: AppModel
     private let kind: MediaKind
-
-    /// nil ise bütün kategoriler listeleniyor.
-    private var filterCategoryID: String?
+    private let categoryID: String
+    private let categoryTitle: String
 
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
+    private var emptyState: EmptyStateView!
     private weak var heroCell: HeroCell?
 
-    /// Banner'ın anlık durumu (bkz. `FeaturedStore`).
-    ///
-    /// Bu sayfanın banner'ı anasayfayla birlikte, katalog hazır olur olmaz
-    /// arkada seçiliyor ve sonucu diskte duruyor: sayfa açıldığında seçim
-    /// çoktan bitmiş oluyor. Bitmemişse bile bölüm yerini ayırıyor —
-    /// `expectsBanner` — ve içerik geldiğinde sayfa zıplamadan doluyor.
+    private var items: [MediaItem] = []
+    /// Banner'ın anlık durumu (bkz. `FeaturedStore`). Kategoriye özel seçim
+    /// de aynı yerden geliyor: sonuç diskte saklanıyor ve bölüm içerik gelene
+    /// kadar yerini koruyor, sayfa zıplamıyor.
     private var featuredSnapshot = FeaturedStore.Snapshot(items: [], isResolving: false)
     private var featured: [MediaItem] { featuredSnapshot.items }
     private var expectsBanner: Bool { featuredSnapshot.expectsBanner }
 
-    /// tvOS'ta odaklanan kart büyüyor; banner yokken ilk ray tepeye
+    /// Bir kerede çizilen kart sayısı: bir kategoride binlerce içerik
+    /// olabiliyor ve hepsini birden vermek ilk çizimi kilitliyor.
+    private var visibleCount = pageSize
+    private static let pageSize = 120
+    /// tvOS'ta odaklanan kart büyüyor; banner yokken ilk satır tepeye
     /// yapışmasın diye içerik biraz daha aşağıdan başlıyor.
     #if os(tvOS)
     private static let contentTopPadding: CGFloat = 40
@@ -54,16 +61,15 @@ final class KindBrowseViewController: UIViewController {
     private static let contentBottomPadding: CGFloat = 0
     #endif
 
-    /// Ray başına çizilen kart sayısı; tamamı kategorinin kendi sayfasında.
-    private static let itemsPerRow = 24
-
     private var metrics: AppMetrics { AppMetrics.metrics(for: view.bounds.width) }
 
-    init(kind: MediaKind, model: AppModel) {
+    init(kind: MediaKind, categoryID: String, title: String, model: AppModel) {
         self.kind = kind
+        self.categoryID = categoryID
+        self.categoryTitle = title
         self.model = model
         super.init(nibName: nil, bundle: nil)
-        title = kind.title
+        self.title = title
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -72,32 +78,28 @@ final class KindBrowseViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = AppPalette.background
         navigationItem.setPrefersLargeTitle(false)
-        refreshTitle()
+        #if os(tvOS)
+        // tvOS'ta başlık ızgaranın kendi başlığında duruyor; çubukta ikinci
+        // kez yazsaydı banner'ın üstünde asılı kalırdı.
+        navigationItem.title = ""
+        #endif
+
         setupCollectionView()
         setupDataSource()
-        setupFilterButton()
-        refreshFeatured()
+        loadItems()
         applySnapshot(animated: false)
 
         NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(libraryDidChange),
-            name: .contentLibraryDidChange,
-            object: nil
+            self, selector: #selector(libraryDidChange),
+            name: .contentLibraryDidChange, object: nil
         )
-
         NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(languageDidChange),
-            name: .appLanguageDidChange,
-            object: nil
+            self, selector: #selector(libraryDidChange),
+            name: .appLanguageDidChange, object: nil
         )
-
         NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(featuredDidChange),
-            name: .featuredDidChange,
-            object: nil
+            self, selector: #selector(featuredDidChange),
+            name: .featuredDidChange, object: nil
         )
     }
 
@@ -112,8 +114,8 @@ final class KindBrowseViewController: UIViewController {
     }
 
     /// Banner varken içerik ekranın tepesinden başlıyor — görsel navigasyon
-    /// çubuğunun altına kadar uzanıyor, anasayfadaki gibi. Banner yoksa o pay
-    /// elle veriliyor: kaydırma görünümünün kendi güvenli alan ayarı kapalı.
+    /// çubuğunun altına kadar uzanıyor. Banner yoksa o pay elle veriliyor:
+    /// kaydırma görünümünün kendi güvenli alan ayarı kapalı.
     private func updateContentInsets() {
         let top = expectsBanner ? 0 : view.safeAreaInsets.top + Self.contentTopPadding
         let bottom = view.safeAreaInsets.bottom + Self.contentBottomPadding
@@ -131,103 +133,44 @@ final class KindBrowseViewController: UIViewController {
         collectionView.contentOffset.y -= delta
     }
 
-    private func scrollToTop() {
-        collectionView.setContentOffset(
-            CGPoint(x: 0, y: -collectionView.adjustedContentInset.top), animated: false
-        )
-    }
-
-    /// tvOS'ta başlık çubukta yazmıyor: banner ekranın tepesine kadar
-    /// uzanıyor ve başlık görselin üstünde asılı kalıyordu. Bulunduğu bölümü
-    /// zaten kenar çubuğu söylüyor. iOS'ta çubuk başlığı duruyor — geri
-    /// düğmesinin yanında nerede olunduğunu o anlatıyor.
-    private func refreshTitle() {
-        title = kind.title
-        #if os(tvOS)
-        navigationItem.title = ""
-        #endif
-    }
-
-    @objc private func languageDidChange() {
-        refreshTitle()
-        navigationItem.rightBarButtonItem?.menu = makeFilterMenu()
-        applySnapshot(animated: true)
-    }
-
     // MARK: - Kurulum
-
-    private func setupFilterButton() {
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: "line.3.horizontal.decrease"),
-            style: .plain,
-            target: nil,
-            action: nil
-        )
-        item.accessibilityLabel = L10n.categoryFilter
-        item.menu = makeFilterMenu()
-        navigationItem.rightBarButtonItem = item
-    }
-
-    private func makeFilterMenu() -> UIMenu {
-        let allTitle = L10n.allKinds
-        var actions: [UIAction] = [
-            UIAction(title: allTitle, state: filterCategoryID == nil ? .on : .off) { [weak self] _ in
-                self?.applyFilter(nil)
-            },
-        ]
-        actions += categories.map { category in
-            UIAction(title: category.name, state: filterCategoryID == category.id ? .on : .off) { [weak self] _ in
-                self?.applyFilter(category.id)
-            }
-        }
-        return UIMenu(children: actions)
-    }
-
-    private func applyFilter(_ categoryID: String?) {
-        filterCategoryID = categoryID
-        navigationItem.rightBarButtonItem?.menu = makeFilterMenu()
-        refreshFeatured()
-        applySnapshot(animated: true)
-        // Banner gelip gidebiliyor; girinti onunla birlikte değişiyor ve
-        // liste başa alınırken güncel değeri kullanılmalı.
-        updateContentInsets()
-        scrollToTop()
-    }
 
     private func setupCollectionView() {
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
-        collectionView.backgroundColor = .clear
-        collectionView.delegate = self
         collectionView.prefetchDataSource = self
         collectionView.isPrefetchingEnabled = true
+        collectionView.backgroundColor = .clear
+        collectionView.delegate = self
         collectionView.showsVerticalScrollIndicator = false
         // Banner ekranın tepesine kadar uzanıyor; güvenli alan payı bölüm
-        // ölçülerinin üstüne binmemeli — payı `updateContentInsets` veriyor.
+        // ölçülerinin üstüne binmemeli.
         collectionView.contentInsetAdjustmentBehavior = .never
         collectionView.applyNativeScrollEdges()
 
         collectionView.register(HeroCell.self, forCellWithReuseIdentifier: HeroCell.reuseID)
         collectionView.register(PosterCell.self, forCellWithReuseIdentifier: PosterCell.reuseID)
-        collectionView.register(CategoryCardCell.self, forCellWithReuseIdentifier: CategoryCardCell.reuseID)
         collectionView.register(
             RowHeaderView.self,
             forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader,
             withReuseIdentifier: RowHeaderView.reuseID
         )
+
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(collectionView)
 
+        emptyState = EmptyStateView.installed(in: view)
+
         NSLayoutConstraint.activate([
-            collectionView.topAnchor.constraint(equalTo: view.topAnchor),
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            collectionView.topAnchor.constraint(equalTo: view.topAnchor),
             collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
     }
 
     private func makeLayout() -> UICollectionViewCompositionalLayout {
         // Kenar payı ekranın kenarından ölçülüyor, güvenli alandan değil —
-        // anasayfayla aynı kural, raylar aynı hizada başlıyor.
+        // anasayfayla aynı kural.
         let configuration = UICollectionViewCompositionalLayoutConfiguration()
         configuration.contentInsetsReference = .none
 
@@ -237,12 +180,12 @@ final class KindBrowseViewController: UIViewController {
                 let container = environment.container.contentSize
                 let metrics = AppMetrics.metrics(for: container.width)
 
-                if case .hero = dataSource.sectionIdentifier(for: index) {
+                switch dataSource.sectionIdentifier(for: index) ?? .items {
+                case .hero:
                     return self.heroSection(metrics: metrics, container: container)
+                case .items:
+                    return self.gridSection(metrics: metrics, containerWidth: container.width)
                 }
-                // Ray ölçüleri anasayfayla ortak; ekranlar arasında boşluklar
-                // ve başlık yükseklikleri ayrışmasın diye tek yerden geliyor.
-                return MediaSectionLayout.posterRow(kind: kind, metrics: metrics)
             },
             configuration: configuration
         )
@@ -259,6 +202,31 @@ final class KindBrowseViewController: UIViewController {
         // bölüme kadar olan boşluğu kuruyor (bkz. `HeroSectionMetrics.spacing`).
         return NSCollectionLayoutSection(group: group)
     }
+
+    private func gridSection(metrics: AppMetrics, containerWidth: CGFloat) -> NSCollectionLayoutSection {
+        // Izgara anasayfa, favoriler ve aramayla ortak: kart ölçüsü ve
+        // boşluklar her ekranda aynı.
+        MediaSectionLayout.posterGrid(
+            kind: kind,
+            containerWidth: containerWidth,
+            metrics: metrics,
+            showsHeader: showsGridHeader
+        )
+    }
+
+    /// Kategorinin adı ızgaranın başlığında yazıyor.
+    ///
+    /// iOS'ta yazmıyor: orada ad zaten navigasyon çubuğunda duruyor, ikinci
+    /// kez yazmak sayfayı tekrar ettiriyordu. tvOS'ta çubuk boş, ad buradan.
+    private var showsGridHeader: Bool {
+        #if os(tvOS)
+        true
+        #else
+        false
+        #endif
+    }
+
+    // MARK: - Veri
 
     private func setupDataSource() {
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(
@@ -281,27 +249,16 @@ final class KindBrowseViewController: UIViewController {
                 heroCell = cell
                 return cell
 
-            case let .category(categoryID, title):
-                let cell = collectionView.dequeueReusableCell(
-                    withReuseIdentifier: CategoryCardCell.reuseID, for: indexPath
-                ) as! CategoryCardCell
-                cell.configure(
-                    title: title,
-                    count: model.library.items(kind: kind, categoryID: categoryID).count,
-                    symbol: kind.symbol,
-                    metrics: metrics,
-                    cardWidth: metrics.cardWidth(for: kind),
-                    // Renk rayın sayfadaki sırasından: alt alta duran iki
-                    // kategori kartı aynı renge düşmüyor.
-                    colorIndex: indexPath.section
-                )
-                return cell
-
-            case let .poster(_, media):
+            case let .media(media):
                 let cell = collectionView.dequeueReusableCell(
                     withReuseIdentifier: PosterCell.reuseID, for: indexPath
                 ) as! PosterCell
-                cell.configure(item: media, metrics: metrics, progress: nil)
+                cell.configure(
+                    item: media,
+                    metrics: metrics,
+                    progress: model.activity.progress(for: media.id),
+                    cardWidth: cardWidth
+                )
                 return cell
             }
         }
@@ -309,56 +266,61 @@ final class KindBrowseViewController: UIViewController {
         dataSource.supplementaryViewProvider = { [weak self] collectionView, elementKind, indexPath in
             guard let self,
                   elementKind == UICollectionView.elementKindSectionHeader,
-                  case let .category(id, title) = dataSource.sectionIdentifier(for: indexPath.section)
+                  dataSource.sectionIdentifier(for: indexPath.section) == .items
             else { return nil }
 
             let header = collectionView.dequeueReusableSupplementaryView(
                 ofKind: elementKind, withReuseIdentifier: RowHeaderView.reuseID, for: indexPath
             ) as! RowHeaderView
-            header.configure(title: title, font: metrics.rowTitleFont, showsChevron: true)
-            // Banner'ın hemen altındaki başlık sayfa tepedeyken gizli; hücre
-            // yeniden kullanıldığı için durum her seferinde tazeleniyor.
+            header.configure(title: categoryTitle, font: metrics.rowTitleFont, showsChevron: false)
+            // Banner'ın hemen altındaki başlık sayfa tepedeyken gizli.
             header.applyReveal(
                 self.isHeroHeader(at: indexPath)
                     ? RowHeaderView.revealProgress(for: collectionView, metrics: metrics)
                     : 1
             )
-            header.onTap = { [weak self] in
-                self?.openCategoryList(id: id, title: title)
-            }
             return header
         }
     }
 
-    // MARK: - Veri
-
-    private var categories: [MediaCategory] {
-        model.library.categories[kind] ?? []
+    /// Kartın ekranda kapladığı genişlik — düzenle **aynı** hesap; görselin
+    /// indirme boyutu da buradan geliyor.
+    private var cardWidth: CGFloat {
+        MediaSectionLayout.gridItemWidth(
+            kind: kind,
+            containerWidth: max(collectionView.bounds.width, 1),
+            metrics: metrics
+        )
     }
 
-    /// Banner'ın içeriği: filtre yokken türün tamamından, tek kategoriye
-    /// daraltılmışken o kategoriden.
-    private func refreshFeatured() {
-        let scope: FeaturedScope = filterCategoryID.map { .category(kind, $0) } ?? .kind(kind)
-        featuredSnapshot = model.library.featured.snapshot(for: scope)
+    private func loadItems() {
+        // Sağlayıcı listeleri temiz değil: aynı yayın kategoride iki kez
+        // bulunabiliyor ve diffable data source çift kimlik görüp çöküyor.
+        var seen = Set<MediaID>()
+        items = model.library
+            .items(kind: kind, categoryID: categoryID)
+            .filter { seen.insert($0.id).inserted }
+        visibleCount = Self.pageSize
+        reloadFeatured()
+    }
+
+    /// Banner'ın güncel durumunu okur; seçim `FeaturedStore` içinde yürüyor.
+    private func reloadFeatured() {
+        featuredSnapshot = model.library.featured.snapshot(
+            for: .category(kind, categoryID)
+        )
+    }
+
+    @objc private func featuredDidChange() {
+        let previous = featuredSnapshot.expectsBanner
+        reloadFeatured()
+        applySnapshot(animated: true)
+        if previous != featuredSnapshot.expectsBanner { updateContentInsets() }
     }
 
     /// Bölüm 1'in başlığı banner'ın hemen altındaki başlık.
     private func isHeroHeader(at indexPath: IndexPath) -> Bool {
         expectsBanner && indexPath.section == 1
-    }
-
-    @objc private func featuredDidChange() {
-        let previous = featuredSnapshot.expectsBanner
-        refreshFeatured()
-        applySnapshot(animated: true)
-        if previous != featuredSnapshot.expectsBanner { updateContentInsets() }
-    }
-
-    @objc private func libraryDidChange() {
-        navigationItem.rightBarButtonItem?.menu = makeFilterMenu()
-        refreshFeatured()
-        applySnapshot(animated: true)
     }
 
     private func applySnapshot(animated: Bool) {
@@ -374,29 +336,28 @@ final class KindBrowseViewController: UIViewController {
             }
         }
 
-        let visible = categories.filter { filterCategoryID == nil || $0.id == filterCategoryID }
-        for category in visible {
-            let items = model.library.items(kind: kind, categoryID: category.id)
-            guard !items.isEmpty else { continue }
-
-            let section = Section.category(id: category.id, title: category.name)
-            snapshot.appendSections([section])
-
-            // Rayın ilk kartı kategorinin kendisi — anasayfadaki rayla aynı.
-            var row: [Item] = [.category(categoryID: category.id, title: category.name)]
-
-            // Sağlayıcı listeleri her zaman temiz değil; aynı yayın iki kez
-            // gelirse diffable data source çift kimlik görüp çöküyor.
-            var seen = Set<MediaID>()
-            row += items
-                .filter { seen.insert($0.id).inserted }
-                .prefix(Self.itemsPerRow)
-                .map { Item.poster(categoryID: category.id, media: $0) }
-
-            snapshot.appendItems(row, toSection: section)
+        if !items.isEmpty {
+            snapshot.appendSections([.items])
+            snapshot.appendItems(items.prefix(visibleCount).map(Item.media), toSection: .items)
         }
+
         dataSource.apply(snapshot, animatingDifferences: animated)
         collectionView.updateHeroHeaderReveal(hasHero: expectsBanner, metrics: metrics)
+
+        emptyState.configure(symbol: "tray", title: L10n.categoryEmpty)
+        emptyState.isHidden = !items.isEmpty
+    }
+
+    /// Sıradaki sayfayı ekler. Kaydırma sona yaklaşınca çağrılıyor.
+    private func extendVisibleItems() {
+        guard visibleCount < items.count else { return }
+        visibleCount = min(visibleCount + Self.pageSize, items.count)
+        applySnapshot(animated: false)
+    }
+
+    @objc private func libraryDidChange() {
+        loadItems()
+        applySnapshot(animated: true)
     }
 
     // MARK: - Banner otomatik geçişi
@@ -413,25 +374,6 @@ final class KindBrowseViewController: UIViewController {
 
     // MARK: - Gezinme
 
-    /// Kategorinin kendi sayfası — anasayfadaki kategori kartıyla aynı yer.
-    private func openCategory(id: String, title: String) {
-        let controller = CategoryViewController(
-            kind: kind, categoryID: id, title: title, model: model
-        )
-        navigationController?.pushViewController(controller, animated: true)
-    }
-
-    /// Ray başlığındaki ok — yalnızca iOS'ta dokunulabiliyor.
-    ///
-    /// Kategorinin **listesi**: küçük afiş, başlık, "yıl · tür" alt satırı ve
-    /// bağlam menüsü. Kart ise aynı kategoriyi anasayfa diliyle açıyor. Telefonda
-    /// ikisinin de yeri var: biri içerikte gezinmek, diğeri seçmek için.
-    /// tvOS'ta ray başlığı dokunulabilir değil, orada tek kapı kart.
-    private func openCategoryList(id: String, title: String) {
-        let controller = CatalogViewController(kind: kind, model: model, categoryID: id, title: title)
-        navigationController?.pushViewController(controller, animated: true)
-    }
-
     private func openDetail(_ item: MediaItem, sourceView: UIView? = nil) {
         // Canlı kanalın detay ekranı yok; doğrudan oynatıcı açılıyor.
         guard item.kind != .live else {
@@ -444,9 +386,7 @@ final class KindBrowseViewController: UIViewController {
     }
 }
 
-extension KindBrowseViewController: UICollectionViewDelegate {
-    /// Banner görselini kaydırmaya bağlar: aşağı çekildiğinde üste doğru
-    /// büyüyor, yukarı kaydırıldığında alt ucu geri çekiliyor.
+extension CategoryViewController: UICollectionViewDelegate {
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard scrollView === collectionView else { return }
         let offset = scrollView.contentOffset.y
@@ -461,42 +401,44 @@ extension KindBrowseViewController: UICollectionViewDelegate {
         willDisplay cell: UICollectionViewCell,
         forItemAt indexPath: IndexPath
     ) {
-        // Odaklanan kart hücresinin dışına büyüyor; ortogonal bölümün kendi
-        // kaydırma görünümü kırpma yaparsa büyüme görünmüyor.
         #if os(tvOS)
         collectionView.unclipFocusGrowth(around: cell)
         #endif
 
-        // Hücre ekrana girerken sayfa zaten kaydırılmış olabilir.
-        (cell as? HeroCell)?.applyScroll(offset: collectionView.contentOffset.y)
+        if let cell = cell as? HeroCell {
+            // Hücre ekrana girerken sayfa zaten kaydırılmış olabilir.
+            cell.applyScroll(offset: collectionView.contentOffset.y)
+            return
+        }
+
+        // Sıradaki sayfa: anlık görüntüyü çizim döngüsünün içinde
+        // uygulamamak için bir sonraki tura bırakılıyor.
+        guard dataSource.sectionIdentifier(for: indexPath.section) == .items,
+              indexPath.item >= visibleCount - 12
+        else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.extendVisibleItems()
+        }
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
-        guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
-
-        switch item {
-        case .hero:
-            break
-        case let .category(categoryID, title):
-            openCategory(id: categoryID, title: title)
-        case let .poster(_, media):
-            openDetail(media, sourceView: collectionView.cellForItem(at: indexPath))
-        }
+        guard case let .media(item) = dataSource.itemIdentifier(for: indexPath) else { return }
+        openDetail(item, sourceView: collectionView.cellForItem(at: indexPath))
     }
 }
 
-extension KindBrowseViewController: UICollectionViewDataSourcePrefetching {
+extension CategoryViewController: UICollectionViewDataSourcePrefetching {
     func collectionView(
         _ collectionView: UICollectionView,
         prefetchItemsAt indexPaths: [IndexPath]
     ) {
         let items = indexPaths.compactMap { indexPath -> MediaItem? in
-            guard case let .poster(_, media)? = dataSource.itemIdentifier(for: indexPath) else {
+            guard case let .media(media)? = dataSource.itemIdentifier(for: indexPath) else {
                 return nil
             }
             return media
         }
-        MediaPrefetch.warm(items, posterWidth: metrics.cardWidth(for: kind))
+        MediaPrefetch.warm(items, posterWidth: cardWidth)
     }
 }

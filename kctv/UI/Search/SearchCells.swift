@@ -1,11 +1,10 @@
 import UIKit
 
-/// Arama ekranındaki kapsül düğme: tür süzgeci ve son aramalar.
+/// Arama ekranındaki kapsül düğme: son aramalar.
 ///
 /// Hücrenin içinde gerçek bir `UIButton` var ve konfigürasyonu detay
 /// ekranındaki sezon çipleriyle **aynı** (`UIButton.Configuration.appChip`):
-/// seçili olan beyaz zemin + siyah metin, diğerleri cam, odakta/hover'da
-/// sistemin kendi beyaz vurgusu.
+/// cam zemin, odakta/hover'da sistemin kendi beyaz vurgusu.
 ///
 /// Genişlik butonun kendi içeriğinden geliyor (`.estimated`), böylece son
 /// aramalar satıra sığdığı kadar yan yana dizilip alt satıra taşıyor.
@@ -36,6 +35,8 @@ final class SearchChipCell: UICollectionViewCell {
 
     private func build() {
         backgroundColor = .clear
+        clipsToBounds = false
+        contentView.clipsToBounds = false
 
         // Detay ekranındaki butonlarla birebir aynı basma animasyonu.
         button.addSpringPressFeedback(scale: 0.93)
@@ -70,122 +71,6 @@ final class SearchChipCell: UICollectionViewCell {
         configuration.image = symbol.flatMap { UIImage(systemName: $0) }
         button.configuration = configuration
         self.onTap = onTap
-    }
-}
-
-/// Arama ekranındaki hazır arama kartı — "Aksiyon Filmleri", "Belgeseller".
-///
-/// Poster kartla aynı ölçü, köşe yarıçapı ve cam malzemesi ama afişi yok: bir
-/// türü tek bir afişle temsil etmek yanıltıcı duruyordu, kartın kimliğini renk
-/// veriyor. Zemin açık tondan koyu tona iniyor, başlık da koyu uçta duruyor —
-/// poster kartındaki bulanık şeride burada gerek kalmıyor, yazı doğrudan
-/// zeminin üstünde okunuyor.
-final class SearchSuggestionCell: UICollectionViewCell {
-    static let reuseID = "SearchSuggestionCell"
-    private static let focusScale: CGFloat = 1.08
-
-    private let gradient = CAGradientLayer()
-    private let glass = UIView.glassOverlay(cornerRadius: 0, intensity: 0.55)
-    private let titleLabel = UILabel()
-    private let symbolView = UIImageView()
-    private var titleConstraints: [NSLayoutConstraint] = []
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        build()
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    private func build() {
-        backgroundColor = .clear
-        contentView.backgroundColor = AppPalette.background
-        contentView.clipsToBounds = true
-        contentView.layer.cornerCurve = .continuous
-        contentView.layer.insertSublayer(gradient, at: 0)
-
-        symbolView.tintColor = UIColor.white.withAlphaComponent(0.28)
-        symbolView.contentMode = .scaleAspectFit
-        symbolView.translatesAutoresizingMaskIntoConstraints = false
-
-        titleLabel.textColor = .white
-        titleLabel.numberOfLines = 2
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        // Cam simgenin üstünde (onu kırıyor), başlık camın üstünde (metin
-        // kırılmasın diye).
-        [symbolView, glass, titleLabel].forEach(contentView.addSubview)
-
-        #if os(tvOS)
-        prepareFocusShadow()
-        #endif
-
-        NSLayoutConstraint.activate([
-            glass.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            glass.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            glass.topAnchor.constraint(equalTo: contentView.topAnchor),
-            glass.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-
-            symbolView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            symbolView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-        ])
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        // Katman Auto Layout dışında; çerçevesi elle veriliyor.
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        gradient.frame = contentView.bounds
-        CATransaction.commit()
-    }
-
-    #if os(tvOS)
-    override func didUpdateFocus(
-        in context: UIFocusUpdateContext,
-        with coordinator: UIFocusAnimationCoordinator
-    ) {
-        super.didUpdateFocus(in: context, with: coordinator)
-        updateFocusAppearance(isFocused: isFocused, using: coordinator, scale: Self.focusScale)
-    }
-    #endif
-
-    /// - Parameter colorIndex: kartın destedeki sırası; zemin rengi buradan
-    ///   seçiliyor, böylece yan yana duran kartlar farklı renklerde oluyor.
-    func configure(
-        suggestion: SearchSuggestion,
-        metrics: AppMetrics,
-        cardWidth: CGFloat,
-        colorIndex: Int
-    ) {
-        contentView.layer.cornerRadius = metrics.cardCornerRadius
-        glass.cornerConfiguration = .uniformCorners(radius: .fixed(metrics.cardCornerRadius))
-
-        gradient.colors = AppPalette.suggestionGradient(at: colorIndex).map(\.cgColor)
-        gradient.startPoint = CGPoint(x: 0, y: 0)
-        gradient.endPoint = CGPoint(x: 1, y: 1)
-
-        symbolView.image = UIImage(systemName: suggestion.symbol)
-        symbolView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(
-            pointSize: max(cardWidth * 0.3, 22), weight: .semibold
-        )
-
-        // İçerik sayısı gösterilmiyor; kartta yalnızca türün adı var.
-        titleLabel.font = metrics.rowTitleFont
-        titleLabel.text = suggestion.title
-
-        let padding = metrics.cardOverlayPadding
-        titleConstraints.forEach { $0.isActive = false }
-        titleConstraints = [
-            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: padding),
-            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -padding),
-            titleLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -padding),
-        ]
-        NSLayoutConstraint.activate(titleConstraints)
-
-        isAccessibilityElement = true
-        accessibilityTraits = .button
-        accessibilityLabel = suggestion.title
     }
 }
 

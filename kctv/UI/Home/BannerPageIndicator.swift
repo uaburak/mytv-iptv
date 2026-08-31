@@ -14,6 +14,9 @@ final class BannerPageIndicator: UIView {
     var onSelectPage: ((Int) -> Void)?
 
     private let stack = UIStackView()
+    #if os(tvOS)
+    private let glassBackground = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
+    #endif
     private var tracks: [UIView] = []
     private var fills: [UIView] = []
     private var fillWidths: [NSLayoutConstraint] = []
@@ -26,9 +29,14 @@ final class BannerPageIndicator: UIView {
     private static let segmentSpacing: CGFloat = 8
     /// İçinde bulunulan sayfa dolan bir çubuk, diğerleri nokta.
     private static let activeWidth: CGFloat = 38
-    /// Göstergenin yüksekliği. Banner içeriği alt boşluğunu buna göre
-    /// bırakıyor.
-    static var preferredHeight: CGFloat { segmentHeight }
+    /// Göstergenin yüksekliği.
+    static var preferredHeight: CGFloat {
+        #if os(tvOS)
+        return segmentHeight + 20
+        #else
+        return segmentHeight
+        #endif
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -38,6 +46,24 @@ final class BannerPageIndicator: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     private func build() {
+        #if os(tvOS)
+        glassBackground.backgroundColor = UIColor.black.withAlphaComponent(0.40)
+        glassBackground.layer.cornerCurve = .continuous
+        glassBackground.clipsToBounds = true
+        glassBackground.layer.borderWidth = 0.5
+        glassBackground.layer.borderColor = UIColor.white.withAlphaComponent(0.12).cgColor
+        glassBackground.isUserInteractionEnabled = false
+        glassBackground.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(glassBackground)
+
+        NSLayoutConstraint.activate([
+            glassBackground.leadingAnchor.constraint(equalTo: leadingAnchor),
+            glassBackground.trailingAnchor.constraint(equalTo: trailingAnchor),
+            glassBackground.topAnchor.constraint(equalTo: topAnchor),
+            glassBackground.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        #endif
+
         stack.axis = .horizontal
         // Genişlikler eşit değil: aktif olan çubuk, diğerleri nokta.
         stack.distribution = .fill
@@ -46,6 +72,15 @@ final class BannerPageIndicator: UIView {
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
 
+        #if os(tvOS)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
+            stack.heightAnchor.constraint(equalToConstant: Self.segmentHeight),
+        ])
+        #else
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -53,9 +88,17 @@ final class BannerPageIndicator: UIView {
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
             stack.heightAnchor.constraint(equalToConstant: Self.segmentHeight),
         ])
+        #endif
 
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
     }
+
+    #if os(tvOS)
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        glassBackground.layer.cornerRadius = bounds.height / 2
+    }
+    #endif
 
     /// Çubuklar birkaç punto yüksekliğinde; dokunma alanı görünürden geniş.
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {

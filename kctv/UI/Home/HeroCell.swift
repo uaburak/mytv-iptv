@@ -175,7 +175,7 @@ final class HeroCell: UICollectionViewCell {
     private var metaSpacersEqual: NSLayoutConstraint!
     private var metaRowHeight: NSLayoutConstraint!
     private var plotHeight: NSLayoutConstraint!
-    private var indicatorBottom: NSLayoutConstraint!
+    private var indicatorBottom: NSLayoutConstraint?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -261,7 +261,6 @@ final class HeroCell: UICollectionViewCell {
         columnLeading = column.leadingAnchor.constraint(equalTo: contentView.leadingAnchor)
         columnBottom = column.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
         columnWidth = column.widthAnchor.constraint(equalTo: contentView.widthAnchor)
-        indicatorBottom = pageIndicator.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
 
         NSLayoutConstraint.activate([
             visual.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
@@ -274,11 +273,20 @@ final class HeroCell: UICollectionViewCell {
             columnWidth,
             textBlock.widthAnchor.constraint(equalTo: column.widthAnchor),
 
-            // Gösterge kendi boyunda: cam kapsayıcısı yalnızca çubukları
-            // sarıyor ve ekranın ortasında duruyor.
+            // Gösterge kendi boyunda ve ekranın ortasında duruyor.
             pageIndicator.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            indicatorBottom,
         ])
+
+        #if os(tvOS)
+        // tvOS'ta butonlar ile gösterge aynı dikey hizada
+        NSLayoutConstraint.activate([
+            pageIndicator.centerYAnchor.constraint(equalTo: buttonsGlass.centerYAnchor),
+        ])
+        #else
+        let bottom = pageIndicator.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+        indicatorBottom = bottom
+        bottom.isActive = true
+        #endif
 
         NSLayoutConstraint.activate([
             artwork.leadingAnchor.constraint(equalTo: visual.leadingAnchor),
@@ -465,14 +473,24 @@ final class HeroCell: UICollectionViewCell {
     #endif
 
     #if os(tvOS)
+    override func shouldUpdateFocus(in context: UIFocusUpdateContext) -> Bool {
+        // En sol butonda (infoButton) sola doğru gidildiğinde:
+        // Eğer ilk içerikte değilsek (currentIndex > 0), önceki içeriğe geçilir ve odak butonda kalır.
+        // İlk içerikteysek (currentIndex == 0), odağın sol kenara (SidebarEdgeTrigger) geçmesine izin verilir ve sidebar açılır.
+        if context.previouslyFocusedView === infoButton,
+           context.focusHeading == .left {
+            if currentIndex > 0 {
+                showPrevious()
+                return false
+            }
+        }
+        return super.shouldUpdateFocus(in: context)
+    }
+
     /// Odak, satırın ucundan öteye gitmeye çalıştığında içerik değişiyor.
     ///
-    /// Okun sağında, bilgi butonunun solunda odaklanacak bir şey yok: kumanda
-    /// oraya gitmeye çalıştığında (kaydırmayla da, yön tuşuyla da) odak
-    /// hareketi **başarısız** oluyor ve sistem bunu bildiriyor. Butonlar arası
-    /// normal geçişlerde bildirim gelmediği için banner da değişmiyor —
-    /// hareketi hücrenin kendisi yakalasaydı, odak zaten komşu butona geçmiş
-    /// olduğu için ayrım yapılamıyordu.
+    /// Okun sağında odaklanacak bir şey yok: kumanda oraya gitmeye çalıştığında
+    /// odak hareketi başarısız oluyor ve sistem bunu bildiriyor.
     private func observeFocusMovementFailures() {
         NotificationCenter.default.addObserver(
             self,
@@ -491,9 +509,12 @@ final class HeroCell: UICollectionViewCell {
         else { return }
 
         switch context.focusHeading {
-        case .right where nextButton.isFocused: showNext()
-        case .left where infoButton.isFocused: showPrevious()
-        default: break
+        case .right where nextButton.isFocused:
+            showNext()
+        case .left where infoButton.isFocused && currentIndex > 0:
+            showPrevious()
+        default:
+            break
         }
     }
     #endif
@@ -540,11 +561,14 @@ final class HeroCell: UICollectionViewCell {
         // Geniş ekranda metin bütün eni kaplamıyor: detay ekranındaki kolonla
         // aynı oran, açıklama satırı okunur uzunlukta kalıyor.
         let ratio: CGFloat = width >= 900 ? 0.44 : 1
-        // İçeriğin alt boşluğu göstergeden türetiliyor: sabit bir değerde
-        // iPhone'da buton satırı noktaların üstüne oturuyordu.
-        let indicatorInset = max(12, (inset * 0.75).rounded())
-        let contentInset = indicatorInset + BannerPageIndicator.preferredHeight
-            + max(16, (inset * 0.6).rounded())
+        let indicatorInset = HeroSectionMetrics.spacing(metrics: metrics)
+        #if os(tvOS)
+        // tvOS'ta butonlar ve gösterge aynı hizada olduğundan içerik bloğu daha aşağıya inebilir
+        let contentInset = max(16, (inset * 0.35).rounded())
+        #else
+        // Alt uçtaki üç boşluk eşit: içerik → gösterge → sıradaki bölüm.
+        let contentInset = indicatorInset * 2 + BannerPageIndicator.preferredHeight
+        #endif
 
         return Layout(
             titleFont: metrics.titleFont,
@@ -592,7 +616,9 @@ final class HeroCell: UICollectionViewCell {
         column.spacing = layout.spacing * 1.4
         columnLeading.constant = layout.horizontalInset
         columnBottom.constant = -layout.contentBottomInset
-        indicatorBottom.constant = -layout.indicatorBottomInset
+        #if !os(tvOS)
+        indicatorBottom?.constant = -layout.indicatorBottomInset
+        #endif
 
         // Çarpan sonradan değiştirilemiyor; kısıt yeniden kuruluyor.
         columnWidth.isActive = false
@@ -739,6 +765,8 @@ final class HeroCell: UICollectionViewCell {
         preparing = []
         currentIndex = 0
         displayedBackdrop = nil
+        textBlock.alpha = 1
+        buttonsGlass.alpha = 1
         artwork.prepareForReuse()
     }
 
@@ -751,6 +779,7 @@ final class HeroCell: UICollectionViewCell {
         applyLayoutIfNeeded()
 
         guard items != self.items else {
+            guard !items.isEmpty else { return }
             // Aynı liste: içerik ve süre yerinde kalıyor ama metinler
             // yeniden yazılıyor. Dil değişimi ve izleme listesi güncellemesi
             // de buradan geçiyor.
@@ -760,12 +789,23 @@ final class HeroCell: UICollectionViewCell {
             return
         }
 
+        let wasPlaceholder = self.items.isEmpty
         self.items = items
         // Listeden düşen içeriklerin hazırlığı bellekte kalmasın.
         let live = Set(items.map(\.id))
         slides = slides.filter { live.contains($0.key) }
         artworks = artworks.filter { live.contains($0.key) }
         preparing = preparing.filter { live.contains($0) }
+
+        // Seçim henüz gelmediğinde hücre yerini koruyor: sayfa banner'lı
+        // açılıyor, üstünde nabız atan koyu bir zemin duruyor ve içerik
+        // geldiğinde **aynı yükseklikte** yerine oturuyor. Bölümü sonradan
+        // eklemek sayfayı banner boyu zıplatıyordu.
+        guard !items.isEmpty else {
+            showPlaceholder()
+            return
+        }
+        hidePlaceholder(animated: wasPlaceholder)
 
         pageIndicator.setPages(items.count)
         // Tek içerik varken gösterge de ok da otomatik geçiş de anlamsız.
@@ -776,6 +816,31 @@ final class HeroCell: UICollectionViewCell {
         show(currentIndex, animated: false)
     }
 
+    /// İçerik beklenirken görünen hâl: yalnızca nabız atan koyu zemin.
+    private func showPlaceholder() {
+        stopTimer()
+        displayedBackdrop = nil
+        artwork.setImage(nil)
+        artwork.startLoading()
+        pageIndicator.isHidden = true
+        nextButton.isHidden = true
+        textBlock.alpha = 0
+        buttonsGlass.alpha = 0
+    }
+
+    private func hidePlaceholder(animated: Bool) {
+        guard textBlock.alpha < 1 || buttonsGlass.alpha < 1 else { return }
+        guard animated, window != nil else {
+            textBlock.alpha = 1
+            buttonsGlass.alpha = 1
+            return
+        }
+        UIView.animate(withDuration: 0.32, delay: 0, options: [.allowUserInteraction]) {
+            self.textBlock.alpha = 1
+            self.buttonsGlass.alpha = 1
+        }
+    }
+
     // MARK: - İçerik geçişi
 
     /// Verilen içeriği gösterir. Blok yerinde kalıyor; `animated` yalnızca
@@ -784,13 +849,15 @@ final class HeroCell: UICollectionViewCell {
         guard items.indices.contains(index) else { return }
         currentIndex = index
 
+        // Hazırlık çizimden **önce**: önbellekte duran künye ve görsel bu
+        // karede uygulanıyor, bir sonrakinde değil.
+        prepare(index)
         render(animated: animated)
         pageIndicator.setCurrentPage(index)
         restartTimer()
 
         // Ekrandaki içerik dururken sıradaki hazırlanıyor: geçiş anında
         // görsel elde oluyor ve kare siyah açılmıyor.
-        prepare(index)
         prepare((index + 1) % max(items.count, 1))
     }
 
@@ -959,7 +1026,6 @@ final class HeroCell: UICollectionViewCell {
         let item = items[index]
         let known = slides[item.id]
         guard known == nil || artworks[item.id] == nil else { return }
-        guard preparing.insert(item.id).inserted else { return }
 
         // `AppMetrics` içinde `UIFont` var; görev sınırından yalnızca gereken
         // sayı geçiriliyor.
@@ -967,6 +1033,33 @@ final class HeroCell: UICollectionViewCell {
         let pixelWidth = RemoteImageView.pixelSize(
             displayWidth: metrics.heroImageWidth, scale: scale
         )
+
+        // Elde hazır olan her şey **senkron** toplanıyor. `FeaturedStore`
+        // seçimi yaparken künyeyi ve görselleri ısıttığı için bu yol pratikte
+        // ana yol: banner ilk karede dolu çiziliyor, tek bir bulanık kare
+        // bile geçmiyor. Eskiden bu yolda da bir aktör turu vardı ve hücre
+        // her açılışta önce nabız katmanını gösteriyordu.
+        if let ready = known ?? Self.cachedSlide(for: item) {
+            let backdrop = ready.backdropURL.flatMap {
+                ImageLoader.cachedImage(url: $0, maxPixelSize: pixelWidth)
+            }
+            let logo = ready.logoURL.flatMap {
+                ImageLoader.cachedImage(url: $0, maxPixelSize: 900)
+            }
+            let missesBackdrop = ready.backdropURL != nil && backdrop == nil
+            let missesLogo = ready.logoURL != nil && logo == nil
+            if !missesBackdrop, !missesLogo {
+                store(
+                    ready,
+                    artwork: Artwork(backdrop: backdrop, logo: logo),
+                    for: item.id,
+                    notifies: false
+                )
+                return
+            }
+        }
+
+        guard preparing.insert(item.id).inserted else { return }
         let usesTMDB = TMDBService.isConfigured
 
         Task { [weak self] in
@@ -980,7 +1073,7 @@ final class HeroCell: UICollectionViewCell {
                 if usesTMDB, let metadata = await TMDBService.shared.metadata(for: item) {
                     backdropURL = metadata.backdropURL ?? backdropURL
                     logoURL = metadata.logoURL
-                    overview = metadata.overview ?? overview
+                    overview = HeroFeatured.overview(metadata.overview, overview)
                     if !metadata.genres.isEmpty { genres = metadata.genres }
                 }
                 slide = Slide(
@@ -1006,7 +1099,21 @@ final class HeroCell: UICollectionViewCell {
         }
     }
 
-    private func store(_ slide: Slide?, artwork: Artwork, for id: MediaID) {
+    /// Önbellekte hazır duran künyeden slayt kurar; ağa çıkmıyor.
+    private static func cachedSlide(for item: MediaItem) -> Slide? {
+        guard let metadata = TMDBService.cachedMetadata(for: item) else { return nil }
+        return Slide(
+            backdropURL: metadata.backdropURL ?? item.backdropURL,
+            logoURL: metadata.logoURL,
+            overview: HeroFeatured.overview(metadata.overview, item.plot),
+            genres: metadata.genres.isEmpty ? item.genres : metadata.genres
+        )
+    }
+
+    /// - Parameter notifies: senkron yolda `false`. Çizim çağıranda zaten
+    ///   yapılıyor; burada ikinci kez çizmek geçiş animasyonunu boşuna
+    ///   tetikliyordu.
+    private func store(_ slide: Slide?, artwork: Artwork, for id: MediaID, notifies: Bool = true) {
         preparing.remove(id)
         // Hücre bu arada başka listeye geçtiyse yanıt artık geçersiz.
         guard let slide, items.contains(where: { $0.id == id }) else { return }
@@ -1014,7 +1121,7 @@ final class HeroCell: UICollectionViewCell {
         artworks[id] = artwork
         pruneArtworks()
 
-        guard currentItem?.id == id else { return }
+        guard notifies, currentItem?.id == id else { return }
         // Ekrandaki içeriğin künyesi geç geldi: yazılar ve görsel yumuşakça
         // yerine otursun.
         render(animated: true)
@@ -1105,6 +1212,9 @@ final class HeroCell: UICollectionViewCell {
     }
 
     private func showPrevious() {
+        #if os(tvOS)
+        guard currentIndex > 0 else { return }
+        #endif
         step(by: -1)
     }
 
@@ -1146,5 +1256,214 @@ private final class BadgeLabel: UILabel {
             width: size.width + insets.left + insets.right,
             height: size.height + insets.top + insets.bottom
         )
+    }
+}
+
+/// Banner'a çıkacak içerikler: **en son eklenenler**.
+///
+/// Sağlayıcılarda "öne çıkan / editör seçkisi" diye bir veri yok (ne Xtream
+/// API'sinde ne M3U'da). Elde kullanılabilir tek sinyal içeriğin listeye
+/// eklenme tarihi — sıralama ondan geliyor, böylece banner kendiliğinden
+/// güncel kalıyor: listeye yeni bir film/dizi düştüğünde banner'ın başına
+/// geçiyor ve en eski slayt düşüyor.
+///
+/// Künyesi eksik hiçbir kayıt banner'a girmiyor. Üçü de şart:
+/// - **geniş görsel** (`backdrop_path`) — banner afişi değil backdrop çiziyor,
+///   yoksa slayt bomboş kalıyor,
+/// - **logo** — yalnızca TMDB'den geliyor, sağlayıcıda karşılığı yok,
+/// - **açıklama** — sağlayıcının `plot`'u ya da TMDB'nin özeti.
+///
+/// İlk iki koşul sağlayıcı verisinden anında bakılıyor; logo için TMDB'ye
+/// çıkmak gerektiği için seçim asenkron. Aday listesi baştan kırpılıyor,
+/// yoksa on binlerce kayıt için TMDB'ye çıkılırdı.
+///
+/// Canlı yayın banner'a hiç girmiyor: kanalın afişi değil 16:9 logosu var.
+enum HeroFeatured {
+    /// Banner'ın gezdirdiği içerik sayısı.
+    static let limit = 8
+    /// TMDB'ye sorulacak en fazla aday. Sekizi doldurmak için yeterli pay
+    /// bırakıyor ama ilk açılışta ağ turunu da sınırlıyor.
+    private static let candidateLimit = 48
+
+    /// Sağlayıcı verisiyle elenmiş adaylar: en son eklenen başta.
+    ///
+    /// Ayrı duruyor çünkü tarama eş zamanlı ve ucuz; asıl pahalı iş bundan
+    /// sonraki TMDB turu.
+    /// - Parameter pools: birden çok liste ayrı ayrı geçiliyor, birleştirilip
+    ///   değil: anasayfa hem filmleri hem dizileri veriyor ve iki kataloğu
+    ///   toplamak on binlerce kaydı boşuna kopyalamak olurdu.
+    ///
+    /// Görsel/açıklama koşulu burada **aranmıyor**: çoğu panel film listesinde
+    /// `backdrop_path` göndermiyor (o alan yalnızca `get_vod_info`'da) ve
+    /// eksiği TMDB kapatabiliyor. Burada elense banner çoğu listede bomboş
+    /// kalırdı; eleme künye çözüldükten sonra, `grade(_:)` içinde.
+    static func candidates(from pools: [[MediaItem]]) -> [MediaItem] {
+        // Katalog on binlerce kayıt. Hepsini toplayıp sıralamak yerine en yeni
+        // `candidateLimit` tanesi tarama sırasında tutuluyor: liste dolduktan
+        // sonra çoğu kayıt tek bir tarih karşılaştırmasıyla eleniyor.
+        var seen = Set<MediaID>()
+        var newest: [MediaItem] = []
+        newest.reserveCapacity(candidateLimit)
+
+        for pool in pools {
+            for item in pool where item.kind != .live {
+                let date = item.addedAt ?? .distantPast
+                if newest.count == candidateLimit,
+                   date <= (newest.last?.addedAt ?? .distantPast) { continue }
+                // Sağlayıcı listeleri temiz değil: aynı yayın havuzda birden
+                // çok kez bulunabiliyor ve banner aynı içeriği iki kez
+                // gezdiriyordu. Küme sorgusu tarih elemesinden sonra: sırf
+                // kimlik bakmak için on binlerce ekleme yapılmıyor.
+                guard seen.insert(item.id).inserted else { continue }
+
+                // Eşit tarihlerde katalog sırası korunuyor; liste her
+                // kuruluşta aynı çıkıyor.
+                let index = newest.firstIndex { ($0.addedAt ?? .distantPast) < date }
+                newest.insert(item, at: index ?? newest.count)
+                if newest.count > candidateLimit { newest.removeLast() }
+            }
+        }
+        return newest
+    }
+
+    /// Banner'a çıkacak nihai liste.
+    ///
+    /// Şart iki kademeli: önce logosu, yatay görseli ve açıklaması olan
+    /// adaylar aranıyor — banner'ın Apple TV'deki görünümü buna bağlı.
+    /// Sekiz tane çıkmazsa logosu olmayan ama görseli ve açıklaması olan
+    /// adaylarla tamamlanıyor: eskiden bu kademe yoktu ve logosu az olan
+    /// listelerde banner ya çok geç doluyor ya hiç çıkmıyordu.
+    static func items(from pool: [MediaItem]) async -> [MediaItem] {
+        await items(from: [pool])
+    }
+
+    static func items(from pools: [[MediaItem]]) async -> [MediaItem] {
+        // Logo yalnızca TMDB'den geliyor; anahtar yoksa şartı sağlayan hiçbir
+        // içerik olamaz ve banner hiç kurulmuyor.
+        guard TMDBService.isConfigured else { return [] }
+
+        let candidates = candidates(from: pools)
+        var picked: [MediaItem] = []
+        var runnersUp: [MediaItem] = []
+        var index = 0
+
+        // Adaylar sırayla ama **kümeler hâlinde** yoklanıyor: tek tek beklemek
+        // ilk açılışta banner'ı saniyelerce boş bırakıyordu, hepsini birden
+        // sormak da sekiz içerik için otuz iki gereksiz istek demekti.
+        while index < candidates.count, picked.count < limit {
+            let chunk = Array(candidates.dropFirst(index).prefix(limit))
+            index += chunk.count
+
+            let graded = await withTaskGroup(
+                of: (offset: Int, grade: Grade).self
+            ) { group in
+                for (offset, item) in chunk.enumerated() {
+                    group.addTask { (offset: offset, grade: await grade(item)) }
+                }
+                var buffer: [(offset: Int, grade: Grade)] = []
+                for await result in group { buffer.append(result) }
+                // Görevler bitiş sırasına göre dönüyor; eklenme sırası korunmalı.
+                return buffer.sorted { $0.offset < $1.offset }
+            }
+
+            for (offset, grade) in graded {
+                switch grade {
+                case .featured: picked.append(chunk[offset])
+                case .usable: runnersUp.append(chunk[offset])
+                case .unusable: break
+                }
+            }
+        }
+
+        if picked.count < limit {
+            picked += runnersUp.prefix(limit - picked.count)
+        }
+        return Array(picked.prefix(limit))
+    }
+
+    /// Adayın banner'a uygunluğu.
+    private enum Grade {
+        /// Logo + yatay görsel + açıklama: aranan görünüm.
+        case featured
+        /// Logosuz ama görseli ve açıklaması var; yer doldurmaya yeter.
+        case usable
+        case unusable
+    }
+
+    private static func grade(_ item: MediaItem) async -> Grade {
+        let metadata = await TMDBService.shared.metadata(for: item)
+        guard (metadata?.backdropURL ?? item.backdropURL) != nil,
+              overview(metadata?.overview, item.plot) != nil
+        else { return .unusable }
+        return metadata?.logoURL != nil ? .featured : .usable
+    }
+
+    /// İki kaynaktan ilk **dolu** açıklama.
+    ///
+    /// Düz `??` yetmiyor: TMDB kimi başlıkta boş dizge dönüyor ve o da bir
+    /// değer sayıldığı için sağlayıcının açıklaması hiç denenmiyordu. Elemeyle
+    /// gösterimin aynı sonucu vermesi için ikisi de buradan geçiyor.
+    static func overview(_ primary: String?, _ fallback: String?) -> String? {
+        [primary, fallback]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+    }
+}
+
+/// Banner bölümünün ölçüleri.
+///
+/// Anasayfa ve kategori sayfası aynı banner'ı kullanıyor. Yükseklik, boşluk ve
+/// taşma hesabı iki ekranda ayrı yazıldığında ikisi birbirinden kayıyordu;
+/// ölçü tek yerde duruyor, iki sayfanın tepesi birebir aynı.
+enum HeroSectionMetrics {
+    /// Açılış ekranında sıradaki raydan görünen kadarı: başlığı, boşluğu ve
+    /// kartın bir bölümü. Sayfanın devamı olduğu ilk bakışta anlaşılıyor.
+    static func peek(metrics: AppMetrics) -> CGFloat {
+        metrics.rowHeaderHeight + metrics.rowHeaderGap
+            + metrics.clipCardWidth * (9.0 / 16.0) * 0.55
+    }
+
+    /// Banner'ın alt ucundaki **eşit** boşluk: içerik bloğu → sayfa göstergesi
+    /// → sıradaki bölüm. Üçünün arası aynı ve dar; gösterge kendi payını
+    /// hücrenin içinde bırakıyor, bölüme ayrıca boşluk eklenmiyor — eklenseydi
+    /// göstergeyle sıradaki bölüm arası içerik-gösterge arasından geniş olurdu.
+    static func spacing(metrics: AppMetrics) -> CGFloat {
+        max(12, (metrics.screenPadding * 0.4).rounded())
+    }
+
+    /// Banner hücresinin yüksekliği.
+    ///
+    /// İçerik bloğu bu hücrenin içinde duruyor; görsel ise altından taşıp
+    /// ekranın dibine kadar iniyor.
+    ///
+    /// tvOS'ta ekranın tamamı. Telefon ve tablette detay ekranıyla aynı kural
+    /// geçerli — ekranın yaklaşık %74'ü, en az 560pt — böylece iki ekranın
+    /// hero'su aynı boyda duruyor; sıradaki raya ayrılan yer düşüldükten sonra
+    /// kalan alan bundan küçükse o geçerli.
+    static func height(container: CGSize, metrics: AppMetrics) -> CGFloat {
+        guard container.width > 0, container.height > 0 else { return metrics.heroHeight }
+        let visible = container.height - peek(metrics: metrics)
+        #if os(tvOS)
+        return max(240, visible)
+        #else
+        return max(240, min(visible, max(560, container.height * 0.74)))
+        #endif
+    }
+
+    /// Görselin hücrenin altından taşacağı miktar: açılışta ekranın dibine
+    /// kadar iniyor, ray ve aradaki boşluk onun üstünde duruyor.
+    ///
+    /// Yalnızca tvOS'ta. Telefonda banner sıradaki rayın altına uzanmıyor:
+    /// ekran zaten dar, bindirme okumayı zorlaştırmaktan başka bir şey
+    /// yapmıyor.
+    static func overhang(container: CGSize, metrics: AppMetrics) -> CGFloat {
+        #if os(tvOS)
+        return min(
+            peek(metrics: metrics),
+            max(0, container.height - height(container: container, metrics: metrics))
+        )
+        #else
+        return 0
+        #endif
     }
 }

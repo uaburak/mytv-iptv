@@ -20,6 +20,20 @@ final class FavoritesViewController: UIViewController {
     private var dataSource: UICollectionViewDiffableDataSource<Section, MediaItem>!
     private var emptyState: EmptyStateView!
 
+    #if os(tvOS)
+    /// Apple TV'de ekranın kendi başlığı ve tür süzgeci içerikte duruyor.
+    ///
+    /// Navigasyon çubuğundaki başlık burada işe yaramıyor: kenar çubuğu
+    /// tasarımında çubuk gizli ve ekran adsız açılıyordu. Süzgeç de tvOS'a
+    /// özgü: kumandayla ızgarada gezinirken "yalnızca dizilerim" demek
+    /// aşağı doğru uzun bir yolculuktan kısa.
+    private let headerStack = UIStackView()
+    private let headerTitle = UILabel()
+    private let filterRow = UIStackView()
+    private var filterButtons: [MediaKind?: UIButton] = [:]
+    private var selectedKind: MediaKind?
+    #endif
+
     /// Düzen kapanışı bölümü sıra numarasıyla soruyor; anlık görüntüdeki sıra
     /// burada tutuluyor.
     private var visibleKinds: [MediaKind] = []
@@ -37,6 +51,11 @@ final class FavoritesViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = AppPalette.background
         navigationItem.setPrefersLargeTitle(false)
+        #if os(tvOS)
+        // Başlık içerikte; çubukta ikinci kez yazmıyor.
+        navigationItem.title = ""
+        setupHeader()
+        #endif
         setupCollectionView()
         setupDataSource()
         emptyState = EmptyStateView.installed(in: view)
@@ -61,10 +80,77 @@ final class FavoritesViewController: UIViewController {
 
     // MARK: - Kurulum
 
+    #if os(tvOS)
+    private func setupHeader() {
+        headerTitle.font = TVFormMetrics.titleFont
+        headerTitle.textColor = .white
+
+        filterRow.axis = .horizontal
+        filterRow.spacing = 16
+        filterRow.alignment = .center
+
+        headerStack.axis = .vertical
+        headerStack.spacing = 26
+        headerStack.alignment = .leading
+        headerStack.translatesAutoresizingMaskIntoConstraints = false
+        headerStack.addArrangedSubview(headerTitle)
+        headerStack.addArrangedSubview(filterRow)
+        view.addSubview(headerStack)
+
+        NSLayoutConstraint.activate([
+            headerStack.topAnchor.constraint(
+                equalTo: view.topAnchor, constant: TVFormMetrics.topInset
+            ),
+            headerStack.leadingAnchor.constraint(
+                equalTo: view.leadingAnchor, constant: AppMetrics.tv.screenPadding
+            ),
+            headerStack.trailingAnchor.constraint(
+                lessThanOrEqualTo: view.trailingAnchor, constant: -AppMetrics.tv.screenPadding
+            ),
+        ])
+    }
+
+    /// Süzgeç çipleri: yalnızca içeriği olan türler çıkıyor, sayılarıyla.
+    private func rebuildFilterRow(counts: [MediaKind: Int]) {
+        let available = Self.order.filter { (counts[$0] ?? 0) > 0 }
+        // Tek tür varsa süzgeç bir şey yapmıyor; satır da görünmüyor.
+        filterRow.isHidden = available.count < 2
+        if let selectedKind, !available.contains(selectedKind) { self.selectedKind = nil }
+
+        for view in filterRow.arrangedSubviews {
+            filterRow.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        filterButtons = [:]
+
+        let total = counts.values.reduce(0, +)
+        addFilterButton(kind: nil, title: L10n.filterCount(L10n.allKinds, total))
+        for kind in available {
+            addFilterButton(kind: kind, title: L10n.filterCount(kind.title, counts[kind] ?? 0))
+        }
+    }
+
+    private func addFilterButton(kind: MediaKind?, title: String) {
+        var configuration = UIButton.Configuration.appChip(isSelected: kind == selectedKind)
+        configuration.title = title
+        let button = UIButton(configuration: configuration)
+        button.addSpringPressFeedback(scale: 0.95)
+        button.addAction(UIAction { [weak self] _ in
+            guard let self, selectedKind != kind else { return }
+            selectedKind = kind
+            applySnapshot(animated: true)
+        }, for: .primaryActionTriggered)
+        filterButtons[kind] = button
+        filterRow.addArrangedSubview(button)
+    }
+    #endif
+
     private func setupCollectionView() {
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
         collectionView.backgroundColor = .clear
         collectionView.delegate = self
+        collectionView.prefetchDataSource = self
+        collectionView.isPrefetchingEnabled = true
         collectionView.showsVerticalScrollIndicator = false
         collectionView.applyNativeScrollEdges()
         collectionView.register(PosterCell.self, forCellWithReuseIdentifier: PosterCell.reuseID)
@@ -76,12 +162,21 @@ final class FavoritesViewController: UIViewController {
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(collectionView)
 
+        #if os(tvOS)
+        // Izgara başlığın altından başlıyor.
+        let topAnchor = headerStack.bottomAnchor
+        let topSpacing: CGFloat = 40
+        #else
+        // Güvenli alana değil ekranın tepesine bağlanıyor: içerik
+        // navigation bar'ın ardından geçip bulanıklaşıyor, sert bir çizgide
+        // kesilmiyor. Dinlenme konumundaki boşluğu
+        // `contentInsetAdjustmentBehavior` varsayılanı veriyor.
+        let topAnchor = view.topAnchor
+        let topSpacing: CGFloat = 0
+        #endif
+
         NSLayoutConstraint.activate([
-            // Güvenli alana değil ekranın tepesine bağlanıyor: içerik
-            // navigation bar'ın ardından geçip bulanıklaşıyor, sert bir çizgide
-            // kesilmiyor. Dinlenme konumundaki boşluğu
-            // `contentInsetAdjustmentBehavior` varsayılanı veriyor.
-            collectionView.topAnchor.constraint(equalTo: view.topAnchor),
+            collectionView.topAnchor.constraint(equalTo: topAnchor, constant: topSpacing),
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -155,6 +250,10 @@ final class FavoritesViewController: UIViewController {
 
     private func updateLocalizedTexts() {
         title = L10n.tabFavorites
+        #if os(tvOS)
+        navigationItem.title = ""
+        headerTitle.text = L10n.tabFavorites
+        #endif
         emptyState?.configure(
             symbol: "heart",
             title: L10n.favoritesEmptyTitle,
@@ -175,9 +274,16 @@ final class FavoritesViewController: UIViewController {
             grouped[item.kind, default: []].append(item)
         }
 
+        #if os(tvOS)
+        rebuildFilterRow(counts: grouped.mapValues(\.count))
+        let visibleOrder = selectedKind.map { [$0] } ?? Self.order
+        #else
+        let visibleOrder = Self.order
+        #endif
+
         var snapshot = NSDiffableDataSourceSnapshot<Section, MediaItem>()
         var kinds: [MediaKind] = []
-        for kind in Self.order {
+        for kind in visibleOrder {
             guard let group = grouped[kind], !group.isEmpty else { continue }
             kinds.append(kind)
             snapshot.appendSections([.kind(kind)])
@@ -189,6 +295,11 @@ final class FavoritesViewController: UIViewController {
         visibleKinds = kinds
         dataSource.apply(snapshot, animatingDifferences: animated)
         emptyState.isHidden = !items.isEmpty
+        #if os(tvOS)
+        // Hiç favori yokken başlık ve süzgeç de yok: ekranın ortasında
+        // yalnızca boş durum duruyor.
+        headerStack.isHidden = items.isEmpty
+        #endif
     }
 }
 
@@ -252,5 +363,16 @@ extension FavoritesViewController: UICollectionViewDelegate {
                 },
             ])
         }
+    }
+}
+
+extension FavoritesViewController: UICollectionViewDataSourcePrefetching {
+    func collectionView(
+        _ collectionView: UICollectionView,
+        prefetchItemsAt indexPaths: [IndexPath]
+    ) {
+        let items = indexPaths.compactMap { dataSource.itemIdentifier(for: $0) }
+        guard let first = items.first else { return }
+        MediaPrefetch.warm(items, posterWidth: cardWidth(for: first.kind))
     }
 }

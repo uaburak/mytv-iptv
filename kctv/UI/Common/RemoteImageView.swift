@@ -103,27 +103,46 @@ final class RemoteImageView: UIView {
         applyPlaceholder(title: title)
 
         guard currentURL != url || imageView.image == nil else { return }
-        currentURL = url
         loadTask?.cancel()
-        imageView.image = nil
-        imageView.alpha = 0
+        currentURL = url
 
-        guard let url else { return }
+        guard let url else {
+            imageView.image = nil
+            imageView.alpha = 0
+            return
+        }
+
         let scale = window?.windowScene?.screen.scale ?? traitCollection.displayScale
         // Kart odakta büyüyor; görsel dinlenme boyutuna göre indirilirse
         // büyürken yumuşuyor. Büyüme payı baştan hesaba katılıyor.
         let maxPixelSize = Self.pixelSize(displayWidth: displayWidth, scale: scale)
 
+        // Önbellek **senkron** okunuyor: hazır bir görsel için tek bir kare
+        // bile boş geçmiyor. Eski kod önce görüntüyü siliyor, sonra aktöre
+        // gidip aynı kareyi geri koyuyordu; kaydırırken ve ekranlar arası
+        // gidip gelirken her kart bir anlığına yer tutucuya düşüyordu.
+        if let cached = ImageLoader.cachedImage(url: url, maxPixelSize: maxPixelSize) {
+            imageView.image = cached
+            imageView.alpha = 1
+            return
+        }
+
+        imageView.image = nil
+        imageView.alpha = 0
+
         loadTask = Task { [weak self] in
-            // Önbellekte varsa ilk karede göster.
-            if let cached = await ImageLoader.shared.cached(url: url, maxPixelSize: maxPixelSize) {
-                self?.apply(cached, animated: false, for: url)
-                return
-            }
             let image = await ImageLoader.shared.image(for: url, maxPixelSize: maxPixelSize)
             guard let image else { return }
             self?.apply(image, animated: true, for: url)
         }
+    }
+
+    /// Bu görünümün ölçüsüyle görseli önceden çözer; ekran açıldığında
+    /// bellekten gelsin diye.
+    static func prefetch(_ urls: [URL], displayWidth: CGFloat, scale: CGFloat = 3) {
+        ImageLoader.shared.prefetch(
+            urls, maxPixelSize: pixelSize(displayWidth: displayWidth, scale: scale)
+        )
     }
 
     /// Önceden çözülmüş görseli doğrudan basar; ağa çıkmaz.
