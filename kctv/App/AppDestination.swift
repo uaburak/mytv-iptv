@@ -68,9 +68,7 @@ enum AppDestination: String, CaseIterable, Hashable {
         // `UISearchContainerViewController` gerekiyor.
         case .search: SearchViewController.makeTabController(model: model)
         case .home: HomeViewController(model: model)
-        // Canlı yayında beklenen ekran kanal ızgarası değil rehber: hangi
-        // kanalda şu an ne var.
-        case .live: GuideViewController(model: model)
+        case .live: KindBrowseViewController(kind: .live, model: model)
         case .movies: KindBrowseViewController(kind: .movie, model: model)
         case .series: KindBrowseViewController(kind: .series, model: model)
         case .favorites: FavoritesViewController(model: model)

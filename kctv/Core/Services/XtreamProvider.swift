@@ -159,7 +159,7 @@ actor XtreamProvider: ContentProvider {
         let payload = try await data(action: action)
         return decodeList(XtreamCategoryDTO.self, from: payload).compactMap { dto in
             guard let id = dto.categoryID, let name = dto.categoryName else { return nil }
-            return MediaCategory(id: id, name: name, kind: kind)
+            return MediaCategory(id: id, name: name.cleanedCategoryName, kind: kind)
         }
     }
 

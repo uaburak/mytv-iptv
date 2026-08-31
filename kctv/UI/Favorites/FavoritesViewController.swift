@@ -330,8 +330,8 @@ extension FavoritesViewController: UICollectionViewDelegate {
         navigationController?.pushViewController(controller, animated: true)
     }
 
-    /// Oynatma ve favoriden çıkarma karta uzun basınca açılıyor. Kaydırmalı
-    /// satır eylemleri tvOS'ta yok; bağlam menüsü iki platformda da çalışıyor.
+    /// Karta uzun basınca çıkan menü — İzle, favori, izleme listesi. Menünün
+    /// kendisi `MediaCardMenu`'de: aynı kart her ekranda aynı eylemleri veriyor.
     ///
     /// Tekil `...ForItemAt:` karşılığı artık kullanılamıyor; çoklu seçime
     /// açık olan bu yöntem geçerli. Burada çoklu seçim yok, o yüzden yalnızca
@@ -346,22 +346,11 @@ extension FavoritesViewController: UICollectionViewDelegate {
               let indexPath = indexPaths.first,
               let item = dataSource.itemIdentifier(for: indexPath)
         else { return nil }
-        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
-            UIMenu(children: [
-                UIAction(
-                    title: item.kind == .live ? L10n.watch : L10n.play,
-                    image: UIImage(systemName: "play.fill")
-                ) { _ in
-                    Task { await self?.model.play(item) }
-                },
-                UIAction(
-                    title: L10n.removeFromFavorites,
-                    image: UIImage(systemName: "heart.slash"),
-                    attributes: .destructive
-                ) { _ in
-                    self?.model.activity.toggleFavorite(item)
-                },
-            ])
+        return MediaCardMenu.configuration(for: item, model: model) { [weak self] item in
+            guard let self else { return }
+            navigationController?.pushViewController(
+                DetailViewController(item: item, model: model), animated: true
+            )
         }
     }
 }

@@ -79,7 +79,6 @@ final class HeroCell: UICollectionViewCell {
     private let titleLabel = UILabel()
 
     private let metaRow = UIStackView()
-    private let kindIcon = UIImageView()
     private let metaLabel = UILabel()
     private let ageBadge = BadgeLabel()
     /// Rozet satırını sola ya da ortaya yaslayan esnek boşluklar.
@@ -120,8 +119,27 @@ final class HeroCell: UICollectionViewCell {
     /// Sıradaki içeriğin görseli hazır değilse geçiş bu kadar erteleniyor.
     private static let retryDelay: TimeInterval = 0.5
     private static let transitionDuration: TimeInterval = 0.45
-    /// Bu kadar kaydırıldığında görselin alt ucu geri çekiliyor.
-    private static let extensionThreshold: CGFloat = 8
+
+    /// Banner'dan aşağı inildiğinde içerik bloğunun ekstra yükselişi.
+    ///
+    /// Yükselen yalnızca banner'ın **içi**: başlık/logo, künye satırı,
+    /// açıklama, butonlar ve sayfa göstergesi. Görsel, karartmalar ve
+    /// banner alanının kendisi yerinde kalıyor — ikisi birlikte kalksaydı
+    /// banner tümden yukarı kayıyormuş gibi görünürdü, oysa istenen içeriğin
+    /// görselin önünden çekilmesi.
+    private static let contentLiftDistance: CGFloat = 100
+
+    /// Yükselişin tamamlandığı kaydırma yolu.
+    ///
+    /// Hareket bir eşiğe bağlı değil, kaydırmanın kendisine bağlı: parmak
+    /// durduğunda hareket de duruyor. Eşikte tetiklenen zamanlı bir animasyon,
+    /// kaydırma çoktan durmuşken kendi başına devam ettiği için yapay
+    /// duruyordu — görselin alt ucunu geri çeken animasyon o yolu izleyebilir
+    /// (tek seferlik bir kırpma o), yazının hareketi izleyemez.
+    private static let contentLiftRamp: CGFloat = 320
+
+    /// Yürürlükteki yükseliş. Düzen payıyla toplanıyor, onun yerine geçmiyor.
+    private var contentLift: CGFloat = 0
 
     #if os(tvOS)
     private static let showsNextButton = true
@@ -148,12 +166,9 @@ final class HeroCell: UICollectionViewCell {
         didSet {
             guard abs(oldValue - artworkOverhang) > 0.5 else { return }
             artworkBottom.constant = artworkOverhang
-            updateArtworkExtension(animated: false)
+            visualBottom.constant = artworkOverhang
         }
     }
-
-    /// Görselin alt ucu şu an rayın arkasına uzanıyor mu.
-    private var isArtworkExtended = true
 
     /// Aşağı çekildiğinde görselin hücrenin üstüne doğru büyümesini sağlayan
     /// kısıt. Detay ekranındaki gibi ölçek dönüşümü kullanılmıyor: çerçeveyi
@@ -277,16 +292,9 @@ final class HeroCell: UICollectionViewCell {
             pageIndicator.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
         ])
 
-        #if os(tvOS)
-        // tvOS'ta butonlar ile gösterge aynı dikey hizada
-        NSLayoutConstraint.activate([
-            pageIndicator.centerYAnchor.constraint(equalTo: buttonsGlass.centerYAnchor),
-        ])
-        #else
         let bottom = pageIndicator.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
         indicatorBottom = bottom
         bottom.isActive = true
-        #endif
 
         NSLayoutConstraint.activate([
             artwork.leadingAnchor.constraint(equalTo: visual.leadingAnchor),
@@ -362,10 +370,6 @@ final class HeroCell: UICollectionViewCell {
             titleLabel.topAnchor.constraint(greaterThanOrEqualTo: titleSlot.topAnchor),
         ])
 
-        kindIcon.contentMode = .scaleAspectFit
-        kindIcon.tintColor = UIColor.white.withAlphaComponent(0.92)
-        kindIcon.setContentHuggingPriority(.required, for: .horizontal)
-
         metaLabel.textColor = UIColor.white.withAlphaComponent(0.92)
         metaLabel.lineBreakMode = .byTruncatingTail
 
@@ -390,7 +394,7 @@ final class HeroCell: UICollectionViewCell {
             spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
         metaLeadingSpacer.isHidden = true
-        [metaLeadingSpacer, kindIcon, metaLabel, ageBadge, metaTrailingSpacer]
+        [metaLeadingSpacer, metaLabel, ageBadge, metaTrailingSpacer]
             .forEach(metaRow.addArrangedSubview)
         metaSpacersEqual = metaLeadingSpacer.widthAnchor.constraint(
             equalTo: metaTrailingSpacer.widthAnchor
@@ -540,6 +544,7 @@ final class HeroCell: UICollectionViewCell {
         var buttonInset: CGFloat
         var buttonVerticalInset: CGFloat
         var spacing: CGFloat
+        var buttonSpacing: CGFloat
         var horizontalInset: CGFloat
         var contentBottomInset: CGFloat
         var indicatorBottomInset: CGFloat
@@ -563,17 +568,24 @@ final class HeroCell: UICollectionViewCell {
         let ratio: CGFloat = width >= 900 ? 0.44 : 1
         let indicatorInset = HeroSectionMetrics.spacing(metrics: metrics)
         #if os(tvOS)
-        // tvOS'ta butonlar ve gösterge aynı hizada olduğundan içerik bloğu daha aşağıya inebilir
-        let contentInset = max(16, (inset * 0.35).rounded())
+        // tvOS'ta butonların alt kenarının banner tabanına mesafesi:
+        let contentInset = max(18, (inset * 0.35).rounded())
+        // Banner'ın altındaki ilk rayın (İzlemeye Devam Et) kartları, gizli başlık payı
+        // (44pt) ve boşluğu (28pt) nedeniyle banner tabanından 72pt aşağıda başlar.
+        let nextSectionGap = metrics.rowHeaderHeight + metrics.rowHeaderGap
+        let indicatorHeight = BannerPageIndicator.preferredHeight
+        // Göstergeyi butonlar ile aşağıdaki kartlar arasındaki toplam boşluğun (contentInset + nextSectionGap)
+        // tam ortasına konumlandırıyoruz; böylece buton->gösterge ve gösterge->kartlar boşlukları eşitleniyor.
+        let indicatorBottomConstant = ((nextSectionGap - contentInset + indicatorHeight) / 2).rounded()
         #else
-        // Alt uçtaki üç boşluk eşit: içerik → gösterge → sıradaki bölüm.
         let contentInset = indicatorInset * 2 + BannerPageIndicator.preferredHeight
+        let indicatorBottomConstant = -indicatorInset
         #endif
 
         return Layout(
             titleFont: metrics.titleFont,
-            titleSlotHeight: (titleSize * 2.4).rounded(),
-            logoHeight: (titleSize * 1.45).rounded(),
+            titleSlotHeight: (titleSize * 1.6).rounded(),
+            logoHeight: (titleSize * 0.82).rounded(),
             metaFont: .systemFont(ofSize: secondary, weight: .medium),
             badgeFont: .systemFont(ofSize: max(11, secondary - 3), weight: .semibold),
             plotFont: .systemFont(ofSize: secondary),
@@ -581,10 +593,11 @@ final class HeroCell: UICollectionViewCell {
             buttonFontSize: max(14, (secondary * 1.05).rounded()),
             buttonInset: max(18, (secondary * 1.1).rounded()),
             buttonVerticalInset: max(11, (secondary * 0.55).rounded()),
-            spacing: max(10, (inset * 0.3).rounded()),
+            spacing: max(14, (inset * 0.40).rounded()),
+            buttonSpacing: max(20, (inset * 0.55).rounded()),
             horizontalInset: inset,
             contentBottomInset: contentInset,
-            indicatorBottomInset: indicatorInset,
+            indicatorBottomInset: indicatorBottomConstant,
             backdropRamp: max(140, (metrics.rowSpacing * 2.5).rounded()),
             columnRatio: ratio,
             isCentered: ratio >= 1
@@ -604,21 +617,15 @@ final class HeroCell: UICollectionViewCell {
 
         metaLabel.font = layout.metaFont
         ageBadge.font = layout.badgeFont
-        kindIcon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(
-            pointSize: layout.iconSize, weight: .semibold
-        )
-        metaRowHeight.constant = max(layout.metaFont.lineHeight, layout.iconSize * 1.3).rounded(.up)
+        metaRowHeight.constant = layout.metaFont.lineHeight.rounded(.up)
 
         plotLabel.font = layout.plotFont
         plotHeight.constant = (layout.plotFont.lineHeight * 2).rounded(.up)
 
         textBlock.spacing = layout.spacing
-        column.spacing = layout.spacing * 1.4
+        column.spacing = layout.buttonSpacing
         columnLeading.constant = layout.horizontalInset
-        columnBottom.constant = -layout.contentBottomInset
-        #if !os(tvOS)
-        indicatorBottom?.constant = -layout.indicatorBottomInset
-        #endif
+        applyContentLift()
 
         // Çarpan sonradan değiştirilemiyor; kısıt yeniden kuruluyor.
         columnWidth.isActive = false
@@ -718,42 +725,28 @@ final class HeroCell: UICollectionViewCell {
     /// çekme efekti her iki platformda da çalışıyor.
     func applyScroll(offset: CGFloat) {
         let top = -max(0, -offset)
-        if abs(visualTop.constant - top) > 0.5 {
+        // İçerik kaydırmayla birlikte görselin önünden yukarı çekiliyor.
+        // Yol boyunca yumuşak: `smoothstep` hem başlangıçta hem tavana
+        // otururken sertliği alıyor, doğrusal ilerleyiş yapay duruyordu.
+        let progress = min(max(offset / Self.contentLiftRamp, 0), 1)
+        let eased = progress * progress * (3 - 2 * progress)
+        let lift = eased * Self.contentLiftDistance
+
+        if abs(visualTop.constant - top) > 0.5 || abs(contentLift - lift) > 0.5 {
             visualTop.constant = top
+            contentLift = lift
+            applyContentLift()
             // Kaydırma her karede kısıt değiştiriyor; düzeni hemen kapatmak
             // görselin bir kare geriden gelmesini önlüyor.
             layoutIfNeeded()
         }
-        setArtworkExtended(offset < Self.extensionThreshold)
     }
 
-    /// Görselin alt ucu yalnızca sayfa en üstteyken rayın arkasına uzanıyor.
-    ///
-    /// Uzunluk kaydırma konumunu **takip etmiyor**, eşik geçilince tek seferde
-    /// yumuşakça çekiliyor. Her karede kısıt değiştirmek kaydırma
-    /// animasyonunun ritmini bozuyor ve aşağı inerken takılma hissi veriyordu;
-    /// böyle geçiş kendi eğrisiyle akıp odak animasyonuyla birlikte bitiyor.
-    private func setArtworkExtended(_ extended: Bool) {
-        guard extended != isArtworkExtended else { return }
-        isArtworkExtended = extended
-        updateArtworkExtension(animated: window != nil)
-    }
-
-    private func updateArtworkExtension(animated: Bool) {
-        let target = isArtworkExtended ? artworkOverhang : 0
-        guard abs(visualBottom.constant - target) > 0.5 else { return }
-        visualBottom.constant = target
-        guard animated else {
-            layoutIfNeeded()
-            return
-        }
-        UIView.animate(
-            withDuration: 0.45,
-            delay: 0,
-            options: [.curveEaseInOut, .allowUserInteraction, .beginFromCurrentState]
-        ) {
-            self.layoutIfNeeded()
-        }
+    /// İçerik bloğunun dikey yeri: düzenin kendi payı + kaydırma yükselişi.
+    private func applyContentLift() {
+        let layout = appliedLayout
+        columnBottom.constant = -((layout?.contentBottomInset ?? 0) + contentLift)
+        indicatorBottom?.constant = (layout?.indicatorBottomInset ?? 0) - contentLift
     }
 
     override func prepareForReuse() {
@@ -872,7 +865,6 @@ final class HeroCell: UICollectionViewCell {
             titleLabel.text = item.title
             titleLabel.isHidden = logo != nil
 
-            kindIcon.image = UIImage(systemName: item.kind.symbol)
             metaLabel.text = Self.metaText(for: item, slide: slide)
 
             let age = Self.ageBadgeText(for: item)
@@ -1419,8 +1411,15 @@ enum HeroSectionMetrics {
     /// Açılış ekranında sıradaki raydan görünen kadarı: başlığı, boşluğu ve
     /// kartın bir bölümü. Sayfanın devamı olduğu ilk bakışta anlaşılıyor.
     static func peek(metrics: AppMetrics) -> CGFloat {
-        metrics.rowHeaderHeight + metrics.rowHeaderGap
-            + metrics.clipCardWidth * (9.0 / 16.0) * 0.55
+        #if os(tvOS)
+        // tvOS'ta kartların sadece üst ~%30'luk kısmı alttan hafifçe görünerek
+        // ilk açılışta kartların daha aşağıda durmasını sağlar.
+        return metrics.rowHeaderHeight + metrics.rowHeaderGap
+            + metrics.clipCardWidth * (9.0 / 16.0) * 0.30
+        #else
+        return metrics.rowHeaderHeight + metrics.rowHeaderGap
+            + metrics.clipCardWidth * (9.0 / 16.0) * 0.35
+        #endif
     }
 
     /// Banner'ın alt ucundaki **eşit** boşluk: içerik bloğu → sayfa göstergesi

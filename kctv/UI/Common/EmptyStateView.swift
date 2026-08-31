@@ -41,19 +41,27 @@ final class EmptyStateView: UIView {
     ///
     /// Beş ekran aynı üç kısıtı tekrar tekrar yazıyordu; kenar payları da her
     /// birinde başka bir sayıydı.
+    ///
+    /// `centeredOn` verilirse görünüm kapsayıcının değil o alanın ortasına
+    /// oturuyor: sayfanın solunda sabit bir menü varsa boş durum ızgaranın
+    /// ortasında durmalı. Bu kısıtı sonradan **ekleyen** çağıran, kapsayıcıya
+    /// bağlı olanla çelişen ikinci bir required kısıt kurmuş oluyordu; Auto
+    /// Layout da çelişkiyi zincirin başka bir yerinden — menünün genişliğinden —
+    /// kırıyordu.
     @discardableResult
-    static func installed(in container: UIView) -> EmptyStateView {
+    static func installed(in container: UIView, centeredOn target: UIView? = nil) -> EmptyStateView {
         let view = EmptyStateView()
         view.translatesAutoresizingMaskIntoConstraints = false
         view.isHidden = true
         container.addSubview(view)
 
+        let center = target ?? container
         let width = view.widthAnchor.constraint(equalToConstant: maxWidth)
         width.priority = .defaultHigh
 
         NSLayoutConstraint.activate([
-            view.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            view.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            view.centerXAnchor.constraint(equalTo: center.centerXAnchor),
+            view.centerYAnchor.constraint(equalTo: center.centerYAnchor),
             width,
             view.leadingAnchor.constraint(
                 greaterThanOrEqualTo: container.leadingAnchor, constant: 32

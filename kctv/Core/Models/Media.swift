@@ -108,6 +108,55 @@ struct MediaItem: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+extension String {
+    /// Sağlayıcıdan gelen kategori adının ekranda görünecek hâli.
+    ///
+    /// IPTV listelerinde kategori adının sonuna liste etiketi ekleniyor
+    /// ("4K Film|VOD", "Aksiyon|AY VOD", "Yerli|Dizi"), başına da dikkat çeksin
+    /// diye emoji konuyor ("⏸️ Yeni Eklenenler"). İkisi de sağlayıcının kendi
+    /// defterinden kalma; ekranda kategorinin adı yeter.
+    ///
+    /// Kategori **kimliği** ham addan üretiliyor ve bu temizlik ona hiç
+    /// dokunmuyor: gruplama, önbellek ve favoriler eskisi gibi çalışıyor.
+    var cleanedCategoryName: String {
+        // Boru işaretinden sonrası etiket.
+        let head = prefix { $0 != "|" }
+        let withoutDecoration = String(
+            String.UnicodeScalarView(head.unicodeScalars.filter { !$0.isDecorative })
+        )
+        // Etiket ve emoji düşünce başta/sonda kalan ayraçlar ve çift boşluklar.
+        let cleaned = withoutDecoration
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-–—•·:,;/\\"))
+            .trimmingCharacters(in: .whitespaces)
+        // Adın tamamı süsten ibaretse elimizde kalanı gösteriyoruz.
+        return cleaned.isEmpty ? trimmingCharacters(in: .whitespacesAndNewlines) : cleaned
+    }
+}
+
+private extension Unicode.Scalar {
+    /// Emoji, dingbat, ok ve benzeri süsler. ASCII ve harfler dokunulmadan
+    /// geçiyor — Türkçe karakterler de dahil.
+    var isDecorative: Bool {
+        if value < 0x80 { return false }
+        // Varyasyon seçicileri, sıfır genişlikli birleştirici, tuş kapağı.
+        if (0xFE00...0xFE0F).contains(value) || value == 0x200D || value == 0x20E3 { return true }
+        if properties.isEmoji || properties.isEmojiModifier { return true }
+        switch value {
+        case 0x2190...0x21FF,    // oklar
+             0x2300...0x23FF,    // teknik simgeler (⏸ burada)
+             0x25A0...0x27BF,    // geometrik şekiller, dingbatlar
+             0x2B00...0x2BFF,    // ek oklar ve yıldızlar
+             0x1F000...0x1FAFF:  // emoji blokları
+            return true
+        default:
+            return false
+        }
+    }
+}
+
 struct MediaCategory: Identifiable, Hashable, Codable, Sendable {
     var id: String
     var name: String

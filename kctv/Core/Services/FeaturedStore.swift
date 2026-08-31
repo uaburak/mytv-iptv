@@ -136,14 +136,10 @@ final class FeaturedStore {
         }
     }
 
-    /// Katalog hazır olduğunda ana kapsamların seçimini başlatır.
-    ///
-    /// Kullanıcı Filmler sayfasına gittiğinde iş çoktan bitmiş oluyor.
+    /// Katalog hazır olduğunda ana kapsamın seçimini başlatır.
     func prewarm() {
         guard !catalog.isEmpty else { return }
-        for scope in [FeaturedScope.home, .kind(.movie), .kind(.series)] {
-            _ = snapshot(for: scope)
-        }
+        _ = snapshot(for: .home)
     }
 
     // MARK: - Sorgu

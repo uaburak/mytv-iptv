@@ -673,6 +673,20 @@ extension HomeViewController: UICollectionViewDelegate {
         cell.applyScroll(offset: collectionView.contentOffset.y)
     }
 
+    /// Karta uzun basınca çıkan menü — İzle, favori, izleme listesi. Menünün
+    /// kendisi `MediaCardMenu`'de: aynı kart her ekranda aynı eylemleri veriyor.
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard indexPaths.count == 1, let indexPath = indexPaths.first else { return nil }
+        guard case let .poster(_, item)? = dataSource.itemIdentifier(for: indexPath) else { return nil }
+        return MediaCardMenu.configuration(for: item, model: model) { [weak self] item in
+            self?.openDetail(item)
+        }
+    }
+
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
@@ -687,11 +701,7 @@ extension HomeViewController: UICollectionViewDelegate {
                 openDetail(media, sourceView: collectionView.cellForItem(at: indexPath))
             }
         case let .mainCard(kind):
-            // Canlı yayında beklenen ekran kanal ızgarası değil rehber:
-            // hangi kanalda şu an ne var. Film ve dizi eskisi gibi.
-            let controller: UIViewController = kind == .live
-                ? GuideViewController(model: model)
-                : KindBrowseViewController(kind: kind, model: model)
+            let controller = KindBrowseViewController(kind: kind, model: model)
             navigationController?.pushViewController(controller, animated: true)
         case let .category(_, kind, categoryID, title):
             openCategory(kind: kind, categoryID: categoryID, title: title)

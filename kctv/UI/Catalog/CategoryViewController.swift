@@ -421,6 +421,20 @@ extension CategoryViewController: UICollectionViewDelegate {
         }
     }
 
+    /// Karta uzun basınca çıkan menü — İzle, favori, izleme listesi. Menünün
+    /// kendisi `MediaCardMenu`'de: aynı kart her ekranda aynı eylemleri veriyor.
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard indexPaths.count == 1, let indexPath = indexPaths.first else { return nil }
+        guard case let .media(item)? = dataSource.itemIdentifier(for: indexPath) else { return nil }
+        return MediaCardMenu.configuration(for: item, model: model) { [weak self] item in
+            self?.openDetail(item)
+        }
+    }
+
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
         guard case let .media(item) = dataSource.itemIdentifier(for: indexPath) else { return }

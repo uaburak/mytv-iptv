@@ -422,28 +422,13 @@ final class ContentLibrary {
             ))
         }
 
-        // 2) Kategori rayları — her türden dolu olan ilk kategoriler.
-        for kind in [MediaKind.movie, .series, .live] {
-            let items = snapshot.items[kind] ?? []
-            guard !items.isEmpty else { continue }
-            let grouped = itemsByCategory[kind] ?? [:]
-
-            let categories = (snapshot.categories[kind] ?? [])
-                .filter { (grouped[$0.id]?.count ?? 0) >= 4 }
-                .prefix(kind == .live ? 3 : 6)
-
-            for category in categories {
-                guard let categoryItems = grouped[category.id] else { continue }
-                rows.append(ContentRow(
-                    id: "\(kind.rawValue)-\(category.id)",
-                    title: category.name,
-                    subtitle: nil,
-                    kind: kind,
-                    categoryID: category.id,
-                    items: Array(categoryItems.prefix(24))
-                ))
-            }
-        }
+        // Kategori rayları burada değil.
+        //
+        // Anasayfa artık bir katalog dökümü değil: banner, kaldığın yer,
+        // izleme listen ve yeni eklenenler. "Çocuk Filmleri", "Romantik" gibi
+        // türlerin yeri Filmler / Diziler / Kanallar sayfalarının kendi sol
+        // menüsü — orada hepsi tek listede ve içerik sayılarıyla duruyor,
+        // anasayfada ise ilk altısı keyfî biçimde öne çıkıyordu.
 
         return rows
     }

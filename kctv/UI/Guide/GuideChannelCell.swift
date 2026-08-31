@@ -112,6 +112,8 @@ final class GuideChannelCell: UITableViewCell {
         nextLabel.font = .systemFont(ofSize: metrics.listSubtitleFont.pointSize - 1)
 
         nameLabel.text = item.title
+        // Logolar birbirini tutmayan oranlarda geliyor; kırpmadan sığdırılıyor.
+        logo.imageContentMode = .scaleAspectFit
         logo.configure(url: item.posterURL, title: item.title, displayWidth: 72)
     }
 

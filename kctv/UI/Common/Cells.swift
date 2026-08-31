@@ -28,7 +28,6 @@ final class PosterCell: UICollectionViewCell {
     #if os(tvOS)
     private let glass = UIView.glassOverlay(cornerRadius: 0, intensity: 0.55)
     #endif
-    private var artworkHeight: NSLayoutConstraint?
 
     private var title = ""
     private var progress: Double?
@@ -85,6 +84,11 @@ final class PosterCell: UICollectionViewCell {
             artwork.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             artwork.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             artwork.topAnchor.constraint(equalTo: contentView.topAnchor),
+            // Afiş hücrenin tamamı. Yüksekliği ayrıca hesaplanınca (ray
+            // ölçüsünden) ızgaradaki sütun genişliğiyle tutmuyordu: afiş
+            // hücreden taşıyor, oran bozuluyor ve taşan pay alt satırla
+            // arasındaki boşluğu yiyordu. Oranı artık düzen veriyor.
+            artwork.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
 
             overlay.leadingAnchor.constraint(equalTo: artwork.leadingAnchor),
             overlay.trailingAnchor.constraint(equalTo: artwork.trailingAnchor),
@@ -150,6 +154,13 @@ final class PosterCell: UICollectionViewCell {
         #if os(tvOS)
         glass.cornerConfiguration = .uniformCorners(radius: .fixed(metrics.cardCornerRadius))
         #endif
+        // Kanal logosu afiş değil: her biri başka oranda geliyor ve karta
+        // doldurmak için kırpılınca logonun kenarları gidiyor. Kart zemini
+        // zaten siyah; logo geldiği oranla ortasına sığıyor — kenarlara
+        // dayanmasın diye de bir pay bırakılıyor.
+        let isChannelLogo = item.kind == .live
+        artwork.imageContentMode = isChannelLogo ? .scaleAspectFit : .scaleAspectFill
+        artwork.imageInsetRatio = isChannelLogo ? RemoteImageView.logoInsetRatio : 0
         artwork.configure(url: item.posterURL, title: item.title, displayWidth: width)
         artwork.alpha = isAvailable ? 1.0 : 0.65
 
@@ -158,18 +169,6 @@ final class PosterCell: UICollectionViewCell {
             badgeContainer.isHidden = false
         } else {
             badgeContainer.isHidden = true
-        }
-
-        // Kısıt yeniden kurulmuyor, sabiti güncelleniyor: hücre döngüsünde
-        // her karta yeni bir `NSLayoutConstraint` üretip eskisini sökmek
-        // düzen motorunu boşuna çalıştırıyordu.
-        let height = width / item.kind.posterAspect
-        if let artworkHeight {
-            artworkHeight.constant = height
-        } else {
-            let constraint = artwork.heightAnchor.constraint(equalToConstant: height)
-            constraint.isActive = true
-            artworkHeight = constraint
         }
 
         // Kart tek bir erişilebilirlik öğesi: içinde okunacak bir alt görünüm
@@ -457,6 +456,10 @@ final class RowHeaderView: UICollectionReusableView {
     override init(frame: CGRect) {
         contentStack = UIStackView()
         super.init(frame: frame)
+        // Başlık yuvasının dışına taşmıyor: beliriş yolunun başında yuvanın
+        // tamamen altında duruyor ve oradan çıkıyor. Kırpma olmasaydı yazı
+        // banner'ın üstünde havada asılı görünürdü.
+        clipsToBounds = true
         titleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
         titleLabel.textColor = .white
         chevron.tintColor = AppPalette.secondaryText
@@ -525,23 +528,32 @@ final class RowHeaderView: UICollectionReusableView {
     /// - Parameter progress: 0 gizli, 1 tamamen görünür.
     func applyReveal(_ progress: CGFloat) {
         let clamped = min(max(progress, 0), 1)
-        contentStack.alpha = clamped
-        // Yerine otururken hafifçe yükseliyor; sadece sönümlenmek cansız duruyordu.
+        // `smoothstep`: eğri hem yola çıkarken hem yerine otururken yatay.
+        // Kaydırmaya birebir bağlı olduğu için eğrinin uçlarındaki sertlik
+        // doğrudan görünüyordu — başlık kımıldar kımıldamaz tam hızda çıkıp
+        // yerine çarpıyordu. Banner içeriğinin yükselişi de aynı eğride.
+        let eased = clamped * clamped * (3 - 2 * clamped)
+        contentStack.alpha = eased
         contentStack.transform = CGAffineTransform(
-            translationX: 0, y: (1 - clamped) * Self.revealOffset
+            translationX: 0, y: (1 - eased) * revealDistance
         )
     }
 
-    /// Belirirken kat edilen yol.
-    private static let revealOffset: CGFloat = 10
+    /// Belirirken kat edilen yol: başlığın kendi yuvası kadar.
+    ///
+    /// Görünüm kırptığı için başlık yolun başında yuvasının tamamen altında —
+    /// ekranda hiç yok — ve yükseldikçe alttan çıkıyor. Sabit 10pt'lik bir
+    /// payla hareket görünmüyor, yalnızca sönümleniyor gibi duruyordu.
+    private var revealDistance: CGFloat { max(bounds.height, 1) }
 
     /// Kaydırmanın belirişe dönüşmesi.
     ///
-    /// Başlık, banner'ın altındaki boşluk kadar kaydırıldığında tamamen
-    /// açılıyor: kullanıcı sayfayı "başlattığı" anda başlık yerinde oluyor.
+    /// Yol, başlığın kendi yüksekliğinin üç katı. Bir buçuk katta beliriş
+    /// altmış küsur nokta içinde bitiyordu: kaydırma daha ivmelenmeden başlık
+    /// yerine oturuyor, hareket kaydırmadan kopuk ve ani görünüyordu.
     static func revealProgress(for scrollView: UIScrollView, metrics: AppMetrics) -> CGFloat {
         let scrolled = scrollView.contentOffset.y + scrollView.adjustedContentInset.top
-        return min(max(scrolled / max(metrics.rowHeaderHeight * 1.5, 1), 0), 1)
+        return min(max(scrolled / max(metrics.rowHeaderHeight * 3, 1), 0), 1)
     }
 }
 

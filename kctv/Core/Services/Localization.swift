@@ -141,6 +141,8 @@ enum L10n {
     static var noChannels: String { isTurkish ? "Kanal bulunamadı" : "No channels found" }
     static var movies: String { isTurkish ? "Filmler" : "Movies" }
     static var series: String { isTurkish ? "Diziler" : "Series" }
+    static var recentlyWatched: String { isTurkish ? "Son İzlediklerim" : "Recently Watched" }
+    static var genres: String { isTurkish ? "Türler" : "Genres" }
     static var recentlyAdded: String { isTurkish ? "Son Eklenenler" : "Recently Added" }
     static var allCategories: String { isTurkish ? "Tüm Kategoriler" : "All Categories" }
     static var seeAll: String { isTurkish ? "Tümünü Gör" : "See All" }
@@ -241,6 +243,8 @@ enum L10n {
     static var watch: String { isTurkish ? "İzle" : "Watch" }
     static var addToFavorites: String { isTurkish ? "Favorilere Ekle" : "Add to Favorites" }
     static var removeFromFavorites: String { isTurkish ? "Favorilerden Çıkar" : "Remove from Favorites" }
+    static var addToWatchlist: String { isTurkish ? "İzleme Listeme Ekle" : "Add to Watchlist" }
+    static var removeFromWatchlist: String { isTurkish ? "İzleme Listemden Çıkar" : "Remove from Watchlist" }
     static var streamFailed: String { isTurkish ? "Yayın açılamadı." : "Playback failed." }
     static var libraryLoadFailed: String {
         isTurkish ? "İçerikler yüklenemedi" : "Couldn't load content"

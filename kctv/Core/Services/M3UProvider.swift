@@ -195,7 +195,7 @@ actor M3UProvider: ContentProvider {
 
         categoriesByKind = groups.mapValues { counts in
             counts
-                .map { MediaCategory(id: Self.categoryID($0.key), name: $0.key, kind: .live, itemCount: $0.value) }
+                .map { MediaCategory(id: Self.categoryID($0.key), name: $0.key.cleanedCategoryName, kind: .live, itemCount: $0.value) }
                 .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         }
         // Kategori nesnesindeki `kind` alanını doğru türle eşle.

@@ -163,6 +163,13 @@ final class CatalogItemCell: UICollectionViewCell {
 
         applyMode(mode)
         artwork.layer.cornerRadius = metrics.cardCornerRadius
+        // Kanal logosu afiş değil: her biri başka oranda geliyor ve karta
+        // doldurmak için kırpılınca logonun kenarları gidiyor. Kart zemini
+        // zaten siyah; logo geldiği oranla ortasına sığıyor — kenarlara
+        // dayanmasın diye de bir pay bırakılıyor.
+        let isChannelLogo = item.kind == .live
+        artwork.imageContentMode = isChannelLogo ? .scaleAspectFit : .scaleAspectFill
+        artwork.imageInsetRatio = isChannelLogo ? RemoteImageView.logoInsetRatio : 0
         artwork.configure(url: item.posterURL, title: item.title, displayWidth: max(imageWidth, 1))
 
         titleLabel.font = metrics.listTitleFont

@@ -104,19 +104,35 @@ enum MediaSectionLayout {
         #endif
     }
 
+    /// Apple TV'de ekranın nokta cinsinden genişliği — 4K'da da 1920.
+    /// Sütunun hedef genişliği buradan çıkıyor.
+    private static let fullScreenWidth: CGFloat = 1920
+
     /// Izgaranın sütun sayısı.
     ///
-    /// tvOS'ta sabit: 10 feet mesafede satırda yedi afiş hem okunur kalıyor hem
-    /// de ekranın tamamını kullanıyor. iOS'ta kart raylardaki ölçüsüne yakın
-    /// kalacak şekilde satıra kaç tane sığıyorsa o kadar — iPhone'da üç sütun.
+    /// tvOS'ta sabit olan sütun sayısı değil, **kartın genişliği**. Tam ekran
+    /// bir sayfada satıra yedi afiş (yatay 16:9 kartlarda dört) sığıyor; sabit
+    /// yedi yazıldığında, solunda gömülü menü olan sayfalarda ızgaraya ~1390pt
+    /// kalıyor ve aynı yedi sütuna bölününce kartlar yarı yarıya inceliyordu.
+    /// Artık kart tam ekrandaki ölçüsünü koruyor, satıra kaç tane sığıyorsa o
+    /// kadar sütun açılıyor — menülü sayfada beş.
+    ///
+    /// iOS'ta kart raylardaki ölçüsüne yakın kalıyor — iPhone'da üç sütun.
     static func gridColumns(
         kind: MediaKind,
         containerWidth: CGFloat,
         metrics: AppMetrics
     ) -> Int {
         #if os(tvOS)
-        // Yatay (16:9) kartlar iki kat geniş; onlarda yedi sütun okunmuyor.
-        return kind == .live ? 4 : 7
+        let spacing = gridSpacing(metrics: metrics)
+        let fullScreenColumns: CGFloat = kind == .live ? 4 : 7
+        let fullScreenAvailable = fullScreenWidth - metrics.screenPadding * 2
+        let targetWidth =
+            (fullScreenAvailable - spacing * (fullScreenColumns - 1)) / fullScreenColumns
+
+        let available = max(containerWidth - metrics.screenPadding * 2, 1)
+        let fitting = ((available + spacing) / (targetWidth + spacing)).rounded()
+        return max(Int(fitting), 2)
         #else
         let available = max(containerWidth - metrics.screenPadding * 2, 1)
         let target = max(metrics.cardWidth(for: kind) + metrics.cardSpacing, 1)

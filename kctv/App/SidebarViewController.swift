@@ -700,124 +700,7 @@ private final class SectionChipView: FocusableControl {
     }
 }
 
-/// Menü panelindeki tek satır: solda simge, yanında adı.
-///
-/// Odak ve seçim geri bildirimi uygulamanın çipleriyle aynı dili konuşuyor —
-/// odaktaki satır dolu beyaz zemin + siyah yazı. Büyüme ve gölge
-/// `FocusableControl`'den geliyor, animasyon ikinci kez yazılmıyor.
-private final class SidebarItemView: FocusableControl {
-    private let highlight = UIView()
-    private let iconView = UIImageView()
-    private let titleLabel = UILabel()
 
-    var onSelect: (() -> Void)?
-
-    var symbol: String = "" {
-        didSet { iconView.image = UIImage(systemName: symbol) }
-    }
-
-    var title: String = "" {
-        didSet {
-            titleLabel.text = title
-            accessibilityLabel = title
-        }
-    }
-
-    /// Seçili bölüm; odaktan bağımsız.
-    var isCurrent = false {
-        didSet { applyFocusStyle(isFocused: isFocused) }
-    }
-
-    override var focusScale: CGFloat { 1.03 }
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        build()
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    private func build() {
-        highlight.layer.cornerRadius = SidebarRowGeometry.itemHeight / 2
-        highlight.layer.cornerCurve = .continuous
-        highlight.isUserInteractionEnabled = false
-        highlight.translatesAutoresizingMaskIntoConstraints = false
-
-        iconView.contentMode = .center
-        iconView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(
-            pointSize: 24, weight: .semibold
-        )
-        iconView.translatesAutoresizingMaskIntoConstraints = false
-
-        titleLabel.font = .systemFont(ofSize: 26, weight: .medium)
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        addSubview(highlight)
-        addSubview(iconView)
-        addSubview(titleLabel)
-
-        addAction(UIAction { [weak self] _ in self?.onSelect?() }, for: .primaryActionTriggered)
-
-        NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: SidebarRowGeometry.itemHeight),
-
-            highlight.leadingAnchor.constraint(equalTo: leadingAnchor),
-            highlight.trailingAnchor.constraint(equalTo: trailingAnchor),
-            highlight.topAnchor.constraint(equalTo: topAnchor),
-            highlight.bottomAnchor.constraint(equalTo: bottomAnchor),
-
-            iconView.leadingAnchor.constraint(
-                equalTo: leadingAnchor, constant: SidebarRowGeometry.slotLeading
-            ),
-            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: SidebarRowGeometry.slotSize),
-            iconView.heightAnchor.constraint(equalToConstant: SidebarRowGeometry.slotSize),
-
-            titleLabel.leadingAnchor.constraint(
-                equalTo: iconView.trailingAnchor, constant: SidebarRowGeometry.textGap
-            ),
-            titleLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: trailingAnchor, constant: -14
-            ),
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-
-        isAccessibilityElement = true
-        accessibilityTraits = .button
-        applyFocusStyle(isFocused: false)
-    }
-
-    override func applyFocusStyle(isFocused: Bool) {
-        if isFocused {
-            highlight.backgroundColor = .white
-            iconView.tintColor = .black
-            titleLabel.textColor = .black
-        } else if isCurrent {
-            highlight.backgroundColor = AppPalette.elevated
-            iconView.tintColor = AppPalette.primaryText
-            titleLabel.textColor = AppPalette.primaryText
-        } else {
-            highlight.backgroundColor = .clear
-            iconView.tintColor = AppPalette.secondaryText
-            titleLabel.textColor = AppPalette.secondaryText
-        }
-    }
-}
-
-/// Menü satırlarının ve profil butonunun ortak ölçüleri.
-private enum SidebarRowGeometry {
-    /// Vurgu kapsülünün panel kenarına uzaklığı — iki yanda da aynı.
-    static let pillInset: CGFloat = 20
-    static let itemHeight: CGFloat = 68
-
-    /// İkon ve avatar yuvasının sol kenar mesafesi
-    static let slotLeading: CGFloat = 7
-    /// İkon ve avatar yuvasının boyutu (ikon 54x54 alanın ortasında durur, avatar bu alanı doldurur)
-    static let slotSize: CGFloat = 54
-    /// Yuva ile metin arasındaki boşluk
-    static let textGap: CGFloat = 14
-}
 
 /// Panelin en üstündeki profil satırı: avatar ve kullanıcı adı.
 ///
@@ -846,6 +729,9 @@ private final class SidebarProfileButton: FocusableControl {
 
         avatarView.isCircular = true
         avatarView.clipsToBounds = true
+        // Fotoğrafı olmayan hesapta adın baş harfleri: burada bir görselin
+        // yerini tutmuyor, kişinin kendi kısaltması.
+        avatarView.showsInitials = true
         avatarView.translatesAutoresizingMaskIntoConstraints = false
 
         nameLabel.font = .systemFont(ofSize: 24, weight: .semibold)

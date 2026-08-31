@@ -504,6 +504,24 @@ extension CatalogViewController: UICollectionViewDataSource, UICollectionViewDel
         }
     }
 
+    /// Karta uzun basınca çıkan menü — İzle, favori, izleme listesi. Menünün
+    /// kendisi `MediaCardMenu`'de: aynı kart her ekranda aynı eylemleri veriyor.
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard indexPaths.count == 1, let indexPath = indexPaths.first else { return nil }
+        guard items.indices.contains(indexPath.item) else { return nil }
+        let item = items[indexPath.item]
+        return MediaCardMenu.configuration(for: item, model: model) { [weak self] item in
+            guard let self else { return }
+            navigationController?.pushViewController(
+                DetailViewController(item: item, model: model), animated: true
+            )
+        }
+    }
+
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
         let item = items[indexPath.item]

@@ -19,6 +19,21 @@ final class RemoteImageView: UIView {
         set { imageView.contentMode = newValue }
     }
 
+    /// Görselin kenarlardan payı — görünümün **kısa** kenarına oran.
+    ///
+    /// `.scaleAspectFit` ile anlamlı: kırpmadan sığdırılan bir logo kartın
+    /// kenarlarına dayanıyor ve olduğundan büyük duruyor. Pay, kartın oranı ne
+    /// olursa olsun logonun etrafında aynı kalınlıkta bir boşluk bırakıyor —
+    /// yatay ve dikey ayrı ayrı hesaplansaydı geniş kartta yanlarda kalın,
+    /// üstte ince bir çerçeve çıkardı.
+    var imageInsetRatio: CGFloat = 0 {
+        didSet { setNeedsLayout() }
+    }
+
+    /// Kanal logolarının kart içindeki payı. Tek yerden okunuyor: aynı logo
+    /// ızgarada da katalogda da aynı büyüklükte durmalı.
+    static let logoInsetRatio: CGFloat = 0.15
+
     /// Arka planda degrade yer tutucunun gösterilip gösterilmeyeceği.
     var showsPlaceholderBackground: Bool = true {
         didSet { gradientLayer.isHidden = !showsPlaceholderBackground }
@@ -37,9 +52,17 @@ final class RemoteImageView: UIView {
         displayWidth * max(2, scale > 0 ? scale : 3) * focusHeadroom
     }
 
-    /// Kartlarda başlığın baş harfleri yer tutucu olarak gösteriliyor.
-    /// Detay hero'sunda kapalı: orada yalnızca bulanık bir zemin isteniyor.
-    var showsInitials = true {
+    /// Görselin yerine adın baş harfleri.
+    ///
+    /// Varsayılan **kapalı**. Afişi olmayan ya da henüz inmemiş bir kartta
+    /// beliren iki-üç harf hiçbir şey anlatmıyordu; üstelik afiş düşer düşmez
+    /// kayboluyordu, yani her kart yüklenirken içinde bir yazı yanıp sönüyordu.
+    /// Afiş yoksa yapacak bir şey de yok: degrade zemin yeterli.
+    ///
+    /// Kişi görsellerinde (profil avatarı, oyuncu fotoğrafları) açılıyor —
+    /// orada baş harfler eksik bir görselin yerini tutmuyor, kişinin adının
+    /// kısaltması oluyor.
+    var showsInitials = false {
         didSet { initialsLabel.isHidden = !showsInitials }
     }
 
@@ -52,6 +75,8 @@ final class RemoteImageView: UIView {
 
     private var currentURL: URL?
     private var loadTask: Task<Void, Never>?
+    /// `imageInsetRatio` bunların sabitini sürüyor.
+    private var imageEdges: [NSLayoutConstraint] = []
 
 
     override init(frame: CGRect) {
@@ -68,6 +93,7 @@ final class RemoteImageView: UIView {
         clipsToBounds = true
         layer.addSublayer(gradientLayer)
 
+        initialsLabel.isHidden = true
         initialsLabel.textAlignment = .center
         initialsLabel.font = .systemFont(ofSize: 30, weight: .semibold)
         initialsLabel.textColor = UIColor.white.withAlphaComponent(0.9)
@@ -78,16 +104,26 @@ final class RemoteImageView: UIView {
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
 
-        for subview in [initialsLabel, imageView] {
-            subview.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(subview)
-            NSLayoutConstraint.activate([
-                subview.leadingAnchor.constraint(equalTo: leadingAnchor),
-                subview.trailingAnchor.constraint(equalTo: trailingAnchor),
-                subview.topAnchor.constraint(equalTo: topAnchor),
-                subview.bottomAnchor.constraint(equalTo: bottomAnchor),
-            ])
-        }
+        initialsLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(initialsLabel)
+        NSLayoutConstraint.activate([
+            initialsLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+            initialsLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
+            initialsLabel.topAnchor.constraint(equalTo: topAnchor),
+            initialsLabel.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(imageView)
+        // Sabitleri `layoutSubviews` sürüyor; pay yokken dördü de sıfır ve
+        // görsel eskisi gibi kenardan kenara.
+        imageEdges = [
+            imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            imageView.topAnchor.constraint(equalTo: topAnchor),
+            trailingAnchor.constraint(equalTo: imageView.trailingAnchor),
+            bottomAnchor.constraint(equalTo: imageView.bottomAnchor),
+        ]
+        NSLayoutConstraint.activate(imageEdges)
     }
 
     override func layoutSubviews() {
@@ -96,6 +132,13 @@ final class RemoteImageView: UIView {
         if isCircular {
             layer.cornerRadius = min(bounds.width, bounds.height) / 2
         }
+
+        // Pay görünümün ölçüsünden çıkıyor, o yüzden burada. Değişmediyse
+        // sabite dokunulmuyor: her düzen turunda kısıt güncellemek bir tur
+        // daha düzen istiyor ve iş sonu gelmeyen bir döngüye dönüyor.
+        let inset = (min(bounds.width, bounds.height) * imageInsetRatio).rounded()
+        guard imageEdges.first?.constant != inset else { return }
+        for edge in imageEdges { edge.constant = inset }
     }
 
     func configure(url: URL?, title: String, displayWidth: CGFloat) {
