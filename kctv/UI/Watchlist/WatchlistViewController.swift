@@ -1,12 +1,12 @@
 import UIKit
 
-/// Favorilere eklenen içerikler.
+/// İzleme listesine eklenen içerikler.
 ///
 /// Düzen katalog ve arama sonuçlarıyla aynı: tür türe ayrılmış afiş ızgarası,
 /// aynı `PosterCell`, aynı `MediaSectionLayout`. Ekran daha önce kendi satır
 /// hücresini çiziyordu — uygulamanın tek liste görünümü oydu ve tvOS'ta minik
 /// afişli bir tablo olarak duruyordu.
-final class FavoritesViewController: UIViewController {
+final class WatchlistViewController: UIViewController {
     private enum Section: Hashable {
         case kind(MediaKind)
     }
@@ -63,7 +63,7 @@ final class FavoritesViewController: UIViewController {
         applySnapshot(animated: false)
 
         NotificationCenter.default.addObserver(
-            self, selector: #selector(reload), name: .appModelFavoritesDidChange, object: nil
+            self, selector: #selector(reload), name: .appModelActivityDidChange, object: nil
         )
         NotificationCenter.default.addObserver(
             self, selector: #selector(reload), name: .contentLibraryDidChange, object: nil
@@ -192,7 +192,7 @@ final class FavoritesViewController: UIViewController {
                 containerWidth: width,
                 metrics: AppMetrics.metrics(for: width),
                 // Tek tür varsa başlık gereksiz: ekranın başlığı zaten
-                // "Favoriler" ve altında tek bir ızgara duruyor.
+                // "İzleme Listem" ve altında tek bir ızgara duruyor.
                 showsHeader: visibleKinds.count > 1
             )
         }
@@ -249,24 +249,24 @@ final class FavoritesViewController: UIViewController {
     }
 
     private func updateLocalizedTexts() {
-        title = L10n.tabFavorites
+        title = L10n.myWatchlist
         #if os(tvOS)
         navigationItem.title = ""
-        headerTitle.text = L10n.tabFavorites
+        headerTitle.text = L10n.myWatchlist
         #endif
         emptyState?.configure(
-            symbol: "heart",
-            title: L10n.favoritesEmptyTitle,
-            message: L10n.favoritesEmptyMessage
+            symbol: "bookmark",
+            title: L10n.watchlistEmptyTitle,
+            message: L10n.watchlistEmptyMessage
         )
     }
 
     private func applySnapshot(animated: Bool) {
-        // Favoriler yalnızca kimlik olarak saklanıyor; içerik katalogdan
+        // Liste yalnızca kimlik olarak saklanıyor; içerik katalogdan
         // çözülüyor. Katalogda karşılığı olmayan kimlikler (liste değişmiş,
         // sağlayıcı içeriği kaldırmış) listelenmiyor ama kaydı silinmiyor —
-        // içerik geri gelirse favori de geri geliyor.
-        let items = model.activity.favoriteIDs.compactMap { model.library.item(for: $0) }
+        // içerik geri gelirse kayıt da geri geliyor.
+        let items = model.activity.watchlistIDs.compactMap { model.library.item(for: $0) }
 
         var grouped: [MediaKind: [MediaItem]] = [:]
         var seen = Set<MediaID>()
@@ -296,14 +296,14 @@ final class FavoritesViewController: UIViewController {
         dataSource.apply(snapshot, animatingDifferences: animated)
         emptyState.isHidden = !items.isEmpty
         #if os(tvOS)
-        // Hiç favori yokken başlık ve süzgeç de yok: ekranın ortasında
+        // Liste boşken başlık ve süzgeç de yok: ekranın ortasında
         // yalnızca boş durum duruyor.
         headerStack.isHidden = items.isEmpty
         #endif
     }
 }
 
-extension FavoritesViewController: UICollectionViewDelegate {
+extension WatchlistViewController: UICollectionViewDelegate {
     /// Odaklanan kart hücresinin dışına büyüyor; araya giren katmanlar kırpma
     /// yaparsa büyüme görünmüyor.
     #if os(tvOS)
@@ -330,7 +330,7 @@ extension FavoritesViewController: UICollectionViewDelegate {
         navigationController?.pushViewController(controller, animated: true)
     }
 
-    /// Karta uzun basınca çıkan menü — İzle, favori, izleme listesi. Menünün
+    /// Karta uzun basınca çıkan menü — İzle ve kaydet. Menünün
     /// kendisi `MediaCardMenu`'de: aynı kart her ekranda aynı eylemleri veriyor.
     ///
     /// Tekil `...ForItemAt:` karşılığı artık kullanılamıyor; çoklu seçime
@@ -355,7 +355,7 @@ extension FavoritesViewController: UICollectionViewDelegate {
     }
 }
 
-extension FavoritesViewController: UICollectionViewDataSourcePrefetching {
+extension WatchlistViewController: UICollectionViewDataSourcePrefetching {
     func collectionView(
         _ collectionView: UICollectionView,
         prefetchItemsAt indexPaths: [IndexPath]

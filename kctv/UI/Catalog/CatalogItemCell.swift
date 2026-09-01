@@ -27,7 +27,16 @@ final class CatalogItemCell: UICollectionViewCell {
     var artworkView: UIView { artwork }
 
     var onPlay: (() -> Void)?
-    var onToggleFavorite: (() -> Void)?
+
+    /// Kaydetme defteri türe göre: canlıda favori (oynatıcının kanal listesi),
+    /// film ve dizide izleme listesi.
+    private static func saveTitle(item: MediaItem, saved: Bool) -> String {
+        if item.kind == .live {
+            return saved ? L10n.removeFromFavorites : L10n.addToFavorites
+        }
+        return saved ? L10n.removeFromWatchlist : L10n.addToWatchlist
+    }
+    var onToggleSaved: (() -> Void)?
 
     private var listConstraints: [NSLayoutConstraint] = []
     private var gridConstraints: [NSLayoutConstraint] = []
@@ -155,7 +164,7 @@ final class CatalogItemCell: UICollectionViewCell {
         metrics: AppMetrics,
         mode: DisplayMode,
         imageWidth: CGFloat,
-        isFavorite: Bool
+        isSaved: Bool
     ) {
         let listHeight = metrics.posterWidth * 0.62
         artworkHeight.constant = listHeight
@@ -190,10 +199,10 @@ final class CatalogItemCell: UICollectionViewCell {
                 self?.onPlay?()
             },
             UIAction(
-                title: isFavorite ? L10n.removeFromFavorites : L10n.addToFavorites,
-                image: UIImage(systemName: isFavorite ? "checkmark" : "plus")
+                title: Self.saveTitle(item: item, saved: isSaved),
+                image: UIImage(systemName: isSaved ? "checkmark" : "plus")
             ) { [weak self] _ in
-                self?.onToggleFavorite?()
+                self?.onToggleSaved?()
             },
         ])
         menuButton.menu = menu

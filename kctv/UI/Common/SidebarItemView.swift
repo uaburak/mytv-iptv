@@ -10,7 +10,7 @@ enum SidebarRowGeometry {
 }
 
 /// Hem ana uygulamanın kenar çubuğunda (SidebarViewController) hem de
-/// sayfa içi gömülü menülerde (KindBrowseViewController) kullanılan standart satır butonu.
+/// sayfa içi gömülü menülerde (BrowseViewController) kullanılan standart satır butonu.
 final class SidebarItemView: FocusableControl {
     private let highlight = UIView()
     private let iconView = UIImageView()

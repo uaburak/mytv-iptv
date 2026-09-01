@@ -23,14 +23,25 @@ enum MediaCardMenu {
         // Durum menü kurulmadan önce okunuyor: eylem sağlayıcı ana aktörde
         // çalışmıyor, oraya yalnızca hazır metinler giriyor.
         let activity = model.activity
-        let isFavorite = activity.isFavorite(item)
-        let isInWatchlist = activity.isInWatchlist(item)
+        // Kaydetme defteri türe göre değişiyor. Canlı kanalda favori:
+        // oynatıcının kanal listesi ve kanal çekmecesi oradan besleniyor.
+        // Film ve dizide izleme listesi. İkisi bir arada gösterilmiyor —
+        // kullanıcıya aynı işin iki adı gibi görünüyordu.
+        let usesFavorites = item.kind == .live
+        let isSaved = usesFavorites ? activity.isFavorite(item) : activity.isInWatchlist(item)
         // Yarım kalmış bir kayıt varsa eylem "Devam Et": menü, kartın
         // üstündeki ilerleme çubuğuyla aynı şeyi söylemeli.
         let resumes = activity.latestProgress(for: item.id).map { !$0.isFinished } ?? false
 
+        // Kullanıcının kendi kanal listeleri yalnızca kanallarda ve yalnızca
+        // en az bir liste kurulmuşsa. Liste yokken "Listeye Ekle" gösterip
+        // boş bir alt menü açmanın anlamı yok — listeyi Kanallar sayfasının
+        // sol menüsündeki "Liste Oluştur" kuruyor.
+        let lists = item.kind == .live ? model.activity.channelLists : []
+        let listElement = listElement(for: item, lists: lists, model: model)
+
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
-            UIMenu(children: [
+            var children: [UIMenuElement] = [
                 UIAction(
                     title: resumes ? L10n.resume : L10n.watch,
                     image: UIImage(systemName: "play.fill")
@@ -38,21 +49,65 @@ enum MediaCardMenu {
                     Task { @MainActor in await watch(item, model: model, openDetail: openDetail) }
                 },
                 UIAction(
-                    title: isFavorite ? L10n.removeFromFavorites : L10n.addToFavorites,
-                    image: UIImage(systemName: isFavorite ? "heart.slash" : "heart"),
-                    attributes: isFavorite ? .destructive : []
+                    title: saveTitle(saved: isSaved, usesFavorites: usesFavorites),
+                    image: UIImage(systemName: isSaved ? "bookmark.slash" : "bookmark"),
+                    attributes: isSaved ? .destructive : []
                 ) { _ in
-                    model.activity.toggleFavorite(item)
+                    if usesFavorites {
+                        model.activity.toggleFavorite(item)
+                    } else {
+                        model.activity.toggleWatchlist(item)
+                    }
                 },
-                UIAction(
-                    title: isInWatchlist ? L10n.removeFromWatchlist : L10n.addToWatchlist,
-                    image: UIImage(systemName: isInWatchlist ? "bookmark.slash" : "bookmark"),
-                    attributes: isInWatchlist ? .destructive : []
-                ) { _ in
-                    model.activity.toggleWatchlist(item)
-                },
-            ])
+            ]
+            if let listElement { children.append(listElement) }
+            return UIMenu(children: children)
         }
+    }
+
+    /// Kanal listeleri menüde nasıl duruyor?
+    ///
+    /// Tek liste varsa doğrudan bir eylem — araya bir alt menü koymak tek
+    /// seçenek için fazladan bir tuş demek. Birden fazlaysa alt menü ve her
+    /// listenin yanında kanalın o listede olup olmadığını gösteren işaret;
+    /// aynı satır hem ekliyor hem çıkarıyor.
+    @MainActor
+    private static func listElement(
+        for item: MediaItem,
+        lists: [ChannelList],
+        model: AppModel
+    ) -> UIMenuElement? {
+        guard !lists.isEmpty else { return nil }
+
+        if lists.count == 1, let only = lists.first {
+            let contains = only.channelIDs.contains(item.id)
+            return UIAction(
+                title: contains ? L10n.removeFromList : L10n.addToList,
+                image: UIImage(systemName: contains ? "text.badge.minus" : "text.badge.plus"),
+                attributes: contains ? .destructive : []
+            ) { _ in
+                model.activity.toggleChannel(item, inList: only.id)
+            }
+        }
+
+        let actions = lists.map { list in
+            let contains = list.channelIDs.contains(item.id)
+            return UIAction(title: list.name, state: contains ? .on : .off) { _ in
+                model.activity.toggleChannel(item, inList: list.id)
+            }
+        }
+        return UIMenu(
+            title: L10n.addToList,
+            image: UIImage(systemName: "text.badge.plus"),
+            children: actions
+        )
+    }
+
+    private static func saveTitle(saved: Bool, usesFavorites: Bool) -> String {
+        if usesFavorites {
+            return saved ? L10n.removeFromFavorites : L10n.addToFavorites
+        }
+        return saved ? L10n.removeFromWatchlist : L10n.addToWatchlist
     }
 
     @MainActor

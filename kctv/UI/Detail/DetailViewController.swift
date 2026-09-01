@@ -40,7 +40,6 @@ final class DetailViewController: UIViewController {
     private var renderedEpisodeSignature: String?
 
     private var isPlotExpanded = false
-    private var favoriteBarButton: UIBarButtonItem?
     private var didApplyInitialLayout = false
 
     /// Yukarı kaydırırken görselin içerikten ne kadar yavaş hareket edeceği.
@@ -175,14 +174,9 @@ final class DetailViewController: UIViewController {
 
     /// tvOS'ta navigasyon çubuğuna buton konmuyor: sağ üst köşe kumandayla
     /// ulaşması zahmetli bir yer ve paylaşım sayfası zaten o platformda yok.
-    /// Favori, hero'daki aksiyon satırında Oynat'ın yanında duruyor.
+    /// İzleme listesi, hero'daki aksiyon satırında Oynat'ın yanında duruyor.
     private func setupToolbarItems() {
-        #if os(tvOS)
-        updateFavoriteButton()
-        #else
-        let current = detail?.item ?? item
-        let isFav = model.activity.isFavorite(current)
-
+        #if os(iOS)
         let share = UIBarButtonItem(
             image: UIImage(systemName: "square.and.arrow.up"),
             style: .plain,
@@ -191,32 +185,8 @@ final class DetailViewController: UIViewController {
         )
         share.tintColor = .white
 
-        let spacer = UIBarButtonItem.fixedSpace(12)
-
-        let favorite = UIBarButtonItem(
-            image: favoriteImage,
-            style: .plain,
-            target: self,
-            action: #selector(toggleFavorite)
-        )
-        favorite.tintColor = isFav ? .systemRed : .white
-        favoriteBarButton = favorite
-
-        // İki buton arasında spacer ile ayrı ayrı konumlandırma (Sağdan sola: Favori | Spacer | Paylaş)
-        navigationItem.rightBarButtonItems = [favorite, spacer, share]
+        navigationItem.rightBarButtonItems = [share]
         #endif
-    }
-
-    /// tvOS'taki hero favori butonunun simgesini duruma göre günceller.
-    private func updateFavoriteButton() {
-        let isFav = model.activity.isFavorite(detail?.item ?? item)
-        hero.setFavorite(isFavorite: isFav)
-    }
-
-    private var favoriteImage: UIImage? {
-        let current = detail?.item ?? item
-        let isFav = model.activity.isFavorite(current)
-        return UIImage(systemName: isFav ? "heart.fill" : "heart")
     }
 
     // MARK: - Düzen
@@ -294,7 +264,6 @@ final class DetailViewController: UIViewController {
         )
         #endif
         #if os(tvOS)
-        hero.favoriteButton.addTarget(self, action: #selector(toggleFavorite), for: .primaryActionTriggered)
         #endif
     }
 
@@ -364,10 +333,6 @@ final class DetailViewController: UIViewController {
 
         hero.setPlayTitle(playTitle(for: current))
         hero.setWatchlist(isInWatchlist: model.activity.isInWatchlist(current))
-
-        #if os(tvOS)
-        updateFavoriteButton()
-        #endif
     }
 
     /// Dizide sürdürülecek bölümün neden seçildiği.
@@ -914,11 +879,6 @@ final class DetailViewController: UIViewController {
             selectedSeason = detail?.seasons.first?.number
             renderEpisodes()
             hero.setPlayTitle(playTitle(for: detail?.item ?? item))
-            #if os(tvOS)
-            updateFavoriteButton()
-            #else
-            favoriteBarButton?.image = favoriteImage
-            #endif
         }
 
         // TMDB künyesi — `viewDidLoad` önbellekten almışsa ağa çıkılmıyor.
@@ -968,11 +928,6 @@ final class DetailViewController: UIViewController {
         renderRelated()
         renderHero()
         hero.stopLoadingAnimation(animated: true)
-        #if os(tvOS)
-        updateFavoriteButton()
-        #else
-        favoriteBarButton?.image = favoriteImage
-        #endif
     }
 
     /// TMDB künyesini ekranın kullandığı alanlara yazar.
@@ -1171,27 +1126,6 @@ final class DetailViewController: UIViewController {
         hero.watchlistButton.setSymbol(inWatchlist ? "checkmark" : "plus")
     }
 
-    @objc private func toggleFavorite() {
-        let current = detail?.item ?? item
-        model.activity.toggleFavorite(current)
-        let isFav = model.activity.isFavorite(current)
-
-        Haptics.impact(.medium)
-
-        // Kalp dolarken/boşalırken sembolün kendi katmanları morph oluyor.
-        #if os(tvOS)
-        hero.favoriteButton.setSymbol(
-            isFav ? "heart.fill" : "heart",
-            transition: .replace.magic(fallback: .upUp)
-        )
-        hero.favoriteButton.configuration?.baseForegroundColor = isFav ? .systemRed : .white
-        #else
-        if let image = favoriteImage {
-            favoriteBarButton?.setSymbolImage(image, contentTransition: .replace.magic(fallback: .upUp))
-        }
-        favoriteBarButton?.tintColor = isFav ? .systemRed : .white
-        #endif
-    }
 
     @objc private func shareItem() {
         let current = detail?.item ?? item

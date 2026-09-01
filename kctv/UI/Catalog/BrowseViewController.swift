@@ -1,11 +1,20 @@
 import UIKit
 
-/// Filmler, Diziler ve Canlı Kanallar için Apple TV tarzı gömülü sol menülü (in-page sidebar) gezinme ekranı.
+/// Canlı Kanallar, Filmler, Diziler ve İzleme Listem sayfalarının ortak
+/// ekranı: solda sayfaya gömülü menü, sağda afiş ızgarası.
 ///
-/// Sol tarafta uygulamanın genel sidebar butonlarıyla birebir aynı stilde butonlar
-/// (Son İzlediklerim, İzlemeye Devam Et, Favoriler, İzleme Listem ve Türler/Kategoriler),
-/// sağ tarafta ise seçili olan filtrenin/kategorinin dinamik afiş ızgarası yer alır.
-final class KindBrowseViewController: UIViewController {
+/// Dört sayfanın düzeni birebir aynı — sabit üst filtre bloğu, altında kayan
+/// "Türler" listesi, sağda seçime göre değişen ızgara. Aralarındaki tek fark
+/// menünün neyi listelediği ve ızgaranın neyi çözdüğü; ikisi de `Source`'tan
+/// geliyor. Dört ayrı ekran yazıldığında aynı düzeltmeyi dört kez yapmak
+/// gerekiyordu.
+final class BrowseViewController: UIViewController {
+
+    /// Ekranın neyi gezdirdiği.
+    enum Source: Hashable {
+        case kind(MediaKind)
+        case watchlist
+    }
 
     enum SidebarFilter: Hashable {
         case finished
@@ -13,14 +22,27 @@ final class KindBrowseViewController: UIViewController {
         case favorites
         case watchlist
         case category(id: String, name: String)
+        /// İzleme listesinde: hepsi.
+        case all
+        /// İzleme listesinde: tür süzgeci.
+        case kind(MediaKind)
+        /// Kanallarda: kullanıcının kendi listesi.
+        case channelList(id: String, name: String)
+        /// Kanallarda: yeni liste kuran satır. Süzgeç değil, eylem — seçilince
+        /// ızgara değişmiyor, bir kip açılıyor.
+        case createList
 
         func title(kind: MediaKind) -> String {
             switch self {
-            case .finished: return L10n.recentlyWatched
+            case .finished: return L10n.watched
             case .continueWatching: return L10n.continueWatching
             case .favorites: return L10n.tabFavorites
             case .watchlist: return L10n.myWatchlist
             case let .category(_, name): return name
+            case .all: return L10n.allItems
+            case let .kind(kind): return kind.title
+            case let .channelList(_, name): return name
+            case .createList: return L10n.createList
             }
         }
 
@@ -31,6 +53,10 @@ final class KindBrowseViewController: UIViewController {
             case .favorites: return "heart.fill"
             case .watchlist: return "bookmark.fill"
             case let .category(_, name): return Self.categorySymbol(for: name, kind: kind)
+            case .all: return "square.grid.2x2.fill"
+            case let .kind(kind): return kind.symbol
+            case .channelList: return "list.bullet"
+            case .createList: return "plus.circle"
             }
         }
 
@@ -88,7 +114,25 @@ final class KindBrowseViewController: UIViewController {
     }
 
     private let model: AppModel
-    private let kind: MediaKind
+    private let source: Source
+
+    /// Izgaranın kart oranı ve ölçüleri bundan geliyor.
+    ///
+    /// İzleme listesinde yalnızca film ve dizi bulunuyor — kanallar favoride —
+    /// ve ikisinin oranı aynı; orada film ölçüsü kullanılıyor.
+    private var kind: MediaKind {
+        switch source {
+        case let .kind(kind): return kind
+        case .watchlist: return .movie
+        }
+    }
+
+    private var sourceTitle: String {
+        switch source {
+        case let .kind(kind): return kind.title
+        case .watchlist: return L10n.myWatchlist
+        }
+    }
 
     private var selectedFilter: SidebarFilter = .finished
 
@@ -98,6 +142,18 @@ final class KindBrowseViewController: UIViewController {
     /// katmana alınmasa görünen listenin dışında kalan satırlar da çiziliyor ve
     /// sayfanın üstüne — rozetin, ızgaranın üzerine — taşıyor.
     private let sidebarClip = UIView()
+    /// Sabit üst blok: filtre satırları ve "TÜRLER" başlığı. Kaymıyor —
+    /// listenin neresinde olursan ol bu satırlar bir tuş uzakta.
+    private let fixedStack = UIStackView()
+    /// Kayan kategorilerin kırpma kabı.
+    ///
+    /// Kaydırma görünümünün kendisi kırpmıyor — odaklanan satır büyüyüp gölge
+    /// bırakıyor ve o taşma görünmeli. Ama üst kenarı serbest bırakınca yukarı
+    /// kayan kategoriler sabit bloğun (filtreler ve "TÜRLER" başlığı) üstüne
+    /// çiziliyordu. Bu kap tam kaydırma görünümünün üst kenarında kesiyor;
+    /// yanlarda ve altta taşma payı duruyor.
+    private let categoriesClip = FadingClipView()
+    /// Yalnızca kategoriler kayıyor.
     private let sidebarScrollView = UIScrollView()
     private let sidebarStack = UIStackView()
     private var filterViews: [SidebarFilter: SidebarItemView] = [:]
@@ -140,21 +196,37 @@ final class KindBrowseViewController: UIViewController {
     /// Odaklanan satırın büyüme ve gölge payı: kırpan kap listeden bu kadar
     /// taşıyor, kaydırma görünümünün dışına çıkan satırlar burada kesiliyor.
     private static let focusBleed: CGFloat = 24
+    /// Kırpma kenarındaki yumuşamanın boyu.
+    private static let categoriesFadeHeight: CGFloat = 40
+    /// İlk kategorinin kırpma kenarına payı.
+    ///
+    /// Kabın üst kenarından değil, kaydırma **içeriğinin** üstünden veriliyor:
+    /// kap yerinde kalıyor (yumuşama başlığın hemen altında başlıyor) ama ilk
+    /// satır o kadar aşağıdan başlıyor. Böylece hem başlıkla arası açılıyor
+    /// hem de odaklanınca büyüyen satırın üst kenarı yumuşamanın altında
+    /// kalmıyor.
+    private static let categoriesTopInset: CGFloat = 8
     #else
     private static let sidebarWidth: CGFloat = 260
     private static let sidebarGap: CGFloat = 20
     private static let contentTopPadding: CGFloat = 16
     private static let contentBottomPadding: CGFloat = 20
     private static let focusBleed: CGFloat = 0
+    private static let categoriesFadeHeight: CGFloat = 16
+    private static let categoriesTopInset: CGFloat = 4
     #endif
 
     private var metrics: AppMetrics { AppMetrics.metrics(for: view.bounds.width) }
 
-    init(kind: MediaKind, model: AppModel) {
-        self.kind = kind
+    init(source: Source, model: AppModel) {
+        self.source = source
         self.model = model
         super.init(nibName: nil, bundle: nil)
-        title = kind.title
+        title = sourceTitle
+    }
+
+    convenience init(kind: MediaKind, model: AppModel) {
+        self.init(source: .kind(kind), model: model)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -193,7 +265,7 @@ final class KindBrowseViewController: UIViewController {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(activityDidChange),
-            name: .appModelFavoritesDidChange,
+            name: .appModelActivityDidChange,
             object: nil
         )
     }
@@ -225,6 +297,21 @@ final class KindBrowseViewController: UIViewController {
             bottom: bottomPadding,
             right: 0
         )
+
+        updateCategoriesFade()
+    }
+
+    /// Yumuşama yalnızca üstte gerçekten içerik kaldığında var.
+    ///
+    /// Sabit bir degrade, liste en başındayken ilk kategoriyi de soluk
+    /// gösteriyor — hata gibi duruyor. Bu yüzden degradenin boyu kaydırma
+    /// miktarıyla açılıyor: liste yerindeyken kesme yok, kaydırma başlar
+    /// başlamaz yumuşama beliriyor.
+    private func updateCategoriesFade() {
+        let scrolled = sidebarScrollView.contentOffset.y
+            + sidebarScrollView.adjustedContentInset.top
+        let ratio = min(max(scrolled / Self.categoriesFadeHeight, 0), 1)
+        categoriesClip.fadeHeight = Self.categoriesFadeHeight * ratio
     }
 
     #if os(tvOS)
@@ -255,13 +342,18 @@ final class KindBrowseViewController: UIViewController {
     #endif
 
     private func refreshTitle() {
-        title = kind.title
+        title = sourceTitle
         #if os(tvOS)
         navigationItem.title = ""
         #endif
     }
 
     private func determineInitialFilter() {
+        // İzleme listesinde her şey tek listede; süzgeç isteğe bağlı.
+        if case .watchlist = source {
+            selectedFilter = .all
+            return
+        }
         // Canlı kanallarda "izlemeye devam / bitirdiklerim" satırları yok;
         // oraya düşen bir seçim menüde karşılığı olmayan bir filtre bırakıyor.
         guard kind != .live else {
@@ -282,30 +374,67 @@ final class KindBrowseViewController: UIViewController {
         if let firstCategory = categories.first {
             selectedFilter = .category(id: firstCategory.id, name: firstCategory.name)
         } else {
-            selectedFilter = .favorites
+            // Menüde favori satırı yok; boşa düşen bir seçim bırakılmıyor.
+            selectedFilter = .watchlist
         }
     }
 
     private var categories: [MediaCategory] {
-        model.library.categories[kind] ?? []
+        guard case .kind = source else { return [] }
+        return model.library.categories[kind] ?? []
     }
 
-    private func countText(forCategory id: String) -> String {
-        "(\(model.library.items(kind: kind, categoryID: id).count.formatted()))"
+    /// Sabit üst bloktaki satırlar.
+    private var topFilters: [SidebarFilter] {
+        switch source {
+        case .kind(.live):
+            // Favoriler, sonra kullanıcının kendi listeleri, en altta da yeni
+            // liste kuran satır.
+            return [.favorites]
+                + model.activity.channelLists.map { .channelList(id: $0.id, name: $0.name) }
+                + [.createList]
+        case .kind: return [.continueWatching, .watchlist, .finished]
+        // İzleme listesi sayfası da "benim listem" mantığında: kaydettiklerim
+        // ve izlediklerim yan yana.
+        case .watchlist: return [.all, .finished]
+        }
+    }
+
+    /// Kayan bölümdeki satırlar: tür sayfalarında kategoriler, izleme
+    /// listesinde içerik türleri. İkisi de aynı yuvayı dolduruyor.
+    private var scrollingFilters: [SidebarFilter] {
+        switch source {
+        case .kind:
+            return categories.map { .category(id: $0.id, name: $0.name) }
+        case .watchlist:
+            // Boş tür satırı gösterilmiyor: izleme listesinde dizi yoksa
+            // "Diziler (0)" satırı kullanıcıya bir şey vaat edip boş açılıyor.
+            return [MediaKind.movie, .series, .live]
+                .filter { !resolveItems(for: .kind($0)).isEmpty }
+                .map { .kind($0) }
+        }
+    }
+
+    private func countText(for filter: SidebarFilter) -> String {
+        "(\(resolveItems(for: filter).count.formatted()))"
     }
 
     /// Sayılar satırlar yeniden kurulmadan tazeleniyor: kütüphane
     /// güncellendiğinde odak listede kalıyor.
-    private func refreshCategoryCounts() {
+    private func refreshRowCounts() {
         for (filter, itemView) in filterViews {
-            guard case let .category(id, _) = filter else { continue }
-            itemView.detail = countText(forCategory: id)
+            switch filter {
+            case .category, .kind, .channelList:
+                itemView.detail = countText(for: filter)
+            default:
+                break
+            }
         }
     }
 
     @objc private func libraryDidChange() {
         setupSidebar()
-        refreshCategoryCounts()
+        refreshRowCounts()
         // Kaydırma korunuyor: kullanıcı ızgaranın ortasındayken arka planda
         // gelen bir güncelleme onu başa atmasın.
         commitFilter(reloading: false, resettingScroll: false)
@@ -315,10 +444,23 @@ final class KindBrowseViewController: UIViewController {
     /// süzgeçlerde ızgara tazeleniyor: kategoriye bakan kullanıcının önünde
     /// boşuna iş yapılmıyor.
     @objc private func activityDidChange() {
-        switch selectedFilter {
-        case .favorites, .watchlist, .finished, .continueWatching:
+        // İzleme listesi sayfasında menünün kendisi de listeden besleniyor:
+        // tür satırları gelip gidiyor, sayılar değişiyor.
+        if case .watchlist = source {
+            setupSidebar()
+            refreshRowCounts()
             commitFilter(reloading: false, resettingScroll: false)
-        case .category:
+            return
+        }
+        // Liste satırları ve sayıları izleme kaydından besleniyor; satırlar
+        // gerçekten değişmediyse `setupSidebar` zaten erken dönüyor.
+        setupSidebar()
+        refreshRowCounts()
+
+        switch selectedFilter {
+        case .favorites, .watchlist, .finished, .continueWatching, .channelList:
+            commitFilter(reloading: false, resettingScroll: false)
+        case .category, .all, .kind, .createList:
             break
         }
     }
@@ -336,12 +478,26 @@ final class KindBrowseViewController: UIViewController {
         sidebarClip.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(sidebarClip)
 
+        fixedStack.axis = .vertical
+        fixedStack.spacing = 6
+        fixedStack.alignment = .fill
+        fixedStack.clipsToBounds = false
+        fixedStack.translatesAutoresizingMaskIntoConstraints = false
+        sidebarClip.addSubview(fixedStack)
+
         sidebarScrollView.showsVerticalScrollIndicator = false
         sidebarScrollView.showsHorizontalScrollIndicator = false
         sidebarScrollView.clipsToBounds = false
         sidebarScrollView.contentInsetAdjustmentBehavior = .never
+        sidebarScrollView.contentInset = UIEdgeInsets(
+            top: Self.categoriesTopInset, left: 0, bottom: 0, right: 0
+        )
+        sidebarScrollView.delegate = self
+        categoriesClip.translatesAutoresizingMaskIntoConstraints = false
+        sidebarClip.addSubview(categoriesClip)
+
         sidebarScrollView.translatesAutoresizingMaskIntoConstraints = false
-        sidebarClip.addSubview(sidebarScrollView)
+        categoriesClip.addSubview(sidebarScrollView)
 
         sidebarStack.axis = .vertical
         sidebarStack.spacing = 6
@@ -371,10 +527,21 @@ final class KindBrowseViewController: UIViewController {
             sidebarBottom,
             sidebarClip.widthAnchor.constraint(equalToConstant: Self.sidebarWidth + bleed * 2),
 
-            sidebarScrollView.leadingAnchor.constraint(equalTo: sidebarClip.leadingAnchor, constant: bleed),
-            sidebarScrollView.trailingAnchor.constraint(equalTo: sidebarClip.trailingAnchor, constant: -bleed),
-            sidebarScrollView.topAnchor.constraint(equalTo: sidebarClip.topAnchor, constant: bleed),
-            sidebarScrollView.bottomAnchor.constraint(equalTo: sidebarClip.bottomAnchor, constant: -bleed),
+            fixedStack.leadingAnchor.constraint(equalTo: sidebarClip.leadingAnchor, constant: bleed),
+            fixedStack.trailingAnchor.constraint(equalTo: sidebarClip.trailingAnchor, constant: -bleed),
+            fixedStack.topAnchor.constraint(equalTo: sidebarClip.topAnchor, constant: bleed),
+
+            // Kap yanlarda ve altta payı koruyor, üstte tam kaydırma
+            // görünümünün kenarında kesiyor.
+            categoriesClip.leadingAnchor.constraint(equalTo: sidebarClip.leadingAnchor),
+            categoriesClip.trailingAnchor.constraint(equalTo: sidebarClip.trailingAnchor),
+            categoriesClip.topAnchor.constraint(equalTo: fixedStack.bottomAnchor),
+            categoriesClip.bottomAnchor.constraint(equalTo: sidebarClip.bottomAnchor),
+
+            sidebarScrollView.leadingAnchor.constraint(equalTo: categoriesClip.leadingAnchor, constant: bleed),
+            sidebarScrollView.trailingAnchor.constraint(equalTo: categoriesClip.trailingAnchor, constant: -bleed),
+            sidebarScrollView.topAnchor.constraint(equalTo: categoriesClip.topAnchor),
+            sidebarScrollView.bottomAnchor.constraint(equalTo: categoriesClip.bottomAnchor, constant: -bleed),
 
             sidebarStack.leadingAnchor.constraint(equalTo: sidebarScrollView.contentLayoutGuide.leadingAnchor),
             sidebarStack.trailingAnchor.constraint(equalTo: sidebarScrollView.contentLayoutGuide.trailingAnchor),
@@ -389,38 +556,73 @@ final class KindBrowseViewController: UIViewController {
     /// Kütüphane bildirimi sık geliyor; her seferinde satırları söküp yeniden
     /// eklemek odağı düşürüyor ve kullanıcı listenin başına atılıyordu.
     private func setupSidebar(force: Bool = false) {
-        // 1. Özel Filtre Butonları (Son İzlediklerim, İzlemeye Devam Et, Favoriler, İzleme Listem)
-        let topFilters: [SidebarFilter]
-        if kind == .live {
-            topFilters = [.favorites, .watchlist]
-        } else {
-            topFilters = [.finished, .continueWatching, .favorites, .watchlist]
-        }
+        let top = topFilters
+        let scrolling = scrollingFilters
 
-        let signature = (topFilters.map { $0.title(kind: kind) }
-            + categories.map { "\($0.id)|\($0.name)" }).joined(separator: "\n")
-        guard force || signature != sidebarSignature || sidebarStack.arrangedSubviews.isEmpty else {
+        let signature = (top + scrolling)
+            .map { "\($0)" }
+            .joined(separator: "\n")
+        guard force || signature != sidebarSignature || fixedStack.arrangedSubviews.isEmpty else {
             return
         }
         sidebarSignature = signature
 
-        sidebarStack.arrangedSubviews.forEach { subview in
-            sidebarStack.removeArrangedSubview(subview)
-            subview.removeFromSuperview()
+        for stack in [fixedStack, sidebarStack] {
+            stack.arrangedSubviews.forEach { subview in
+                stack.removeArrangedSubview(subview)
+                subview.removeFromSuperview()
+            }
         }
         filterViews.removeAll()
 
-        for filter in topFilters {
-            sidebarStack.addArrangedSubview(
-                makeRow(for: filter, title: filter.title(kind: kind), detail: nil)
+        // 1. Sabit filtre satırları.
+        for filter in top {
+            // Sayı yalnızca bir listeyi temsil eden satırlarda; "Liste Oluştur"
+            // bir liste değil.
+            let detail: String?
+            if case .channelList = filter {
+                detail = countText(for: filter)
+            } else {
+                detail = nil
+            }
+            fixedStack.addArrangedSubview(
+                makeRow(for: filter, title: filter.title(kind: kind), detail: detail)
             )
         }
 
-        // 2. "TÜRLER" / "KATEGORİLER" Başlık Etiketi
-        if let last = sidebarStack.arrangedSubviews.last {
-            sidebarStack.setCustomSpacing(20, after: last)
+        // 2. "TÜRLER" / "KATEGORİLER" başlığı. Kayan bölümün başlığı ama
+        // kendisi sabit blokta: listeyle kaysaydı kullanıcı kategorilerin
+        // arasındayken neye baktığını gösteren tek şey ekrandan çıkardı.
+        // Altında satır yoksa başlık da yok: boş bir "TÜRLER" bir şey vaat
+        // edip hiçbir şey göstermiyor.
+        if !scrolling.isEmpty {
+            if let last = fixedStack.arrangedSubviews.last {
+                fixedStack.setCustomSpacing(20, after: last)
+            }
+            fixedStack.addArrangedSubview(makeSectionHeader())
         }
 
+        // 3. Kayan satırlar: kategoriler ya da içerik türleri.
+        for filter in scrolling {
+            sidebarStack.addArrangedSubview(
+                makeRow(
+                    for: filter,
+                    title: filter.title(kind: kind),
+                    detail: countText(for: filter)
+                )
+            )
+        }
+
+        // Seçili filtre listeden düşmüş olabilir (kategoriler sonradan geldi).
+        if filterViews[selectedFilter] == nil {
+            determineInitialFilter()
+            for (filter, itemView) in filterViews {
+                itemView.isCurrent = (filter == selectedFilter)
+            }
+        }
+    }
+
+    private func makeSectionHeader() -> UIView {
         let headerLabel = UILabel()
         headerLabel.text = kind == .live ? L10n.categories : L10n.genres
         #if os(tvOS)
@@ -429,7 +631,7 @@ final class KindBrowseViewController: UIViewController {
         headerLabel.font = .systemFont(ofSize: 14, weight: .semibold)
         #endif
         headerLabel.textColor = AppPalette.secondaryText
-        
+
         let headerContainer = UIView()
         headerContainer.translatesAutoresizingMaskIntoConstraints = false
         headerLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -443,24 +645,7 @@ final class KindBrowseViewController: UIViewController {
             headerLabel.topAnchor.constraint(equalTo: headerContainer.topAnchor, constant: 10),
             headerLabel.bottomAnchor.constraint(equalTo: headerContainer.bottomAnchor, constant: -6),
         ])
-        sidebarStack.addArrangedSubview(headerContainer)
-        sidebarStack.setCustomSpacing(6, after: headerContainer)
-
-        // 3. Sunucudan Gelen Kategori Butonları
-        for category in categories {
-            let filter = SidebarFilter.category(id: category.id, name: category.name)
-            sidebarStack.addArrangedSubview(
-                makeRow(for: filter, title: category.name, detail: countText(forCategory: category.id))
-            )
-        }
-
-        // Seçili filtre listeden düşmüş olabilir (kategoriler sonradan geldi).
-        if filterViews[selectedFilter] == nil {
-            determineInitialFilter()
-            for (filter, itemView) in filterViews {
-                itemView.isCurrent = (filter == selectedFilter)
-            }
-        }
+        return headerContainer
     }
 
     private func makeRow(
@@ -471,8 +656,20 @@ final class KindBrowseViewController: UIViewController {
         itemView.isCurrent = (filter == selectedFilter)
         // Odak satıra gelince ızgara değişiyor (Apple TV deseni), tıklanınca
         // odak ızgaraya geçiyor: liste bir filtre, varış noktası içerik.
-        itemView.onFocus = { [weak self] in self?.focusFilter(filter) }
-        itemView.onSelect = { [weak self] in self?.commitFilterAndFocusGrid(filter) }
+        if case .channelList = filter {
+            // Kurduğu listeyi kaldıramamak tuzak. Kanal kartındaki jestin
+            // aynısı: satıra basılı tut, menü gelsin.
+            itemView.addInteraction(UIContextMenuInteraction(delegate: self))
+        }
+
+        if case .createList = filter {
+            // Odakla ızgarayı değiştirmiyor: bu satır bir liste değil, bir
+            // eylem. Seçilince kip açılıyor.
+            itemView.onSelect = { [weak self] in self?.presentCreateList() }
+        } else {
+            itemView.onFocus = { [weak self] in self?.focusFilter(filter) }
+            itemView.onSelect = { [weak self] in self?.commitFilterAndFocusGrid(filter) }
+        }
         filterViews[filter] = itemView
         return itemView
     }
@@ -622,6 +819,62 @@ final class KindBrowseViewController: UIViewController {
         #endif
     }
 
+    /// Yeni liste kipi.
+    ///
+    /// Ad boş bırakılırsa liste yine kuruluyor: kullanıcıyı adlandırmaya
+    /// zorlamanın bir karşılığı yok, adı sonradan da değişebilir.
+    private func presentCreateList() {
+        let alert = UIAlertController(
+            title: L10n.createList,
+            message: L10n.channelListName,
+            preferredStyle: .alert
+        )
+        alert.addTextField { field in
+            field.placeholder = L10n.channelListNamePlaceholder
+            #if os(iOS)
+            field.autocapitalizationType = .words
+            #endif
+        }
+        alert.addAction(UIAlertAction(title: L10n.cancel, style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.create, style: .default) { [weak self, weak alert] _ in
+            guard let self else { return }
+            let typed = (alert?.textFields?.first?.text ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let list = model.activity.createChannelList(
+                named: typed.isEmpty ? L10n.newListDefaultName : typed
+            )
+            adoptNewList(list)
+        })
+        present(alert, animated: true)
+    }
+
+    /// Yeni liste menüye giriyor, seçiliyor ve odak ona gidiyor: kullanıcı
+    /// listeyi kurduğu anda içindeymiş gibi oluyor.
+    private func adoptNewList(_ list: ChannelList) {
+        setupSidebar(force: true)
+        selectFilter(.channelList(id: list.id, name: list.name))
+        #if os(tvOS)
+        lastFocusWasInGrid = false
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
+        #endif
+    }
+
+    /// Listeyi siliyor.
+    ///
+    /// Menüyü ve seçili satırı depo bildirimi zaten tazeliyor; ızgara burada
+    /// elle çözülüyor çünkü seçim silinen listeden başka bir satıra düşmüş
+    /// olabiliyor ve bildirim yolu yalnızca **aynı** seçimi yeniliyor.
+    private func deleteChannelList(id: String) {
+        model.activity.deleteChannelList(id: id)
+        commitFilter(reloading: true, resettingScroll: true)
+        #if os(tvOS)
+        lastFocusWasInGrid = false
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
+        #endif
+    }
+
     private func markSelected(_ filter: SidebarFilter) {
         selectedFilter = filter
         for (candidate, itemView) in filterViews {
@@ -643,11 +896,24 @@ final class KindBrowseViewController: UIViewController {
         )
     }
 
+    /// İzleme kaydından beslenen satırlar (İzlediklerim, İzlemeye Devam Et)
+    /// hangi türleri toplayacak?
+    ///
+    /// Tür sayfasında yalnızca o tür. İzleme listesi sayfasında film ve dizi
+    /// birlikte — ama kanal değil: kanalların kart oranı başka ve tek ızgarada
+    /// afişle yan yana duramıyorlar.
+    private func matchesSource(_ itemKind: MediaKind) -> Bool {
+        switch source {
+        case let .kind(kind): return itemKind == kind
+        case .watchlist: return itemKind != .live
+        }
+    }
+
     private func resolveItems(for filter: SidebarFilter) -> [MediaItem] {
         switch filter {
         case .finished:
             let ids = model.activity.progress
-                .filter { $0.isFinished && $0.mediaID.kind == kind }
+                .filter { $0.isFinished && matchesSource($0.mediaID.kind) }
                 .sorted { $0.updatedAt > $1.updatedAt }
                 .map(\.mediaID)
             var seen = Set<MediaID>()
@@ -655,7 +921,7 @@ final class KindBrowseViewController: UIViewController {
 
         case .continueWatching:
             let ids = model.activity.continueWatching
-                .filter { $0.mediaID.kind == kind }
+                .filter { matchesSource($0.mediaID.kind) }
                 .map(\.mediaID)
             var seen = Set<MediaID>()
             return ids.filter { seen.insert($0).inserted }.compactMap { model.library.item(for: $0) }
@@ -670,6 +936,21 @@ final class KindBrowseViewController: UIViewController {
 
         case let .category(id, _):
             return model.library.items(kind: kind, categoryID: id)
+
+        case .all:
+            return model.activity.watchlistIDs.compactMap { model.library.item(for: $0) }
+
+        case let .kind(kind):
+            return model.activity.watchlistIDs
+                .filter { $0.kind == kind }
+                .compactMap { model.library.item(for: $0) }
+
+        case let .channelList(id, _):
+            return model.activity.channelIDs(inList: id)
+                .compactMap { model.library.item(for: $0) }
+
+        case .createList:
+            return []
         }
     }
 
@@ -705,7 +986,7 @@ final class KindBrowseViewController: UIViewController {
         switch filter {
         case .finished:
             symbol = "clock.arrow.circlepath"
-            title = L10n.recentlyWatched
+            title = L10n.watched
             message = isTurkish ? "Henüz izleyip bitirdiğiniz bir içerik yok." : "No watched content yet."
         case .continueWatching:
             symbol = "play.circle"
@@ -723,6 +1004,24 @@ final class KindBrowseViewController: UIViewController {
             symbol = "tray"
             title = name
             message = L10n.categoryEmpty
+        case .all:
+            symbol = "bookmark"
+            title = L10n.watchlistEmptyTitle
+            message = L10n.watchlistEmptyMessage
+        case let .kind(kind):
+            symbol = "bookmark"
+            title = kind.title
+            message = L10n.watchlistEmptyMessage
+        case let .channelList(_, name):
+            symbol = "list.bullet"
+            title = name
+            message = isTurkish
+                ? "Bu liste boş. Bir kanala basılı tutup \"Listeye Ekle\" ile ekleyebilirsiniz."
+                : "This list is empty. Long-press a channel and choose \"Add to List\"."
+        case .createList:
+            symbol = "plus.circle"
+            title = L10n.createList
+            message = ""
         }
 
         emptyState.configure(symbol: symbol, title: title, message: message)
@@ -748,7 +1047,7 @@ final class KindBrowseViewController: UIViewController {
 
 // MARK: - UICollectionViewDelegate
 
-extension KindBrowseViewController: UICollectionViewDelegate {
+extension BrowseViewController: UICollectionViewDelegate {
     #if os(tvOS)
     /// Filtre değiştiğinde ızgara baştan başlıyor. `remembersLastFocusedIndexPath`
     /// eski listedeki sırayı hatırlıyor; yeni listede o sıra bambaşka bir afiş
@@ -770,6 +1069,11 @@ extension KindBrowseViewController: UICollectionViewDelegate {
         #if os(tvOS)
         collectionView.unclipFocusGrowth(around: cell)
         #endif
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard scrollView === sidebarScrollView else { return }
+        updateCategoriesFade()
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -797,12 +1101,85 @@ extension KindBrowseViewController: UICollectionViewDelegate {
 
 // MARK: - UICollectionViewDataSourcePrefetching
 
-extension KindBrowseViewController: UICollectionViewDataSourcePrefetching {
+extension BrowseViewController: UICollectionViewDataSourcePrefetching {
     func collectionView(
         _ collectionView: UICollectionView,
         prefetchItemsAt indexPaths: [IndexPath]
     ) {
         let items = indexPaths.compactMap { dataSource.itemIdentifier(for: $0) }
         MediaPrefetch.warm(items, posterWidth: metrics.cardWidth(for: kind))
+    }
+}
+
+/// Üst kenarı yumuşayarak kesen kırpma kabı.
+///
+/// Maske **burada** duruyor, dışarıdan takılmıyor: dışarıdan takılan bir
+/// maskenin çerçevesi kabın ölçüsünden önce kurulabiliyor ve çerçevesi sıfır
+/// olan bir maske bütün içeriği gizliyor — kategoriler odaklanabilir ama
+/// görünmez kalıyordu. Burada çerçeve kabın kendi `layoutSubviews`'ünde
+/// kuruluyor, yani ölçü ne zaman oturursa maske de o zaman doğru.
+private final class FadingClipView: UIView {
+    private let fade = CAGradientLayer()
+
+    /// Yumuşamanın boyu (punto). Sıfırken maske hiç takılmıyor.
+    var fadeHeight: CGFloat = 0 {
+        didSet {
+            guard abs(oldValue - fadeHeight) > 0.5 else { return }
+            setNeedsLayout()
+        }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        clipsToBounds = true
+        fade.colors = [UIColor.clear.cgColor, UIColor.black.cgColor]
+        fade.startPoint = CGPoint(x: 0.5, y: 0)
+        fade.endPoint = CGPoint(x: 0.5, y: 1)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+
+        guard fadeHeight > 0.5, bounds.height > 0 else {
+            layer.mask = nil
+            return
+        }
+        if layer.mask !== fade { layer.mask = fade }
+
+        // Katman kısıt tanımıyor; örtük animasyon kapalı, yoksa degrade her
+        // düzen turunda kayarak yerine oturuyor.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        fade.frame = bounds
+        fade.locations = [0, NSNumber(value: Double(min(fadeHeight / bounds.height, 1)))]
+        CATransaction.commit()
+    }
+}
+
+// MARK: - Liste satırının menüsü
+
+extension BrowseViewController: UIContextMenuInteractionDelegate {
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configurationForMenuAtLocation location: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard let row = interaction.view as? SidebarItemView,
+              let filter = filterViews.first(where: { $0.value === row })?.key,
+              case let .channelList(id, _) = filter
+        else { return nil }
+
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            UIMenu(children: [
+                UIAction(
+                    title: L10n.deleteList,
+                    image: UIImage(systemName: "trash"),
+                    attributes: .destructive
+                ) { [weak self] _ in
+                    self?.deleteChannelList(id: id)
+                },
+            ])
+        }
     }
 }

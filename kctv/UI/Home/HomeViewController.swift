@@ -88,7 +88,7 @@ final class HomeViewController: UIViewController {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(libraryDidChange),
-            name: .appModelFavoritesDidChange,
+            name: .appModelActivityDidChange,
             object: nil
         )
 
@@ -314,9 +314,9 @@ final class HomeViewController: UIViewController {
                 ) as! HeroCell
                 // Kapanlar yapılandırmadan önce bağlanıyor: ilk çizimde
                 // izleme listesi durumu da doğru olsun.
-                cell.isFavorite = { [weak self] in self?.model.activity.isFavorite($0) ?? false }
+                cell.isInWatchlist = { [weak self] in self?.model.activity.isInWatchlist($0) ?? false }
                 cell.onDetails = { [weak self] in self?.openDetail($0) }
-                cell.onToggleFavorite = { [weak self] in self?.model.activity.toggleFavorite($0) }
+                cell.onToggleWatchlist = { [weak self] in self?.model.activity.toggleWatchlist($0) }
                 cell.artworkOverhang = HeroSectionMetrics.overhang(
                     container: collectionView.bounds.size, metrics: metrics
                 )
@@ -701,7 +701,7 @@ extension HomeViewController: UICollectionViewDelegate {
                 openDetail(media, sourceView: collectionView.cellForItem(at: indexPath))
             }
         case let .mainCard(kind):
-            let controller = KindBrowseViewController(kind: kind, model: model)
+            let controller = BrowseViewController(kind: kind, model: model)
             navigationController?.pushViewController(controller, animated: true)
         case let .category(_, kind, categoryID, title):
             openCategory(kind: kind, categoryID: categoryID, title: title)

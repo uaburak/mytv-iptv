@@ -5,7 +5,8 @@ extension Notification.Name {
     static let appModelPhaseDidChange = Notification.Name("kctv.phaseDidChange")
     static let appModelPlaybackDidChange = Notification.Name("kctv.playbackDidChange")
     static let appModelAuthDidChange = Notification.Name("kctv.authDidChange")
-    static let appModelFavoritesDidChange = Notification.Name("kctv.favoritesDidChange")
+    /// Favori, izleme listesi ya da ilerleme kaydı değişti.
+    static let appModelActivityDidChange = Notification.Name("kctv.activityDidChange")
     /// Katalog yüklendi/değişti; listeler kendini yeniler.
     static let contentLibraryDidChange = Notification.Name("kctv.libraryDidChange")
 }
@@ -67,7 +68,7 @@ final class AppModel {
         self.auth = auth
         self.library = ContentLibrary(activity: activity)
         self.activity.onChange = { [weak self] favorites, watchlist, progress in
-            NotificationCenter.default.post(name: .appModelFavoritesDidChange, object: nil)
+            NotificationCenter.default.post(name: .appModelActivityDidChange, object: nil)
             self?.pushActivity(favorites: favorites, watchlist: watchlist, progress: progress)
         }
         self.library.onChange = {
@@ -167,7 +168,7 @@ final class AppModel {
             UserDefaults.standard.removePersistentDomain(forName: bundleID)
         }
         URLCache.shared.removeAllCachedResponses()
-        NotificationCenter.default.post(name: .appModelFavoritesDidChange, object: nil)
+        NotificationCenter.default.post(name: .appModelActivityDidChange, object: nil)
         NotificationCenter.default.post(name: .contentLibraryDidChange, object: nil)
         phase = .signedOut
     }

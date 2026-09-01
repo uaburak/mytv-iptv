@@ -91,7 +91,7 @@ final class HeroCell: UICollectionViewCell {
     private let plotLabel = UILabel()
 
     private let infoButton = UIButton(type: .system)
-    private let favoriteButton = UIButton(type: .system)
+    private let watchlistButton = UIButton(type: .system)
     /// Sıradaki içeriği getiren ok. Yalnızca tvOS'ta: telefonda yana
     /// kaydırmak ve noktalara dokunmak yeterli, buton yer kaplıyor.
     private let nextButton = UIButton(type: .system)
@@ -155,9 +155,11 @@ final class HeroCell: UICollectionViewCell {
     #endif
 
     var onDetails: ((MediaItem) -> Void)?
-    var onToggleFavorite: ((MediaItem) -> Void)?
+    /// Banner'daki "+" butonu. Favori değil izleme listesi: kaydetmenin
+    /// tek defteri o, favori yalnızca canlı kanallarda kaldı.
+    var onToggleWatchlist: ((MediaItem) -> Void)?
     /// İzleme listesi durumu hücrede tutulmuyor: model tek kaynak.
-    var isFavorite: ((MediaItem) -> Bool)?
+    var isInWatchlist: ((MediaItem) -> Bool)?
 
     /// Görselin hücrenin altından taşacağı miktar.
     ///
@@ -454,21 +456,21 @@ final class HeroCell: UICollectionViewCell {
         infoButton.addSpringPressFeedback()
         infoButton.addTarget(self, action: #selector(showDetails), for: .primaryActionTriggered)
 
-        favoriteButton.addSpringPressFeedback(scale: 0.90)
-        favoriteButton.addTarget(self, action: #selector(toggleFavorite), for: .primaryActionTriggered)
+        watchlistButton.addSpringPressFeedback(scale: 0.90)
+        watchlistButton.addTarget(self, action: #selector(toggleWatchlist), for: .primaryActionTriggered)
 
         nextButton.addSpringPressFeedback(scale: 0.90)
         nextButton.accessibilityLabel = L10n.nextContent
         nextButton.addTarget(self, action: #selector(showNext), for: .primaryActionTriggered)
 
-        let buttons = UIStackView(arrangedSubviews: [infoButton, favoriteButton, nextButton])
+        let buttons = UIStackView(arrangedSubviews: [infoButton, watchlistButton, nextButton])
         buttons.axis = .horizontal
         buttons.spacing = 10
         buttons.alignment = .center
 
         // Aksiyon satırı tek bir boyu paylaşıyor: ikon-only butonlar simge
         // ölçüsünden daha kısa kalıyordu, ölçüyü bilgi butonu belirliyor.
-        for button in [favoriteButton, nextButton] {
+        for button in [watchlistButton, nextButton] {
             button.heightAnchor.constraint(equalTo: infoButton.heightAnchor).isActive = true
         }
 
@@ -719,9 +721,9 @@ final class HeroCell: UICollectionViewCell {
             fontSize: layout.buttonFontSize
         )
 
-        var favorite = compact
-        favorite.image = UIImage(systemName: isCurrentFavorite ? "checkmark" : "plus")
-        favoriteButton.configuration = favorite
+        var watchlist = compact
+        watchlist.image = UIImage(systemName: isCurrentlySaved ? "checkmark" : "plus")
+        watchlistButton.configuration = watchlist
 
         var next = compact
         next.image = UIImage(systemName: "chevron.right")
@@ -913,7 +915,7 @@ final class HeroCell: UICollectionViewCell {
 
         plotLabel.text = Self.plotText(for: item, slide: slide)
 
-        updateFavoriteButton(animated: animated)
+        updateWatchlistButton(animated: animated)
         renderBackdrop(images?.backdrop, animated: animated)
     }
 
@@ -973,18 +975,18 @@ final class HeroCell: UICollectionViewCell {
         items.indices.contains(currentIndex) ? items[currentIndex] : nil
     }
 
-    private var isCurrentFavorite: Bool {
-        guard let currentItem, let isFavorite else { return false }
-        return isFavorite(currentItem)
+    private var isCurrentlySaved: Bool {
+        guard let currentItem, let isInWatchlist else { return false }
+        return isInWatchlist(currentItem)
     }
 
-    private func updateFavoriteButton(animated: Bool) {
-        let symbol = isCurrentFavorite ? "checkmark" : "plus"
+    private func updateWatchlistButton(animated: Bool) {
+        let symbol = isCurrentlySaved ? "checkmark" : "plus"
         guard animated else {
-            favoriteButton.configuration?.image = UIImage(systemName: symbol)
+            watchlistButton.configuration?.image = UIImage(systemName: symbol)
             return
         }
-        favoriteButton.setSymbol(symbol)
+        watchlistButton.setSymbol(symbol)
     }
 
     // MARK: - Metinler
@@ -1233,13 +1235,13 @@ final class HeroCell: UICollectionViewCell {
         onDetails?(currentItem)
     }
 
-    @objc private func toggleFavorite() {
+    @objc private func toggleWatchlist() {
         guard let currentItem else { return }
-        onToggleFavorite?(currentItem)
+        onToggleWatchlist?(currentItem)
         Haptics.impact(.medium)
         // Model değişimi bildirimle geri dönüp butonu tazeliyor; dokunmanın
         // karşılığı yine de anında görünsün.
-        favoriteButton.setSymbol(isCurrentFavorite ? "checkmark" : "plus")
+        watchlistButton.setSymbol(isCurrentlySaved ? "checkmark" : "plus")
     }
 
     @objc private func showNext() {

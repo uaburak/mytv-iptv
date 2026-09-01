@@ -388,10 +388,10 @@
 		};
 		AA000000000000000000F002 /* XCRemoteSwiftPackageReference "KSPlayer" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/kingslay/KSPlayer";
+			repositoryURL = "https://github.com/uaburak/KSPlayer";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.3.4;
+				branch = "fix/audio-renderer-clock-anchor";
+				kind = branch;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

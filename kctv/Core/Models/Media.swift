@@ -162,6 +162,18 @@ private extension Unicode.Scalar {
     }
 }
 
+/// Kullanıcının kendi kurduğu kanal listesi.
+///
+/// Favoriler tek ve isimsiz bir liste; bu ise kaç tane olursa olsun adlı
+/// listeler — "Spor", "Çocuk", "Haber". Kanallar yalnızca **kimlik** olarak
+/// tutuluyor: kanalın adı, logosu ve numarası sağlayıcının verisi ve
+/// katalogdan çözülüyor.
+struct ChannelList: Identifiable, Hashable, Codable, Sendable {
+    var id: String
+    var name: String
+    var channelIDs: [MediaID] = []
+}
+
 struct MediaCategory: Identifiable, Hashable, Codable, Sendable {
     var id: String
     var name: String

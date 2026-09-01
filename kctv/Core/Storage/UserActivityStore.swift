@@ -14,11 +14,15 @@ final class UserActivityStore {
     private(set) var favoriteIDs: [MediaID] = []
     private(set) var watchlistIDs: [MediaID] = []
     private(set) var progress: [PlaybackProgress] = []
+    /// Kullanıcının kendi kanal listeleri. Şimdilik yalnızca bu cihazda:
+    /// buluta yazılan üçlüye (favori, izleme listesi, ilerleme) dahil değil.
+    private(set) var channelLists: [ChannelList] = []
 
     private let store = LocalStore(folder: "activity")
     private let favoritesKey = "favorites"
     private let watchlistKey = "watchlist"
     private let progressKey = "progress"
+    private let channelListsKey = "channelLists"
 
     /// Firestore'a yazma işini üstlenen kapan; oturum açılınca bağlanır.
     var onChange: ((
@@ -31,6 +35,7 @@ final class UserActivityStore {
         favoriteIDs = Self.readIDs(store: store, key: favoritesKey)
         watchlistIDs = Self.readIDs(store: store, key: watchlistKey)
         progress = store.read([PlaybackProgress].self, key: progressKey) ?? []
+        channelLists = store.read([ChannelList].self, key: channelListsKey) ?? []
     }
 
     /// Eski sürümler tam `MediaItem` yazıyordu. Yeni biçim okunamazsa eski
@@ -68,6 +73,47 @@ final class UserActivityStore {
             watchlistIDs.remove(at: index)
         } else {
             watchlistIDs.insert(item.id, at: 0)
+        }
+        persist()
+    }
+
+    // MARK: - Kanal listeleri
+
+    @discardableResult
+    func createChannelList(named name: String) -> ChannelList {
+        let list = ChannelList(id: UUID().uuidString, name: name)
+        channelLists.append(list)
+        persist()
+        return list
+    }
+
+    func renameChannelList(id: String, to name: String) {
+        guard let index = channelLists.firstIndex(where: { $0.id == id }) else { return }
+        channelLists[index].name = name
+        persist()
+    }
+
+    func deleteChannelList(id: String) {
+        channelLists.removeAll { $0.id == id }
+        persist()
+    }
+
+    func channelIDs(inList id: String) -> [MediaID] {
+        channelLists.first { $0.id == id }?.channelIDs ?? []
+    }
+
+    func isChannel(_ item: MediaItem, inList id: String) -> Bool {
+        channelLists.first { $0.id == id }?.channelIDs.contains(item.id) ?? false
+    }
+
+    /// Listede varsa çıkarıyor, yoksa **başa** ekliyor — en son eklenen kanal
+    /// listenin başında duruyor, favorilerdeki davranışın aynısı.
+    func toggleChannel(_ item: MediaItem, inList id: String) {
+        guard let index = channelLists.firstIndex(where: { $0.id == id }) else { return }
+        if let existing = channelLists[index].channelIDs.firstIndex(of: item.id) {
+            channelLists[index].channelIDs.remove(at: existing)
+        } else {
+            channelLists[index].channelIDs.insert(item.id, at: 0)
         }
         persist()
     }
@@ -159,6 +205,7 @@ final class UserActivityStore {
         favoriteIDs.removeAll()
         watchlistIDs.removeAll()
         progress.removeAll()
+        channelLists.removeAll()
         store.removeAll()
     }
 
@@ -166,6 +213,7 @@ final class UserActivityStore {
         store.write(favoriteIDs, key: favoritesKey)
         store.write(watchlistIDs, key: watchlistKey)
         store.write(progress, key: progressKey)
+        store.write(channelLists, key: channelListsKey)
         onChange?(favoriteIDs, watchlistIDs, progress)
     }
 }

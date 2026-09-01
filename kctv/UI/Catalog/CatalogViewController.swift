@@ -456,10 +456,19 @@ extension CatalogViewController: UICollectionViewDataSource, UICollectionViewDel
             metrics: metrics,
             mode: displayMode,
             imageWidth: gridItemWidth(metrics: metrics),
-            isFavorite: model.activity.isFavorite(item)
+            isSaved: item.kind == .live
+                ? model.activity.isFavorite(item)
+                : model.activity.isInWatchlist(item)
         )
         cell.onPlay = { [weak self] in Task { await self?.model.play(item) } }
-        cell.onToggleFavorite = { [weak self] in self?.model.activity.toggleFavorite(item) }
+        cell.onToggleSaved = { [weak self] in
+            guard let self else { return }
+            if item.kind == .live {
+                model.activity.toggleFavorite(item)
+            } else {
+                model.activity.toggleWatchlist(item)
+            }
+        }
         return cell
         #endif
     }

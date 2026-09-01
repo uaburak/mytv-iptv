@@ -13,7 +13,7 @@ enum AppDestination: String, CaseIterable, Hashable {
     case live
     case movies
     case series
-    case favorites
+    case watchlist
     case playlists
     case settings
 
@@ -24,13 +24,13 @@ enum AppDestination: String, CaseIterable, Hashable {
     /// "Canlı / Film / Dizi" artık anasayfadaki kartlarla değil buradan
     /// açılıyor.
     static let sidebar: [AppDestination] = [
-        .search, .home, .live, .movies, .series, .favorites, .playlists, .settings,
+        .search, .home, .live, .movies, .series, .watchlist, .playlists, .settings,
     ]
 
     /// Sekme çubuğunda tür bölümleri yok: telefonda beş sekmeyi aşan bir çubuk
     /// okunmuyor, oraya anasayfadaki kartlardan giriliyor.
     static let tabBar: [AppDestination] = [
-        .home, .favorites, .playlists, .search, .settings,
+        .home, .watchlist, .playlists, .search, .settings,
     ]
 
     var title: String {
@@ -40,7 +40,7 @@ enum AppDestination: String, CaseIterable, Hashable {
         case .live: L10n.liveTV
         case .movies: L10n.movies
         case .series: L10n.series
-        case .favorites: L10n.tabFavorites
+        case .watchlist: L10n.myWatchlist
         case .playlists: L10n.tabPlaylists
         case .settings: L10n.tabSettings
         }
@@ -55,7 +55,7 @@ enum AppDestination: String, CaseIterable, Hashable {
         case .live: MediaKind.live.symbol
         case .movies: MediaKind.movie.symbol
         case .series: MediaKind.series.symbol
-        case .favorites: "heart.fill"
+        case .watchlist: "bookmark.fill"
         case .playlists: "list.bullet.rectangle"
         case .settings: "gearshape.fill"
         }
@@ -68,10 +68,10 @@ enum AppDestination: String, CaseIterable, Hashable {
         // `UISearchContainerViewController` gerekiyor.
         case .search: SearchViewController.makeTabController(model: model)
         case .home: HomeViewController(model: model)
-        case .live: KindBrowseViewController(kind: .live, model: model)
-        case .movies: KindBrowseViewController(kind: .movie, model: model)
-        case .series: KindBrowseViewController(kind: .series, model: model)
-        case .favorites: FavoritesViewController(model: model)
+        case .live: BrowseViewController(kind: .live, model: model)
+        case .movies: BrowseViewController(kind: .movie, model: model)
+        case .series: BrowseViewController(kind: .series, model: model)
+        case .watchlist: BrowseViewController(source: .watchlist, model: model)
         case .playlists: PlaylistsViewController(model: model)
         case .settings: SettingsViewController(model: model)
         }

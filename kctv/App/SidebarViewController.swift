@@ -259,21 +259,36 @@ final class SidebarViewController: UIViewController {
                 addChild(controller)
                 controller.view.translatesAutoresizingMaskIntoConstraints = false
 
-                // Sayfa geçişlerinde 300ms yumuşak dissolve animasyonu
+                // Yeni ekran geçişten **önce** kuruluyor ve o sırada gizli
+                // duruyor.
+                //
+                // Kurulum animasyon bloğunun içinde yapıldığında, henüz ölçüsü
+                // olmayan görünümün çerçevesi sıfırdan tam boya animasyonla
+                // büyüyordu: sayfa sol üst köşeden açılıyordu. Bir bölüme
+                // ikinci girişte görünmüyordu çünkü ekranlar önbellekte
+                // tutuluyor ve çerçeveleri çoktan oturmuş oluyor — yani hata
+                // yalnızca ilk açılışta ortaya çıkıyordu.
+                controller.view.isHidden = true
+                contentContainer.addSubview(controller.view)
+                NSLayoutConstraint.activate([
+                    controller.view.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
+                    controller.view.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
+                    controller.view.topAnchor.constraint(equalTo: contentContainer.topAnchor),
+                    controller.view.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor),
+                ])
+                contentContainer.layoutIfNeeded()
+
+                // Sayfa geçişlerinde 300ms yumuşak dissolve animasyonu.
+                // Blokta yalnızca "ne görünüyor" değişiyor, düzen değil:
+                // `isHidden` animasyona girmiyor, geçiş kabın öncesi ve
+                // sonrası görüntüsü arasında eriyor.
                 UIView.transition(
                     with: contentContainer,
                     duration: 0.3,
                     options: [.transitionCrossDissolve, .allowUserInteraction]
                 ) {
                     previous.view.removeFromSuperview()
-                    self.contentContainer.addSubview(controller.view)
-                    NSLayoutConstraint.activate([
-                        controller.view.leadingAnchor.constraint(equalTo: self.contentContainer.leadingAnchor),
-                        controller.view.trailingAnchor.constraint(equalTo: self.contentContainer.trailingAnchor),
-                        controller.view.topAnchor.constraint(equalTo: self.contentContainer.topAnchor),
-                        controller.view.bottomAnchor.constraint(equalTo: self.contentContainer.bottomAnchor),
-                    ])
-                    self.contentContainer.layoutIfNeeded()
+                    controller.view.isHidden = false
                 } completion: { _ in
                     previous.removeFromParent()
                     controller.didMove(toParent: self)
@@ -373,7 +388,18 @@ final class SidebarViewController: UIViewController {
             return
         }
 
-        // 3. Kök ekrandayız: Sayfanın neresinde olursak olalım önce en tepeye yumuşak bir animasyonla scroll at
+        // 3. Anasayfa dışındaki kök ekranlarda geri tuşu anasayfaya götürüyor.
+        //
+        // Uygulamanın kökü anasayfa: Filmler, Diziler, Kanallar, İzleme Listem,
+        // Listeler ve Ayarlar oradan bir adım ötede. Geri tuşunun onlarda menüyü
+        // açması "geri" beklentisiyle uyuşmuyordu — menü zaten sol kenardan ve
+        // sol üstteki rozetten bir tuş uzakta.
+        if selected != .home {
+            select(.home, closingPanel: false)
+            return
+        }
+
+        // 4. Anasayfadayız: Sayfanın neresinde olursak olalım önce en tepeye yumuşak bir animasyonla scroll at
         if let currentVC = (children.first as? UINavigationController)?.topViewController {
             if Self.scrollToTop(in: currentVC) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
@@ -386,7 +412,7 @@ final class SidebarViewController: UIViewController {
             }
         }
 
-        // 4. Zaten sayfanın en tepesindeyiz: Bir kez daha geri tuşuna basılınca sidebar açılır
+        // 5. Anasayfanın en tepesindeyiz: Bir kez daha geri tuşuna basılınca sidebar açılır
         openPanel()
     }
 

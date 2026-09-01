@@ -37,7 +37,6 @@ final class DetailHeroView: UIView {
 
     let playButton = UIButton(type: .system)
     let watchlistButton = UIButton(type: .system)
-    let favoriteButton = UIButton(type: .system)
     private var buttonsGlass: UIView!
 
     // MARK: - Durum
@@ -283,13 +282,10 @@ final class DetailHeroView: UIView {
     private func buildButtons() {
         playButton.addSpringPressFeedback()
         watchlistButton.addSpringPressFeedback(scale: 0.90)
-        favoriteButton.addSpringPressFeedback(scale: 0.90)
 
-        #if os(tvOS)
-        let actionButtons = [playButton, watchlistButton, favoriteButton]
-        #else
+        // Kaydetmenin tek yeri izleme listesi. Favori yalnızca canlı
+        // kanallarda kaldı ve kanalın detay ekranı yok.
         let actionButtons = [playButton, watchlistButton]
-        #endif
 
         let buttons = UIStackView(arrangedSubviews: actionButtons)
         buttons.axis = .horizontal
@@ -348,18 +344,6 @@ final class DetailHeroView: UIView {
         )
         config.image = UIImage(systemName: isInWatchlist ? "checkmark" : "plus")
         watchlistButton.configuration = config
-    }
-
-    func setFavorite(isFavorite: Bool) {
-        let layout = appliedLayout ?? Self.layout(metrics: metrics, width: bounds.width > 0 ? bounds.width : 1920)
-        var config = UIButton.Configuration.appGlass(
-            horizontalInset: layout.buttonInset,
-            verticalInset: layout.buttonVerticalInset,
-            fontSize: layout.buttonFontSize
-        )
-        config.image = UIImage(systemName: isFavorite ? "heart.fill" : "heart")
-        config.baseForegroundColor = isFavorite ? .systemRed : .white
-        favoriteButton.configuration = config
     }
 
     func startLoadingAnimation() { artwork.startLoading() }
@@ -489,9 +473,6 @@ final class DetailHeroView: UIView {
 
         let isWatchlist = watchlistButton.configuration?.image == UIImage(systemName: "checkmark")
         setWatchlist(isInWatchlist: isWatchlist)
-
-        let isFav = favoriteButton.configuration?.image == UIImage(systemName: "heart.fill")
-        setFavorite(isFavorite: isFav)
     }
 
     // MARK: - Kaydırma

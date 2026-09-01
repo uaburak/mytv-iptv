@@ -1,5 +1,5 @@
 {
-  "originHash" : "2ad38aa78a376d233e72e7596eb1b289218a2411c80e0c9d7083d334045efc03",
+  "originHash" : "2319f01084a7b83cee5d1862cc648ddc7e6326cc0e542c6d127f2c587b3191de",
   "pins" : [
     {
       "identity" : "abseil-cpp-binary",
@@ -103,10 +103,10 @@
     {
       "identity" : "ksplayer",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/kingslay/KSPlayer",
+      "location" : "https://github.com/uaburak/KSPlayer",
       "state" : {
-        "revision" : "bdfa2da39bb18865b317c4ffd08cdef5f8efc043",
-        "version" : "2.3.4"
+        "branch" : "fix/audio-renderer-clock-anchor",
+        "revision" : "9a9b49afbaab35e0b8eb1272bb432a440a30aa86"
       }
     },
     {

@@ -119,11 +119,19 @@ enum L10n {
     static var nextContent: String { isTurkish ? "Sonraki İçerik" : "Next Item" }
     static var continueWatching: String { isTurkish ? "İzlemeye Devam Et" : "Continue Watching" }
     static var myWatchlist: String { isTurkish ? "İzleme Listem" : "My Watchlist" }
+    /// İzleme listesi sayfasındaki "süzgeçsiz" satırı.
+    static var allItems: String { isTurkish ? "Tümü" : "All" }
     static var liveTV: String { isTurkish ? "Canlı Yayın" : "Live TV" }
     static var guide: String { isTurkish ? "Rehber" : "Guide" }
     static var myList: String { isTurkish ? "Listem" : "My List" }
     static var addToList: String { isTurkish ? "Listeye Ekle" : "Add to List" }
     static var removeFromList: String { isTurkish ? "Listeden Çıkar" : "Remove from List" }
+    static var createList: String { isTurkish ? "Liste Oluştur" : "Create List" }
+    static var create: String { isTurkish ? "Oluştur" : "Create" }
+    static var channelListName: String { isTurkish ? "Liste Adı" : "List Name" }
+    static var channelListNamePlaceholder: String { isTurkish ? "Örn. Spor" : "e.g. Sports" }
+    static var newListDefaultName: String { isTurkish ? "Yeni Liste" : "New List" }
+    static var deleteList: String { isTurkish ? "Listeyi Sil" : "Delete List" }
     static var editList: String { isTurkish ? "Listeyi Düzenle" : "Edit List" }
     static var manageMyList: String { isTurkish ? "Listemi Düzenle" : "Manage My List" }
     static var inMyList: String { isTurkish ? "Listemdeki Kanallar" : "In My List" }
@@ -141,7 +149,7 @@ enum L10n {
     static var noChannels: String { isTurkish ? "Kanal bulunamadı" : "No channels found" }
     static var movies: String { isTurkish ? "Filmler" : "Movies" }
     static var series: String { isTurkish ? "Diziler" : "Series" }
-    static var recentlyWatched: String { isTurkish ? "Son İzlediklerim" : "Recently Watched" }
+    static var watched: String { isTurkish ? "İzlediklerim" : "Watched" }
     static var genres: String { isTurkish ? "Türler" : "Genres" }
     static var recentlyAdded: String { isTurkish ? "Son Eklenenler" : "Recently Added" }
     static var allCategories: String { isTurkish ? "Tüm Kategoriler" : "All Categories" }
@@ -169,10 +177,14 @@ enum L10n {
     }
 
 
-    // MARK: - Favoriler (Favorites)
-    static var favoritesEmptyTitle: String { isTurkish ? "Favori Listeniz Boş" : "No Favorites Yet" }
-    static var favoritesEmptyMessage: String { isTurkish ? "İçerik detayındaki artı butonuna dokunarak favorilerinize ekleyebilirsiniz." : "Tap the plus button on any content detail to add it to your favorites." }
-    /// Favoriler ekranındaki tür süzgeci; kaç içerik olduğunu da yazıyor.
+    // MARK: - İzleme Listesi (Watchlist)
+    static var watchlistEmptyTitle: String { isTurkish ? "İzleme Listeniz Boş" : "Your Watchlist Is Empty" }
+    static var watchlistEmptyMessage: String {
+        isTurkish
+            ? "İçerik detayındaki artı butonuna dokunarak izleme listenize ekleyebilirsiniz."
+            : "Tap the plus button on any content detail to add it to your watchlist."
+    }
+    /// İzleme listesi ekranındaki tür süzgeci; kaç içerik olduğunu da yazıyor.
     static func filterCount(_ title: String, _ count: Int) -> String { "\(title) (\(count))" }
 
     // MARK: - Ayarlar (Settings)

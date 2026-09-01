@@ -398,6 +398,8 @@ final class PlayerViewController: UIViewController {
     /// yapılınca, uygulama izlerken sonlandırıldığında kaldığı yer
     /// kayboluyordu.
     private var lastProgressSave = Date.distantPast
+    /// En son menü kurulduğundaki ses parçası kümesi. Bkz. `refreshTrackMenusIfChanged`.
+    private var audioTrackSignature: String?
     private static let progressSaveInterval: TimeInterval = 30
 
     /// Arayüzün kendiliğinden solmasına kalan süre. Kısa tutulunca kullanıcı
@@ -605,6 +607,7 @@ final class PlayerViewController: UIViewController {
         didShowFailure = false
         lastProgressSave = .distantPast
         selectedAudioTrackID = nil
+        audioTrackSignature = nil
         playPauseButton.setSymbol("pause.fill", animated: false)
         applyTitleLines()
 
@@ -705,7 +708,18 @@ final class PlayerViewController: UIViewController {
         KSOptions.firstPlayerType = KSAVPlayer.self
         KSOptions.secondPlayerType = KSMEPlayer.self
 
-        let options = KSOptions()
+        // FFmpeg yolunda sesi AVAudioEngine yerine AVSampleBufferAudioRenderer
+        // çalıyor. Varsayılan `AudioEnginePlayer` her duraklatmada motoru
+        // durdurup her oynatmada `engine.start()` ile soğuk açıyor. HomePod
+        // gibi AirPlay çıkışlarında bunun bedeli görünür: duraklatınca cihazın
+        // tamponundaki ses akmaya devam ediyor, oynatınca yayın baştan kurulup
+        // tampon yeniden doluyor — aradaki birkaç saniye buradan geliyor.
+        // `AudioRendererPlayer` taşımayı `AVSampleBufferRenderSynchronizer`ın
+        // zaman tabanına devrediyor: durdurma ve başlatma AirPlay cihazına
+        // zamanlanmış olarak iniyor, boru hattı hiç yıkılmıyor.
+        KSOptions.audioPlayerType = AudioRendererPlayer.self
+
+        let options = PlayerOptions()
         options.userAgent = context.headers["User-Agent"] ?? "VLC/3.0.20 LibVLC/3.0.20"
         if let referer = context.headers["Referer"] { options.referer = referer }
         if let startAt = context.startAt, startAt > 0, !context.isLive {
@@ -1289,6 +1303,28 @@ final class PlayerViewController: UIViewController {
     }
 
     /// Ses parçası menüsü. Altyazınınki `PlayerSubtitleController`'da.
+    /// `bufferFinished` için: menüleri yalnızca ses parçası kümesi değiştiyse kurar.
+    ///
+    /// Bu durum her devam edişte, her sarmada ve her parça değişiminde geliyor —
+    /// yani saniyeler içinde defalarca. `refreshTrackMenus` ise her çağrıda altyazı
+    /// ayarları menüsünü baştan üretiyor: boyutlar, renkler, arka planlar, gecikme
+    /// adımları, hepsi ayrı birer `UIAction`. Bunu ana iş parçacığında tekrar tekrar
+    /// yapmanın anlamı yok ve `CADisplayLink` de aynı runloop'ta olduğu için doğrudan
+    /// kare atlamasına dönüşüyor.
+    ///
+    /// Menüyü asıl değiştiren her olayın kendi çağrısı zaten var (açılış, `readyToPlay`,
+    /// parça seçimi, ayar değişimi). Buradaki tek gerçek iş, akışın içinden sonradan
+    /// beliren ses parçalarını yakalamak; onun için de kümenin değişip değişmediğine
+    /// bakmak yeterli.
+    private func refreshTrackMenusIfChanged() {
+        let signature = playerLayer?.player.tracks(mediaType: .audio)
+            .map { "\($0.trackID):\($0.name):\($0.isEnabled)" }
+            .joined(separator: "|")
+        guard signature != audioTrackSignature else { return }
+        audioTrackSignature = signature
+        refreshTrackMenus()
+    }
+
     private func refreshTrackMenus() {
         subtitlesButton.menu = subtitles.makeMenu()
 
@@ -1378,6 +1414,11 @@ final class PlayerViewController: UIViewController {
         seek(to: currentTime + 15)
     }
 
+    /// Sarar. Üç çağrı yeri (±15 ve çubuk) buradan geçiyor.
+    private func seekPlayer(to target: TimeInterval) {
+        playerLayer?.seek(time: target, autoPlay: isPlaying, completion: { _ in })
+    }
+
     private func seek(to seconds: Double) {
         guard duration > 0 else { return }
         let target = max(0, min(duration, seconds))
@@ -1386,7 +1427,7 @@ final class PlayerViewController: UIViewController {
         slider.value = Float(target / duration)
         // Sarma sonrası eski satır ekranda asılı kalmasın.
         subtitles.flush()
-        playerLayer?.seek(time: target, autoPlay: isPlaying, completion: { _ in })
+        seekPlayer(to: target)
         showControls()
     }
 
@@ -1455,7 +1496,7 @@ final class PlayerViewController: UIViewController {
         }
         currentTime = target
         subtitles.flush()
-        playerLayer?.seek(time: target, autoPlay: isPlaying, completion: { _ in })
+        seekPlayer(to: target)
     }
 
     /// Çubuktan **yalnızca** yatay odak hareketi kapalı: sağ/sol sarma demek.
@@ -1486,7 +1527,7 @@ final class PlayerViewController: UIViewController {
         let target = Double(slider.value) * duration
         currentTime = target
         subtitles.flush()
-        playerLayer?.seek(time: target, autoPlay: isPlaying, completion: { _ in })
+        seekPlayer(to: target)
         isScrubbing = false
         scheduleControlsHide()
     }
@@ -1701,7 +1742,7 @@ extension PlayerViewController: KSPlayerLayerDelegate {
             tabs.setChapters(layer.player.chapters)
         case .bufferFinished:
             spinner.stopAnimating()
-            refreshTrackMenus()
+            refreshTrackMenusIfChanged()
         case .buffering, .preparing, .initialized:
             spinner.startAnimating()
         case .error:

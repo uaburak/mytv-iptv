@@ -239,9 +239,9 @@ final class CategoryViewController: UIViewController {
                 let cell = collectionView.dequeueReusableCell(
                     withReuseIdentifier: HeroCell.reuseID, for: indexPath
                 ) as! HeroCell
-                cell.isFavorite = { [weak self] in self?.model.activity.isFavorite($0) ?? false }
+                cell.isInWatchlist = { [weak self] in self?.model.activity.isInWatchlist($0) ?? false }
                 cell.onDetails = { [weak self] in self?.openDetail($0) }
-                cell.onToggleFavorite = { [weak self] in self?.model.activity.toggleFavorite($0) }
+                cell.onToggleWatchlist = { [weak self] in self?.model.activity.toggleWatchlist($0) }
                 cell.artworkOverhang = HeroSectionMetrics.overhang(
                     container: collectionView.bounds.size, metrics: metrics
                 )
