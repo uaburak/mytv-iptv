@@ -409,7 +409,11 @@ actor TMDBService {
     private func details(mediaType: String, id: Int, language: AppLanguage) async -> TMDBDetailResponse? {
         guard let data = await get(
             path: "\(mediaType)/\(id)",
-            query: ["language": language.tmdbLanguageCode, "append_to_response": "credits,videos,recommendations,similar"]
+            query: [
+                "language": language.tmdbLanguageCode,
+                "append_to_response": "credits,videos,recommendations,similar",
+                "include_video_language": "\(language.effectiveLanguageCode),en,null"
+            ]
         ) else {
             return nil
         }
@@ -449,8 +453,13 @@ actor TMDBService {
         let director = details?.credits?.crew?
             .first(where: { $0.job == "Director" })?.name
 
-        let trailerKey = details?.videos?.results?
-            .first(where: { $0.site.lowercased() == "youtube" && ($0.type == "Trailer" || $0.type == "Teaser") })?.key
+        let youtubeVideos = details?.videos?.results?.filter { $0.site.lowercased() == "youtube" } ?? []
+        let langCode = AppLanguage.current.effectiveLanguageCode
+        let trailerKey = youtubeVideos.first(where: { ($0.type == "Trailer" || $0.type == "Teaser") && $0.language == langCode && $0.official == true })?.key
+            ?? youtubeVideos.first(where: { ($0.type == "Trailer" || $0.type == "Teaser") && $0.language == langCode })?.key
+            ?? youtubeVideos.first(where: { ($0.type == "Trailer" || $0.type == "Teaser") && $0.official == true })?.key
+            ?? youtubeVideos.first(where: { $0.type == "Trailer" || $0.type == "Teaser" })?.key
+            ?? youtubeVideos.first?.key
         let trailerURL = trailerKey.flatMap { URL(string: "https://www.youtube.com/watch?v=\($0)") }
 
         var recommendedMovieIDs: [Int] = []
@@ -891,6 +900,13 @@ struct TMDBDetailResponse: Decodable {
             var key: String
             var site: String
             var type: String
+            var official: Bool?
+            var language: String?
+
+            enum CodingKeys: String, CodingKey {
+                case key, site, type, official
+                case language = "iso_639_1"
+            }
         }
     }
 

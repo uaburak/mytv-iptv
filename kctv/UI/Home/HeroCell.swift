@@ -1278,7 +1278,7 @@ extension HeroCell: UIGestureRecognizerDelegate {
 #endif
 
 /// Yaş sınırı gibi kısa rozetler için kenar payı olan etiket.
-private final class BadgeLabel: UILabel {
+final class BadgeLabel: UILabel {
     private let insets = UIEdgeInsets(top: 2, left: 6, bottom: 2, right: 6)
 
     override func drawText(in rect: CGRect) {

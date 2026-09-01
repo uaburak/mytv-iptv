@@ -1,4 +1,5 @@
 import UIKit
+import AVKit
 
 /// Apple TV tarzı detay ekranı: üstte tam genişlikte sinematik görsel,
 /// üzerinde logo/başlık ve aksiyonlar, altında bölümler, künye ve benzerler.
@@ -19,9 +20,11 @@ final class DetailViewController: UIViewController {
     private let bodyBackdrop = GradientBackdropView()
     private let bodyStack = UIStackView()
 
+    private let trailerSection = UIStackView()
     private let episodesSection = UIStackView()
     private let creditsSection = UIStackView()
     private let relatedSection = UIStackView()
+    private var firstSectionHeader: DetailSectionHeaderView?
 
     /// Sezon çipleri ve bölüm rayı ayrı tutuluyor: sezon değişince yalnızca
     /// ray yenileniyor. Çipler yeniden kurulsaydı odaktaki buton yok olur ve
@@ -94,8 +97,7 @@ final class DetailViewController: UIViewController {
         apply(metadata)
         if let logoURL = metadata.logoURL,
            let logo = ImageLoader.cachedImage(url: logoURL, maxPixelSize: 900) {
-            hero.logoView.image = logo
-            hero.logoView.isHidden = false
+            hero.setLogo(logo)
         }
     }
 
@@ -141,9 +143,10 @@ final class DetailViewController: UIViewController {
         guard !didApplyInitialLayout, view.bounds.height > 0 else { return }
         didApplyInitialLayout = true
 
-        hero.updateBaseHeight(Self.heroHeight(forScreenHeight: view.bounds.height))
-        // Hero içeriği alttaki bölümlerle aynı kenar payını kullanıyor.
-        hero.updateHorizontalInset(metrics.screenPadding)
+        let size = view.bounds.size
+        hero.updateMetrics(metrics)
+        hero.updateBaseHeight(HeroSectionMetrics.height(container: size, metrics: metrics))
+        hero.artworkOverhang = HeroSectionMetrics.overhang(container: size, metrics: metrics)
         // Ölçüler ancak burada kesinleşiyor; görsel doğru çözünürlükte
         // isteniyor (`viewDidLoad`'daki çağrı ekran boyu bilinmeden yapılıyor).
         applyHeroArtwork()
@@ -160,23 +163,12 @@ final class DetailViewController: UIViewController {
         with coordinator: any UIViewControllerTransitionCoordinator
     ) {
         super.viewWillTransition(to: size, with: coordinator)
-        // Yükseklik yalnızca ekran boyu gerçekten değiştiğinde güncelleniyor.
         coordinator.animate { _ in
-            self.hero.updateBaseHeight(Self.heroHeight(forScreenHeight: size.height))
-            self.hero.updateHorizontalInset(AppMetrics.metrics(for: size.width).screenPadding)
+            let newMetrics = AppMetrics.metrics(for: size.width)
+            self.hero.updateMetrics(newMetrics)
+            self.hero.updateBaseHeight(HeroSectionMetrics.height(container: size, metrics: newMetrics))
+            self.hero.artworkOverhang = HeroSectionMetrics.overhang(container: size, metrics: newMetrics)
         }
-    }
-
-    /// Hero yüksekliği. Backdrop 16:9 olduğu için ekranın yaklaşık %74'ü
-    /// ideal dengeyi sağlıyor (~642pt @ iPhone 17 Pro).
-    private static func heroHeight(forScreenHeight height: CGFloat) -> CGFloat {
-        #if os(tvOS)
-        // Apple TV düzeni: ilk görünümde arka plan görseli tüm ekranı kaplıyor,
-        // içerik onun üzerinde solda duruyor. Bölümler ve künye aşağıda.
-        return height
-        #else
-        return max(560, height * 0.74)
-        #endif
     }
 
     // MARK: - Toolbar
@@ -218,8 +210,7 @@ final class DetailViewController: UIViewController {
     /// tvOS'taki hero favori butonunun simgesini duruma göre günceller.
     private func updateFavoriteButton() {
         let isFav = model.activity.isFavorite(detail?.item ?? item)
-        hero.favoriteButton.configuration?.image = UIImage(systemName: isFav ? "heart.fill" : "heart")
-        hero.favoriteButton.configuration?.baseForegroundColor = isFav ? .systemRed : .white
+        hero.setFavorite(isFavorite: isFav)
     }
 
     private var favoriteImage: UIImage? {
@@ -255,7 +246,7 @@ final class DetailViewController: UIViewController {
         // Geçiş rampası uzun olsun; siyah zemin yumuşak başlasın.
         bodyBackdrop.rampHeight = 260
         bodyStack.translatesAutoresizingMaskIntoConstraints = false
-        [episodesSection, creditsSection, relatedSection].forEach(bodyStack.addArrangedSubview)
+        [trailerSection, episodesSection, creditsSection, relatedSection].forEach(bodyStack.addArrangedSubview)
 
         let bodyContainer = UIView()
         bodyBackdrop.translatesAutoresizingMaskIntoConstraints = false
@@ -263,7 +254,7 @@ final class DetailViewController: UIViewController {
         bodyContainer.addSubview(bodyStack)
         contentStack.addArrangedSubview(bodyContainer)
 
-        for section in [episodesSection, creditsSection, relatedSection] {
+        for section in [trailerSection, episodesSection, creditsSection, relatedSection] {
             section.axis = .vertical
             section.spacing = metrics.rowHeaderGap
             section.isHidden = true
@@ -304,7 +295,6 @@ final class DetailViewController: UIViewController {
         #endif
         #if os(tvOS)
         hero.favoriteButton.addTarget(self, action: #selector(toggleFavorite), for: .primaryActionTriggered)
-        hero.episodesButton.addTarget(self, action: #selector(scrollToEpisodes), for: .primaryActionTriggered)
         #endif
     }
 
@@ -314,6 +304,7 @@ final class DetailViewController: UIViewController {
 
     private func render() {
         renderHero()
+        renderTrailer()
         renderEpisodes()
         renderCredits()
         renderRelated()
@@ -327,28 +318,42 @@ final class DetailViewController: UIViewController {
 
         // Logo varsa başlık gizli, yoksa başlık görünür.
         let hasLogo = hero.logoView.image != nil
-        hero.logoView.isHidden = !hasLogo
         hero.titleLabel.isHidden = hasLogo
         hero.titleLabel.text = current.title
         hero.titleLabel.font = metrics.titleFont
 
-        // Slogan (Tagline)
-        if let tagline = tmdbMetadata?.tagline, !tagline.isEmpty {
-            hero.taglineLabel.text = "\"\(tagline)\""
-            hero.taglineLabel.isHidden = false
+        var metaParts: [String] = [current.kind.title]
+        let displayGenres = !current.genres.isEmpty ? current.genres : (tmdbMetadata?.genres ?? [])
+        metaParts.append(contentsOf: displayGenres.prefix(3))
+        if let year = current.yearText ?? tmdbMetadata?.releaseYear {
+            metaParts.append(year)
+        }
+        if let duration = current.durationText ?? (tmdbMetadata?.runtimeMinutes.map { "\($0) dk" }) {
+            metaParts.append(duration)
+        }
+        if let country = detail?.country ?? tmdbMetadata?.country {
+            metaParts.append(country)
+        }
+        hero.metaLabel.text = metaParts.joined(separator: " · ")
+
+        // IMDb Puanı
+        let rating = current.ratingFormatted ?? tmdbMetadata?.rating.map { String(format: "%.1f", $0) }
+        if let rating {
+            if let votes = tmdbMetadata?.voteCount, votes > 0 {
+                let votesText = votes >= 1000 ? String(format: "%.1fk", Double(votes) / 1000.0) : "\(votes)"
+                hero.imdbRatingLabel.text = "\(rating) (\(votesText))"
+            } else {
+                hero.imdbRatingLabel.text = rating
+            }
+            hero.imdbRow.isHidden = false
         } else {
-            hero.taglineLabel.isHidden = true
+            hero.imdbRow.isHidden = true
         }
 
-        var genreParts = [current.kind.title]
-        let displayGenres = !current.genres.isEmpty ? current.genres : (tmdbMetadata?.genres ?? [])
-        genreParts.append(contentsOf: displayGenres.prefix(3))
-        hero.genreLabel.text = genreParts.joined(separator: " · ")
-
-        hero.playButton.configuration?.title = playTitle(for: current)
-        hero.watchlistButton.configuration?.image = UIImage(
-            systemName: model.activity.isInWatchlist(current) ? "checkmark" : "plus"
-        )
+        // Yaş Sınırı Rozeti
+        let isAdult = current.isAdult
+        hero.ageBadge.text = isAdult ? "18+" : nil
+        hero.ageBadge.isHidden = !isAdult
 
         let plotText = current.plot ?? tmdbMetadata?.overview
         hero.plotLabel.text = plotText
@@ -357,27 +362,11 @@ final class DetailViewController: UIViewController {
         // kapalı kalıyor.
         hero.plotLabel.isUserInteractionEnabled = (plotText?.count ?? 0) > 140
 
-        var metaParts: [String] = []
-        if let year = current.yearText ?? tmdbMetadata?.releaseYear { metaParts.append(year) }
-        if let duration = current.durationText ?? (tmdbMetadata?.runtimeMinutes.map { "\($0) dk" }) {
-            metaParts.append(duration)
-        }
-        if let percent = current.ratingPercent {
-            if let votes = tmdbMetadata?.voteCount, votes > 0 {
-                let votesText = votes >= 1000 ? String(format: "%.1fk", Double(votes) / 1000.0) : "\(votes)"
-                metaParts.append("%\(percent) ⭐ (\(votesText))")
-            } else {
-                metaParts.append("%\(percent) ⭐")
-            }
-        } else if let rating = tmdbMetadata?.rating, rating > 0 {
-            let percent = Int((rating * 10).rounded())
-            metaParts.append("%\(percent) ⭐")
-        }
-        if let country = detail?.country ?? tmdbMetadata?.country { metaParts.append(country) }
-        hero.metaLabel.text = metaParts.joined(separator: "   ")
+        hero.setPlayTitle(playTitle(for: current))
+        hero.setWatchlist(isInWatchlist: model.activity.isInWatchlist(current))
 
         #if os(tvOS)
-        hero.episodesButton.isHidden = !(detail?.hasEpisodes ?? false)
+        updateFavoriteButton()
         #endif
     }
 
@@ -462,11 +451,6 @@ final class DetailViewController: UIViewController {
         // söyleyen tek işaret o ve gizlendiğinde ray başlıksız, havada
         // kalıyordu.
         episodesSection.addArrangedSubview(makeSeasonChips(detail.seasons, selected: season))
-        // Boy kısıtı ancak çipler hiyerarşiye girdikten sonra kurulabiliyor;
-        // öncesinde Oynat butonuyla ortak ataları yok.
-        for chip in seasonChipButtons.values {
-            chip.heightAnchor.constraint(equalTo: hero.playButton.heightAnchor).isActive = true
-        }
         episodeRowView = makeEpisodeRow(for: season, series: detail.item)
         episodesSection.addArrangedSubview(episodeRowView!)
     }
@@ -576,6 +560,25 @@ final class DetailViewController: UIViewController {
         button.configuration?.title = title
     }
 
+    private func renderTrailer() {
+        let trailerURL = detail?.trailerURL ?? item.trailerURL ?? tmdbMetadata?.trailerURL
+        let current = detail?.item ?? item
+
+        trailerSection.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        guard let trailerURL else {
+            trailerSection.isHidden = true
+            firstSectionHeader = nil
+            return
+        }
+        trailerSection.isHidden = false
+        let header = DetailSectionHeaderView(title: L10n.watchTrailer, metrics: metrics)
+        trailerSection.addArrangedSubview(header)
+        firstSectionHeader = header
+        trailerSection.addArrangedSubview(makeTrailerRow(url: trailerURL, item: current))
+
+        header.applyReveal(RowHeaderView.revealProgress(for: scrollView, metrics: metrics))
+    }
+
     private func renderCredits() {
         creditsSection.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
@@ -588,11 +591,10 @@ final class DetailViewController: UIViewController {
         let releaseDate = tmdbMetadata?.releaseDate
         let status = tmdbMetadata?.status
         let country = tmdbMetadata?.country ?? detail?.country
-        let trailerURL = tmdbMetadata?.trailerURL ?? detail?.trailerURL ?? item.trailerURL
         let current = detail?.item ?? item
 
         let hasAnyInfo = !franchiseItems.isEmpty || isFranchiseLoading || !castNames.isEmpty
-            || director != nil || originalTitle != nil || releaseDate != nil || trailerURL != nil
+            || director != nil || originalTitle != nil || releaseDate != nil
         guard hasAnyInfo else {
             creditsSection.isHidden = true
             return
@@ -602,13 +604,7 @@ final class DetailViewController: UIViewController {
         // Raylar kenardan kenara; kenar payını kendileri veriyor.
         creditsSection.isLayoutMarginsRelativeArrangement = false
 
-        // 1) Fragman — bölümlerle aynı yatay kart düzeninde.
-        if let trailerURL {
-            creditsSection.addArrangedSubview(makeSectionHeader(L10n.watchTrailer))
-            creditsSection.addArrangedSubview(makeTrailerRow(url: trailerURL, item: current))
-        }
-
-        // 2) Seri Filmler (Fragmandan hemen sonra)
+        // 1) Seri Filmler (Fragmandan hemen sonra)
         if isFranchiseLoading {
             creditsSection.addArrangedSubview(makeSectionHeader(L10n.seriesCollection))
             let skeleton = FranchiseSkeletonRow(metrics: metrics)
@@ -721,8 +717,8 @@ final class DetailViewController: UIViewController {
                     playedFraction: nil
                 )
             },
-            onSelect: { url, _ in
-                UIApplication.shared.open(url)
+            onSelect: { [weak self] url, _ in
+                self?.openTrailer(url: url)
             }
         )
     }
@@ -757,11 +753,90 @@ final class DetailViewController: UIViewController {
 
         let button = UIButton(configuration: config)
         button.addSpringPressFeedback()
-        button.addAction(UIAction { _ in
-            UIApplication.shared.open(url)
+        button.addAction(UIAction { [weak self] _ in
+            self?.openTrailer(url: url)
         }, for: .primaryActionTriggered)
         button.heightAnchor.constraint(equalToConstant: 44).isActive = true
         return button
+    }
+
+    private func openTrailer(url: URL) {
+        guard let videoID = Self.extractYouTubeID(from: url) else {
+            UIApplication.shared.open(url, options: [:], completionHandler: nil)
+            return
+        }
+
+        #if os(tvOS)
+        // Apple TV YouTube uygulaması doğrudan video oynatmak için 'youtube://watch/<VIDEO_ID>' şemasını kullanır.
+        if let appURL = URL(string: "youtube://watch/\(videoID)") {
+            UIApplication.shared.open(appURL, options: [:]) { success in
+                if !success {
+                    if let webURL = URL(string: "https://www.youtube.com/watch?v=\(videoID)") {
+                        UIApplication.shared.open(webURL, options: [:], completionHandler: nil)
+                    }
+                }
+            }
+            return
+        }
+        #else
+        // iOS: youtube://watch?v=ID veya doğrudan YouTube uygulaması / Safari
+        if let appURL = URL(string: "youtube://watch?v=\(videoID)") {
+            UIApplication.shared.open(appURL, options: [:]) { success in
+                if !success {
+                    let webURL = URL(string: "https://www.youtube.com/watch?v=\(videoID)") ?? url
+                    UIApplication.shared.open(webURL, options: [:], completionHandler: nil)
+                }
+            }
+            return
+        }
+        #endif
+
+        UIApplication.shared.open(url, options: [:], completionHandler: nil)
+    }
+
+    private static func extractYouTubeID(from url: URL) -> String? {
+        let str = url.absoluteString
+
+        // 1. URLComponents query item "v" (watch?v=ID)
+        if let components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            if let id = components.queryItems?.first(where: { $0.name == "v" })?.value, !id.isEmpty {
+                return id
+            }
+        }
+
+        // 2. youtu.be/ID
+        if str.contains("youtu.be/") {
+            let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            if !path.isEmpty {
+                let id = path.components(separatedBy: "/").first?.components(separatedBy: "?").first
+                if let id, !id.isEmpty { return id }
+            }
+        }
+
+        // 3. embed/ID, v/ID, shorts/ID, watch/ID
+        for prefix in ["embed/", "v/", "shorts/", "watch/"] {
+            if str.contains(prefix), let range = str.range(of: prefix) {
+                let suffix = String(str[range.upperBound...])
+                let id = suffix.components(separatedBy: CharacterSet(charactersIn: "/?&#")).first
+                if let id, !id.isEmpty { return id }
+            }
+        }
+
+        // 4. Regex ile 11 karakterli YouTube ID arama
+        let pattern = "(?<=v=|v\\/|vi=|vi\\/|youtu.be\\/|embed\\/|shorts\\/|watch\\/)[a-zA-Z0-9_-]{11}"
+        if let regex = try? NSRegularExpression(pattern: pattern) {
+            let nsStr = str as NSString
+            if let match = regex.firstMatch(in: str, range: NSRange(location: 0, length: nsStr.length)) {
+                return nsStr.substring(with: match.range)
+            }
+        }
+
+        // 5. URL'in kendisi salt video ID ise
+        if !str.contains("/") && !str.contains(".") && str.count >= 8 && str.count <= 15 {
+            return str
+        }
+
+        return nil
     }
 
     private func makeCreditBlock(title: String, value: String) -> UIView {
@@ -838,9 +913,8 @@ final class DetailViewController: UIViewController {
             detail = try? await model.library.detail(for: item)
             selectedSeason = detail?.seasons.first?.number
             renderEpisodes()
-            hero.playButton.configuration?.title = playTitle(for: detail?.item ?? item)
+            hero.setPlayTitle(playTitle(for: detail?.item ?? item))
             #if os(tvOS)
-            hero.episodesButton.isHidden = !(detail?.hasEpisodes ?? false)
             updateFavoriteButton()
             #else
             favoriteBarButton?.image = favoriteImage
@@ -888,24 +962,11 @@ final class DetailViewController: UIViewController {
         // alması ya da özetin dolması yerinde bir kesme olarak görünüyordu.
         // Düzen animasyona sokulmuyor — logolar farklı oranda ve blok
         // birinden diğerine kayarak geçiyordu.
+        renderTrailer()
         renderEpisodes()
         renderCredits()
         renderRelated()
-
-        if view.window != nil {
-            UIView.transition(
-                with: hero.contentStack,
-                duration: 0.3,
-                options: [.transitionCrossDissolve, .allowUserInteraction]
-            ) {
-                UIView.performWithoutAnimation {
-                    self.renderHero()
-                    self.hero.contentStack.layoutIfNeeded()
-                }
-            }
-        } else {
-            renderHero()
-        }
+        renderHero()
         hero.stopLoadingAnimation(animated: true)
         #if os(tvOS)
         updateFavoriteButton()
@@ -956,7 +1017,8 @@ final class DetailViewController: UIViewController {
     private func loadLogoIfNeeded() async {
         guard hero.logoView.image == nil, let logoURL = tmdbMetadata?.logoURL else { return }
         guard let image = await ImageLoader.shared.image(for: logoURL, maxPixelSize: 900) else { return }
-        hero.logoView.image = image
+        hero.setLogo(image)
+        hero.titleLabel.isHidden = true
     }
 
     /// Alttaki rayların görsellerini önden çözer: kullanıcı aşağı indiğinde
@@ -1160,9 +1222,53 @@ final class DetailViewController: UIViewController {
 }
 
 extension DetailViewController: UIScrollViewDelegate {
-    /// Apple TV davranışı: aşağı çekildiğinde görsel üste sabitlenip büyür,
-    /// yukarı kaydırıldığında içerikten yavaş hareket eder (parallax).
+    /// Anasayfa banner'ıyla birebir aynı kaydırma davranışı: aşağı çekildiğinde
+    /// görsel üste doğru esner, yukarı kaydırıldığında içerik görselin önünden
+    /// yumuşakça kalkar ve hemen altındaki ilk başlık (Fragman) beliriş
+    /// animasyonuyla yerine oturur.
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        hero.apply(offset: scrollView.contentOffset.y, parallaxFactor: parallaxFactor)
+        hero.applyScroll(offset: scrollView.contentOffset.y)
+        firstSectionHeader?.applyReveal(RowHeaderView.revealProgress(for: scrollView, metrics: metrics))
+    }
+}
+
+/// Anasayfadaki RowHeaderView ile birebir aynı beliriş/kayboluş animasyonuna
+/// sahip ray başlığı: sayfa tepedeyken gizlidir, aşağı kaydırıldıkça yumuşakça belirir.
+final class DetailSectionHeaderView: UIView {
+    private let titleLabel = UILabel()
+    private let contentStack = UIStackView()
+
+    init(title: String, metrics: AppMetrics) {
+        super.init(frame: .zero)
+        clipsToBounds = true
+
+        titleLabel.text = title
+        titleLabel.font = metrics.rowTitleFont
+        titleLabel.textColor = .white
+
+        contentStack.axis = .horizontal
+        contentStack.alignment = .center
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.addArrangedSubview(titleLabel)
+        addSubview(contentStack)
+
+        NSLayoutConstraint.activate([
+            contentStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: metrics.screenPadding),
+            contentStack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -metrics.screenPadding),
+            contentStack.topAnchor.constraint(equalTo: topAnchor),
+            contentStack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            heightAnchor.constraint(equalToConstant: metrics.rowHeaderHeight)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func applyReveal(_ progress: CGFloat) {
+        let clamped = min(max(progress, 0), 1)
+        let eased = clamped * clamped * (3 - 2 * clamped)
+        contentStack.alpha = eased
+        contentStack.transform = CGAffineTransform(
+            translationX: 0, y: (1 - eased) * max(bounds.height, 1)
+        )
     }
 }

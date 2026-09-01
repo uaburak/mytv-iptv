@@ -1,58 +1,84 @@
 import UIKit
 
-/// Detay ekranının üst bloğu: arka plan görseli, üzerindeki karartma/blur
-/// katmanı ve içerik (logo ya da başlık, butonlar, künye satırı).
-///
-/// Kaydırma davranışı `DetailViewController` tarafından sürülüyor:
-/// - aşağı çekildiğinde görsel üste sabitlenip büyür,
-/// - yukarı kaydırıldığında içerikten yavaş hareket eder (parallax).
+/// Detay ekranının üst bloğu: anasayfa hero banner'ıyla birebir aynı görsel
+/// mimari, karartma gradyanları, tipografi, logo oranları ve kaydırma efektleri.
 final class DetailHeroView: UIView {
-    /// Görsel, blur katmanı ve karartma gradyanını bir arada tutan kapsayıcı.
-    /// Kaydırma/esneme (stretchy header) efekti bu kapsayıcıya uygulanır;
-    /// böylece resim esnerken veya kayarken gradyan daima resmin altında kalır.
-    private let visualContainer = UIView()
 
+    // MARK: - Görsel Katman
+
+    private let visual = UIView()
     let artwork = HeroArtworkView()
+    /// Alttan karartma: yazılar görselin üstünde okunur kalsın.
+    private let scrim = HeroGradientView()
+    /// Soldan karartma: geniş ekranda içerik solda dar bir kolonda duruyor.
+    private let sideScrim = HeroGradientView()
+    /// Görselin alt ucunda sayfanın siyah zeminine yumuşak geçiş.
+    private let bodyBackdrop = GradientBackdropView()
 
-    /// TMDB'den gelen şeffaf logo. Varsa başlık yerine bu gösteriliyor.
+    // MARK: - İçerik
+
+    let column = UIStackView()
+    let textBlock = UIStackView()
+    var contentStack: UIStackView { column }
+
+    private let titleSlot = UIView()
     let logoView = UIImageView()
     let titleLabel = UILabel()
-    let taglineLabel = UILabel()
-    let genreLabel = UILabel()
-    let plotLabel = UILabel()
+
+    let metaRow = UIStackView()
     let metaLabel = UILabel()
-    let playButton = UIButton(configuration: .filled())
-    let watchlistButton = UIButton(configuration: .filled())
-    /// Favori yalnızca tvOS'ta burada; iOS'ta navigasyon çubuğunda duruyor.
-    /// tvOS'ta sağ üst köşe kumandayla ulaşması zahmetli bir yer.
-    let favoriteButton = UIButton(configuration: .filled())
-    /// Dizilerde bölüm listesine götüren buton; yalnızca tvOS'ta ve yalnızca
-    /// bölümü olan içeriklerde görünüyor.
-    let episodesButton = UIButton(configuration: .filled())
+    let imdbRow = UIStackView()
+    let imdbLogoView = UIImageView()
+    let imdbRatingLabel = UILabel()
+    let ageBadge = BadgeLabel()
+    private let metaTrailingSpacer = UIView()
 
-    let contentStack = UIStackView()
+    let plotLabel = UILabel()
 
-    /// Görselin ve blur katmanının üzerinde, butonların arkasında siyah gradient karartma.
-    private let scrimView = HeroGradientView()
-    /// tvOS'ta içerik solda duruyor; metnin okunması için soldan sağa ikinci
-    /// bir karartma gerekiyor. Alt karartma tek başına yetmiyor.
-    private let sideScrimView = HeroGradientView()
+    let playButton = UIButton(type: .system)
+    let watchlistButton = UIButton(type: .system)
+    let favoriteButton = UIButton(type: .system)
+    private var buttonsGlass: UIView!
+
+    // MARK: - Durum
+
+    #if os(tvOS)
+    private var metrics: AppMetrics = .tv
+    #else
+    private var metrics: AppMetrics = .regular
+    #endif
+    private var appliedLayout: Layout?
+    private var contentLift: CGFloat = 0
+
+    private static let contentLiftDistance: CGFloat = 100
+    private static let contentLiftRamp: CGFloat = 320
+
+    var artworkOverhang: CGFloat = 0 {
+        didSet {
+            guard abs(oldValue - artworkOverhang) > 0.5 else { return }
+            artworkBottom.constant = artworkOverhang
+            visualBottom.constant = artworkOverhang
+        }
+    }
 
     private var visualTop: NSLayoutConstraint!
-    private var visualHeight: NSLayoutConstraint!
-    private var ownHeight: NSLayoutConstraint!
+    private var visualBottom: NSLayoutConstraint!
+    private var artworkBottom: NSLayoutConstraint!
+    private var bodyBackdropHeight: NSLayoutConstraint!
 
-    /// İçerik kolonunun kenar payı. Alttaki bölümlerle (bölümler, fragman,
-    /// oyuncular, bilgi, benzerler) aynı hizada durması için `AppMetrics`
-    /// üzerinden sürülüyor; sabit bir değer ekran boyuna göre kayıyordu.
-    private var contentLeading: NSLayoutConstraint!
-    #if os(tvOS)
-    // tvOS'ta sağ kenarı kolon genişliği belirliyor; trailing kısıtı yok.
-    private var horizontalInset: CGFloat = AppMetrics.tv.screenPadding
-    #else
-    private var contentTrailing: NSLayoutConstraint!
-    private var horizontalInset: CGFloat = AppMetrics.regular.screenPadding
-    #endif
+    private var columnLeading: NSLayoutConstraint!
+    private var columnBottom: NSLayoutConstraint!
+    private var columnWidth: NSLayoutConstraint!
+    private var titleSlotHeight: NSLayoutConstraint!
+    private var logoHeight: NSLayoutConstraint!
+    private var logoMaxWidth: NSLayoutConstraint!
+    private var logoAspect: NSLayoutConstraint?
+    private var logoLeading: NSLayoutConstraint!
+    private var logoCenterX: NSLayoutConstraint!
+    private var imdbLogoHeight: NSLayoutConstraint!
+    private var imdbLogoAspect: NSLayoutConstraint!
+    private var plotHeight: NSLayoutConstraint!
+    private var ownHeight: NSLayoutConstraint!
 
     private(set) var baseHeight: CGFloat = 660
 
@@ -64,157 +90,203 @@ final class DetailHeroView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     private func build() {
-        // Büyüyen görsel kendi sınırlarının dışına taşacağı için kırpma kapalı.
         clipsToBounds = false
 
-        // 1. Görsel Kapsayıcısı (Stretchy & Parallax uygulanan ana blok)
-        visualContainer.translatesAutoresizingMaskIntoConstraints = false
-        visualContainer.clipsToBounds = true
-        addSubview(visualContainer)
+        visual.clipsToBounds = true
+        visual.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(visual)
 
-        // Görsel + açılış blur/nabız katmanı tek bileşende; aynı mantık
-        // anasayfa banner'ında da kullanılıyor.
         artwork.translatesAutoresizingMaskIntoConstraints = false
-        visualContainer.addSubview(artwork)
+        visual.addSubview(artwork)
 
-        // Karartma katmanı: Hem görselin hem de blur katmanının üstünde yer alır.
-        // visualContainer içinde olduğu için resim esnedikçe gradyan da onunla birlikte esner.
-        scrimView.translatesAutoresizingMaskIntoConstraints = false
-        scrimView.isUserInteractionEnabled = false
-        scrimView.colors = [
-            UIColor.clear,
+        // Karartma metin bloğunun hizasında en koyu, oradan aşağı doğru açılıyor.
+        scrim.colors = [
+            UIColor.black.withAlphaComponent(0),
             UIColor.black.withAlphaComponent(0.08),
-            UIColor.black.withAlphaComponent(0.35),
-            UIColor.black.withAlphaComponent(0.70),
-            UIColor.black.withAlphaComponent(0.92),
-            UIColor.black,
+            UIColor.black.withAlphaComponent(0.40),
+            UIColor.black.withAlphaComponent(0.34),
+            UIColor.black.withAlphaComponent(0.26),
         ]
-        scrimView.locations = [0.0, 0.35, 0.55, 0.75, 0.90, 1.0]
-        visualContainer.addSubview(scrimView)
+        scrim.locations = [0, 0.40, 0.72, 0.88, 1]
+        scrim.isUserInteractionEnabled = false
+        scrim.translatesAutoresizingMaskIntoConstraints = false
+        visual.addSubview(scrim)
 
-        #if os(tvOS)
-        sideScrimView.translatesAutoresizingMaskIntoConstraints = false
-        sideScrimView.isUserInteractionEnabled = false
-        sideScrimView.setDirection(start: CGPoint(x: 0, y: 0.5), end: CGPoint(x: 1, y: 0.5))
-        sideScrimView.colors = [
-            UIColor.black.withAlphaComponent(0.92),
-            UIColor.black.withAlphaComponent(0.72),
-            UIColor.black.withAlphaComponent(0.25),
-            UIColor.clear,
+        sideScrim.setDirection(start: CGPoint(x: 0, y: 0.5), end: CGPoint(x: 1, y: 0.5))
+        sideScrim.colors = [
+            UIColor.black.withAlphaComponent(0.42),
+            UIColor.black.withAlphaComponent(0.24),
+            UIColor.black.withAlphaComponent(0.07),
+            .clear,
         ]
-        sideScrimView.locations = [0.0, 0.30, 0.55, 0.80]
-        visualContainer.addSubview(sideScrimView)
-        #endif
+        sideScrim.locations = [0, 0.30, 0.60, 0.88]
+        sideScrim.isHidden = true
+        sideScrim.isUserInteractionEnabled = false
+        sideScrim.translatesAutoresizingMaskIntoConstraints = false
+        visual.addSubview(sideScrim)
+
+        bodyBackdrop.translatesAutoresizingMaskIntoConstraints = false
+        visual.addSubview(bodyBackdrop)
 
         buildContent()
+        buildButtons()
 
-        contentLeading = contentStack.leadingAnchor.constraint(
-            equalTo: leadingAnchor, constant: horizontalInset
-        )
-        #if !os(tvOS)
-        contentTrailing = contentStack.trailingAnchor.constraint(
-            equalTo: trailingAnchor, constant: -horizontalInset
-        )
-        #endif
+        column.axis = .vertical
+        column.alignment = .leading
+        column.translatesAutoresizingMaskIntoConstraints = false
+        column.addArrangedSubview(textBlock)
+        column.addArrangedSubview(buttonsGlass)
+        addSubview(column)
 
-        visualTop = visualContainer.topAnchor.constraint(equalTo: topAnchor)
-        visualHeight = visualContainer.heightAnchor.constraint(equalToConstant: baseHeight)
+        visualTop = visual.topAnchor.constraint(equalTo: topAnchor)
+        visualBottom = visual.bottomAnchor.constraint(
+            equalTo: bottomAnchor, constant: artworkOverhang
+        )
+        artworkBottom = artwork.bottomAnchor.constraint(
+            equalTo: bottomAnchor, constant: artworkOverhang
+        )
+        columnLeading = column.leadingAnchor.constraint(equalTo: leadingAnchor)
+        columnBottom = column.bottomAnchor.constraint(equalTo: bottomAnchor)
+        columnWidth = column.widthAnchor.constraint(equalTo: widthAnchor)
         ownHeight = heightAnchor.constraint(equalToConstant: baseHeight)
 
         NSLayoutConstraint.activate([
             ownHeight,
+            visual.leadingAnchor.constraint(equalTo: leadingAnchor),
+            visual.trailingAnchor.constraint(equalTo: trailingAnchor),
             visualTop,
-            visualHeight,
-            visualContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
-            visualContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            visualBottom,
 
-            artwork.leadingAnchor.constraint(equalTo: visualContainer.leadingAnchor),
-            artwork.trailingAnchor.constraint(equalTo: visualContainer.trailingAnchor),
-            artwork.topAnchor.constraint(equalTo: visualContainer.topAnchor),
-            artwork.bottomAnchor.constraint(equalTo: visualContainer.bottomAnchor),
+            columnLeading,
+            columnBottom,
+            columnWidth,
+            textBlock.widthAnchor.constraint(equalTo: column.widthAnchor),
 
-            scrimView.leadingAnchor.constraint(equalTo: visualContainer.leadingAnchor),
-            scrimView.trailingAnchor.constraint(equalTo: visualContainer.trailingAnchor),
-            scrimView.topAnchor.constraint(equalTo: visualContainer.topAnchor),
-            scrimView.bottomAnchor.constraint(equalTo: visualContainer.bottomAnchor),
-
+            artwork.leadingAnchor.constraint(equalTo: visual.leadingAnchor),
+            artwork.trailingAnchor.constraint(equalTo: visual.trailingAnchor),
+            artwork.topAnchor.constraint(equalTo: visual.topAnchor),
+            artworkBottom,
         ])
 
-        #if os(tvOS)
+        bodyBackdropHeight = bodyBackdrop.heightAnchor.constraint(equalToConstant: 140)
         NSLayoutConstraint.activate([
-            sideScrimView.leadingAnchor.constraint(equalTo: visualContainer.leadingAnchor),
-            sideScrimView.trailingAnchor.constraint(equalTo: visualContainer.trailingAnchor),
-            sideScrimView.topAnchor.constraint(equalTo: visualContainer.topAnchor),
-            sideScrimView.bottomAnchor.constraint(equalTo: visualContainer.bottomAnchor),
+            bodyBackdrop.leadingAnchor.constraint(equalTo: visual.leadingAnchor),
+            bodyBackdrop.trailingAnchor.constraint(equalTo: visual.trailingAnchor),
+            bodyBackdrop.bottomAnchor.constraint(equalTo: visual.bottomAnchor),
+            bodyBackdropHeight,
+        ])
 
-            // İçerik solda, ekranın yarısından biraz dar bir kolonda.
-            contentLeading,
-            contentStack.widthAnchor.constraint(equalTo: widthAnchor, multiplier: 0.44),
-            contentStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -90),
-        ])
-        #else
-        NSLayoutConstraint.activate([
-            contentLeading,
-            contentTrailing,
-            contentStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -24),
-        ])
-        #endif
+        for gradient in [scrim, sideScrim] {
+            NSLayoutConstraint.activate([
+                gradient.leadingAnchor.constraint(equalTo: artwork.leadingAnchor),
+                gradient.trailingAnchor.constraint(equalTo: artwork.trailingAnchor),
+                gradient.topAnchor.constraint(equalTo: artwork.topAnchor),
+                gradient.bottomAnchor.constraint(equalTo: artwork.bottomAnchor),
+            ])
+        }
     }
-
-    func startLoadingAnimation() { artwork.startLoading() }
-
-    func stopLoadingAnimation(animated: Bool = true) { artwork.stopLoading(animated: animated) }
 
     private func buildContent() {
         logoView.contentMode = .scaleAspectFit
-        logoView.isHidden = true
+        logoView.translatesAutoresizingMaskIntoConstraints = false
         logoView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         titleLabel.textColor = .white
-        titleLabel.textAlignment = .center
-        titleLabel.numberOfLines = 3
+        titleLabel.numberOfLines = 2
+        titleLabel.adjustsFontSizeToFitWidth = true
+        titleLabel.minimumScaleFactor = 0.7
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        taglineLabel.font = .italicSystemFont(ofSize: 14)
-        taglineLabel.textColor = UIColor.white.withAlphaComponent(0.8)
-        taglineLabel.textAlignment = .center
-        taglineLabel.numberOfLines = 2
-        taglineLabel.isHidden = true
+        titleSlot.translatesAutoresizingMaskIntoConstraints = false
+        titleSlot.addSubview(logoView)
+        titleSlot.addSubview(titleLabel)
 
-        genreLabel.font = .systemFont(ofSize: 15)
-        genreLabel.textColor = UIColor.white.withAlphaComponent(0.85)
-        genreLabel.textAlignment = .center
+        titleSlotHeight = titleSlot.heightAnchor.constraint(equalToConstant: 80)
+        logoHeight = logoView.heightAnchor.constraint(equalToConstant: 80)
+        logoMaxWidth = logoView.widthAnchor.constraint(lessThanOrEqualToConstant: 280)
+        logoHeight.priority = .defaultHigh
 
-        // tvOS'ta oynat butonu ikincillerden yazı kalınlığı ve genişlikle
-        // ayrışıyor; malzeme hepsinde aynı tonsuz cam. Telefonda ise cam
-        // buton görselin üstünde siliniyor — ana aksiyon dolu beyaz.
-        #if os(tvOS)
-        var playConfig = UIButton.Configuration.appGlass(horizontalInset: 24, fontSize: 16)
-        #else
-        var playConfig = UIButton.Configuration.appProminent(horizontalInset: 24, fontSize: 16)
-        #endif
-        playConfig.image = UIImage(systemName: "play.fill")
-        playButton.configuration = playConfig
+        logoLeading = logoView.leadingAnchor.constraint(equalTo: titleSlot.leadingAnchor)
+        logoCenterX = logoView.centerXAnchor.constraint(equalTo: titleSlot.centerXAnchor)
+
+        NSLayoutConstraint.activate([
+            titleSlotHeight,
+            logoHeight,
+            logoMaxWidth,
+            logoLeading,
+            logoView.bottomAnchor.constraint(equalTo: titleSlot.bottomAnchor),
+            logoView.topAnchor.constraint(greaterThanOrEqualTo: titleSlot.topAnchor),
+            logoView.leadingAnchor.constraint(greaterThanOrEqualTo: titleSlot.leadingAnchor),
+            logoView.trailingAnchor.constraint(lessThanOrEqualTo: titleSlot.trailingAnchor),
+
+            titleLabel.leadingAnchor.constraint(equalTo: titleSlot.leadingAnchor),
+            titleLabel.trailingAnchor.constraint(equalTo: titleSlot.trailingAnchor),
+            titleLabel.bottomAnchor.constraint(equalTo: titleSlot.bottomAnchor),
+            titleLabel.topAnchor.constraint(greaterThanOrEqualTo: titleSlot.topAnchor),
+        ])
+
+        metaLabel.textColor = UIColor.white.withAlphaComponent(0.92)
+        metaLabel.lineBreakMode = .byTruncatingTail
+        metaLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+
+        imdbLogoView.contentMode = .scaleAspectFit
+        imdbLogoView.image = UIImage(named: "imdb_logo")
+        imdbLogoView.setContentHuggingPriority(.required, for: .horizontal)
+        imdbLogoView.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        imdbRatingLabel.textColor = AppPalette.imdbGold
+        imdbRatingLabel.setContentHuggingPriority(.required, for: .horizontal)
+        imdbRatingLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        imdbRow.axis = .horizontal
+        imdbRow.alignment = .center
+        imdbRow.spacing = 6
+        imdbRow.translatesAutoresizingMaskIntoConstraints = false
+        [imdbLogoView, imdbRatingLabel].forEach(imdbRow.addArrangedSubview)
+
+        imdbLogoHeight = imdbLogoView.heightAnchor.constraint(equalToConstant: 16)
+        imdbLogoAspect = imdbLogoView.widthAnchor.constraint(
+            equalTo: imdbLogoView.heightAnchor, multiplier: 575.0 / 290.0
+        )
+        NSLayoutConstraint.activate([imdbLogoHeight, imdbLogoAspect])
+
+        ageBadge.textColor = UIColor.white.withAlphaComponent(0.92)
+        ageBadge.backgroundColor = UIColor.white.withAlphaComponent(0.22)
+        ageBadge.layer.cornerRadius = 4
+        ageBadge.layer.cornerCurve = .continuous
+        ageBadge.clipsToBounds = true
+        ageBadge.textAlignment = .center
+        ageBadge.setContentHuggingPriority(.required, for: .horizontal)
+        ageBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        metaTrailingSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        metaTrailingSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        metaRow.axis = .horizontal
+        metaRow.alignment = .center
+        metaRow.spacing = 10
+        metaRow.translatesAutoresizingMaskIntoConstraints = false
+        [metaLabel, imdbRow, ageBadge, metaTrailingSpacer].forEach(metaRow.addArrangedSubview)
+
+        plotLabel.textColor = UIColor.white.withAlphaComponent(0.80)
+        plotLabel.numberOfLines = 2
+        plotLabel.translatesAutoresizingMaskIntoConstraints = false
+        plotHeight = plotLabel.heightAnchor.constraint(equalToConstant: 40)
+        plotHeight.isActive = true
+
+        textBlock.axis = .vertical
+        textBlock.alignment = .fill
+        textBlock.translatesAutoresizingMaskIntoConstraints = false
+        [titleSlot, metaRow, plotLabel].forEach(textBlock.addArrangedSubview)
+    }
+
+    private func buildButtons() {
         playButton.addSpringPressFeedback()
-
-        var watchlistConfig = UIButton.Configuration.appGlass(horizontalInset: 15)
-        watchlistConfig.image = UIImage(systemName: "plus")
-        watchlistButton.configuration = watchlistConfig
         watchlistButton.addSpringPressFeedback(scale: 0.90)
-
-        var favoriteConfig = UIButton.Configuration.appGlass(horizontalInset: 15)
-        favoriteConfig.image = UIImage(systemName: "heart")
-        favoriteButton.configuration = favoriteConfig
         favoriteButton.addSpringPressFeedback(scale: 0.90)
 
-        var episodesConfig = UIButton.Configuration.appGlass(horizontalInset: 22, fontSize: 16)
-        episodesConfig.title = L10n.episodes
-        episodesConfig.image = UIImage(systemName: "list.bullet")
-        episodesButton.configuration = episodesConfig
-        episodesButton.addSpringPressFeedback()
-        episodesButton.isHidden = true
-
         #if os(tvOS)
-        let actionButtons = [playButton, episodesButton, watchlistButton, favoriteButton]
+        let actionButtons = [playButton, watchlistButton, favoriteButton]
         #else
         let actionButtons = [playButton, watchlistButton]
         #endif
@@ -224,103 +296,222 @@ final class DetailHeroView: UIView {
         buttons.spacing = 10
         buttons.alignment = .center
 
-        // Aksiyon satırı tek bir boyu paylaşıyor. İkon-only butonlar simge
-        // ölçüsünden, sezon çipleri de kendi puntosundan daha kısa kalıyordu;
-        // ölçüyü Oynat butonu belirliyor.
         for button in actionButtons.dropFirst() {
             button.heightAnchor.constraint(equalTo: playButton.heightAnchor).isActive = true
         }
 
-        // İki cam buton ortak bir cam kapsayıcıda; birbirlerine yaklaştıklarında
-        // malzeme akışkan biçimde birleşiyor.
-        let buttonsGlass = UIView.glassContainer(wrapping: buttons, spacing: 10)
-
-        plotLabel.font = .systemFont(ofSize: 15)
-        plotLabel.textColor = UIColor.white.withAlphaComponent(0.92)
-        plotLabel.numberOfLines = 2
-        plotLabel.textAlignment = .center
-        // Özetin tamamını okumak için ayrı bir buton yok: metnin kendisine
-        // dokunmak açıp kapatıyor. Dokunmayı `DetailViewController` bağlıyor.
-        plotLabel.isUserInteractionEnabled = true
-
-        metaLabel.font = .systemFont(ofSize: 13, weight: .medium)
-        metaLabel.textColor = UIColor.white.withAlphaComponent(0.75)
-        metaLabel.textAlignment = .center
-
-        contentStack.axis = .vertical
-        contentStack.spacing = 12
-        contentStack.translatesAutoresizingMaskIntoConstraints = false
-
-        #if os(tvOS)
-        // Apple TV düzeni: her şey solda, açıklama butonların üstünde ve
-        // "daha fazla" yok — kumandayla metin açmak anlamsız, metin kırpılıyor.
-        contentStack.alignment = .leading
-        contentStack.spacing = 18
-        [logoView, titleLabel, genreLabel, plotLabel, metaLabel, buttonsGlass]
-            .forEach(contentStack.addArrangedSubview)
-        [titleLabel, taglineLabel, genreLabel, plotLabel, metaLabel].forEach {
-            $0.textAlignment = .left
-        }
-        titleLabel.numberOfLines = 2
-        plotLabel.numberOfLines = 4
-        plotLabel.font = .systemFont(ofSize: 26)
-        genreLabel.font = .systemFont(ofSize: 24)
-        metaLabel.font = .systemFont(ofSize: 22, weight: .medium)
-        logoView.contentMode = .scaleAspectFit
-        logoView.heightAnchor.constraint(lessThanOrEqualToConstant: 180).isActive = true
-        #else
-        contentStack.alignment = .center
-        [logoView, titleLabel, taglineLabel, genreLabel, buttonsGlass, plotLabel, metaLabel]
-            .forEach(contentStack.addArrangedSubview)
-        // Logo genişliği ekranı aşmasın, yüksekliği sınırlı kalsın.
-        logoView.heightAnchor.constraint(lessThanOrEqualToConstant: 96).isActive = true
-        #endif
-
-        addSubview(contentStack)
+        buttonsGlass = UIView.glassContainer(wrapping: buttons, spacing: 10)
     }
 
-    // MARK: - Kaydırma sürüşü
+    func setLogo(_ logo: UIImage?) {
+        logoView.isHidden = logo == nil
+        logoView.image = logo
 
-    /// İçerik kolonunu alttaki bölümlerle aynı kenar payına çeker.
-    func updateHorizontalInset(_ inset: CGFloat) {
-        guard abs(inset - horizontalInset) > 0.5 else { return }
-        horizontalInset = inset
-        contentLeading.constant = inset
-        #if !os(tvOS)
-        contentTrailing.constant = -inset
+        logoAspect?.isActive = false
+        if let logo, logo.size.height > 0 {
+            logoAspect = logoView.widthAnchor.constraint(
+                equalTo: logoView.heightAnchor,
+                multiplier: logo.size.width / logo.size.height
+            )
+        } else {
+            logoAspect = logoView.widthAnchor.constraint(equalToConstant: 0)
+        }
+        logoAspect?.isActive = true
+    }
+
+    func setPlayTitle(_ title: String) {
+        let layout = appliedLayout ?? Self.layout(metrics: metrics, width: bounds.width > 0 ? bounds.width : 1920)
+        #if os(tvOS)
+        var play = UIButton.Configuration.appGlass(
+            horizontalInset: layout.buttonInset * 1.3,
+            verticalInset: layout.buttonVerticalInset,
+            fontSize: layout.buttonFontSize
+        )
+        #else
+        var play = UIButton.Configuration.appProminent(
+            horizontalInset: layout.buttonInset * 1.3,
+            verticalInset: layout.buttonVerticalInset,
+            fontSize: layout.buttonFontSize
+        )
         #endif
+        play.image = UIImage(systemName: "play.fill")
+        play.title = title
+        playButton.configuration = play
+    }
+
+    func setWatchlist(isInWatchlist: Bool) {
+        let layout = appliedLayout ?? Self.layout(metrics: metrics, width: bounds.width > 0 ? bounds.width : 1920)
+        var config = UIButton.Configuration.appGlass(
+            horizontalInset: layout.buttonInset,
+            verticalInset: layout.buttonVerticalInset,
+            fontSize: layout.buttonFontSize
+        )
+        config.image = UIImage(systemName: isInWatchlist ? "checkmark" : "plus")
+        watchlistButton.configuration = config
+    }
+
+    func setFavorite(isFavorite: Bool) {
+        let layout = appliedLayout ?? Self.layout(metrics: metrics, width: bounds.width > 0 ? bounds.width : 1920)
+        var config = UIButton.Configuration.appGlass(
+            horizontalInset: layout.buttonInset,
+            verticalInset: layout.buttonVerticalInset,
+            fontSize: layout.buttonFontSize
+        )
+        config.image = UIImage(systemName: isFavorite ? "heart.fill" : "heart")
+        config.baseForegroundColor = isFavorite ? .systemRed : .white
+        favoriteButton.configuration = config
+    }
+
+    func startLoadingAnimation() { artwork.startLoading() }
+
+    func stopLoadingAnimation(animated: Bool = true) { artwork.stopLoading(animated: animated) }
+
+    // MARK: - Düzen Hesabı
+
+    private struct Layout: Equatable {
+        var titleFont: UIFont
+        var titleSlotHeight: CGFloat
+        var logoHeight: CGFloat
+        var logoMaxWidth: CGFloat
+        var metaFont: UIFont
+        var badgeFont: UIFont
+        var plotFont: UIFont
+        var iconSize: CGFloat
+        var buttonFontSize: CGFloat
+        var buttonInset: CGFloat
+        var buttonVerticalInset: CGFloat
+        var spacing: CGFloat
+        var buttonSpacing: CGFloat
+        var horizontalInset: CGFloat
+        var contentBottomInset: CGFloat
+        var backdropRamp: CGFloat
+        var columnRatio: CGFloat
+        var isCentered: Bool
+    }
+
+    private static func layout(metrics: AppMetrics, width: CGFloat) -> Layout {
+        let titleSize = metrics.titleFont.pointSize
+        let secondary = max(13, (titleSize * 0.42).rounded())
+        let inset = metrics.screenPadding
+        let ratio: CGFloat = width >= 900 ? 0.44 : 1
+        #if os(tvOS)
+        let contentInset = max(18, (inset * 0.35).rounded())
+        #else
+        let contentInset = max(20, (inset * 0.45).rounded())
+        #endif
+
+        return Layout(
+            titleFont: metrics.titleFont,
+            titleSlotHeight: (titleSize * 1.3).rounded(),
+            logoHeight: (titleSize * 0.56).rounded(),
+            logoMaxWidth: width >= 900 ? 280 : 160,
+            metaFont: .systemFont(ofSize: secondary, weight: .medium),
+            badgeFont: .systemFont(ofSize: max(11, secondary - 3), weight: .semibold),
+            plotFont: .systemFont(ofSize: secondary),
+            iconSize: (secondary * 1.1).rounded(),
+            buttonFontSize: max(14, (secondary * 1.05).rounded()),
+            buttonInset: max(18, (secondary * 1.1).rounded()),
+            buttonVerticalInset: max(11, (secondary * 0.55).rounded()),
+            spacing: max(14, (inset * 0.40).rounded()),
+            buttonSpacing: max(20, (inset * 0.55).rounded()),
+            horizontalInset: inset,
+            contentBottomInset: contentInset,
+            backdropRamp: max(140, (metrics.rowSpacing * 2.5).rounded()),
+            columnRatio: ratio,
+            isCentered: ratio >= 1
+        )
+    }
+
+    func updateMetrics(_ metrics: AppMetrics) {
+        self.metrics = metrics
+        applyLayoutIfNeeded()
     }
 
     func updateBaseHeight(_ height: CGFloat) {
         guard height > 0, abs(height - baseHeight) > 0.5 else { return }
         baseHeight = height
         ownHeight.constant = height
-        visualHeight.constant = height
-        visualTop.constant = 0
     }
 
-    /// `offset` kaydırma konumu. Negatifse görsel kapsayıcısı (resim+blur+gradient)
-    /// üste sabitlenip büyür, pozitifse içerikten yavaş hareket eder (parallax).
-    ///
-    /// `visualContainer`'a uygulandığı için resim, blur ve karartma gradyanı
-    /// birlikte esner; resim asla gradyanın altından taşmaz.
-    func apply(offset: CGFloat, parallaxFactor: CGFloat) {
-        guard baseHeight > 0 else { return }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        applyLayoutIfNeeded()
+    }
 
-        let transform: CGAffineTransform
-        if offset < 0 {
-            // Merkez etrafında ölçeklerken üst kenarı `offset` konumunda tutmak
-            // için gereken ek kaydırma tam olarak offset/2 oluyor.
-            let scale = (baseHeight - offset) / baseHeight
-            transform = CGAffineTransform(scaleX: scale, y: scale)
-                .concatenating(CGAffineTransform(translationX: 0, y: offset / 2))
-        } else {
-            // Hero tamamen yukarı çıktıktan sonra kaydırmayı durduruyoruz;
-            // aksi hâlde görsel gövdenin altından taşıp en altta sıçrama gibi
-            // görünüyordu.
-            transform = CGAffineTransform(translationX: 0, y: min(offset * parallaxFactor, baseHeight))
+    private func applyLayoutIfNeeded() {
+        let width = bounds.width
+        guard width > 0 else { return }
+        let layout = Self.layout(metrics: metrics, width: width)
+        guard layout != appliedLayout else { return }
+        appliedLayout = layout
+
+        titleLabel.font = layout.titleFont
+        titleSlotHeight.constant = layout.titleSlotHeight
+        logoHeight.constant = layout.logoHeight
+        logoMaxWidth.constant = layout.logoMaxWidth
+
+        metaLabel.font = layout.metaFont
+        imdbRatingLabel.font = layout.metaFont
+        ageBadge.font = layout.badgeFont
+        imdbLogoHeight.constant = (layout.metaFont.pointSize * 0.85).rounded()
+
+        plotLabel.font = layout.plotFont
+        plotHeight.constant = (layout.plotFont.lineHeight * 2).rounded(.up)
+
+        textBlock.spacing = layout.spacing
+        column.spacing = layout.buttonSpacing
+        columnLeading.constant = layout.horizontalInset
+        applyContentLift()
+
+        columnWidth.isActive = false
+        columnWidth = column.widthAnchor.constraint(
+            equalTo: widthAnchor,
+            multiplier: layout.columnRatio,
+            constant: layout.columnRatio < 1 ? 0 : -layout.horizontalInset * 2
+        )
+        columnWidth.isActive = true
+
+        bodyBackdrop.rampHeight = layout.backdropRamp
+        bodyBackdropHeight.constant = layout.backdropRamp
+
+        sideScrim.isHidden = layout.isCentered
+
+        titleLabel.textAlignment = layout.isCentered ? .center : .natural
+        logoLeading.isActive = !layout.isCentered
+        logoCenterX.isActive = layout.isCentered
+
+        configureButtons(layout: layout)
+    }
+
+    private func configureButtons(layout: Layout) {
+        let currentPlayTitle = playButton.configuration?.title ?? L10n.play
+        setPlayTitle(currentPlayTitle)
+
+        let isWatchlist = watchlistButton.configuration?.image == UIImage(systemName: "checkmark")
+        setWatchlist(isInWatchlist: isWatchlist)
+
+        let isFav = favoriteButton.configuration?.image == UIImage(systemName: "heart.fill")
+        setFavorite(isFavorite: isFav)
+    }
+
+    // MARK: - Kaydırma
+
+    func applyScroll(offset: CGFloat) {
+        let top = -max(0, -offset)
+        let progress = min(max(offset / Self.contentLiftRamp, 0), 1)
+        let eased = progress * progress * (3 - 2 * progress)
+        let lift = eased * Self.contentLiftDistance
+
+        if abs(visualTop.constant - top) > 0.5 || abs(contentLift - lift) > 0.5 {
+            visualTop.constant = top
+            contentLift = lift
+            applyContentLift()
+            layoutIfNeeded()
         }
+    }
 
-        visualContainer.transform = transform
+    private func applyContentLift() {
+        let layout = appliedLayout
+        columnBottom.constant = -((layout?.contentBottomInset ?? 0) + contentLift)
     }
 }
