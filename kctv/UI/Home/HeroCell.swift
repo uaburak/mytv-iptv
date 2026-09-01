@@ -80,6 +80,9 @@ final class HeroCell: UICollectionViewCell {
 
     private let metaRow = UIStackView()
     private let metaLabel = UILabel()
+    private let imdbRow = UIStackView()
+    private let imdbLogoView = UIImageView()
+    private let imdbRatingLabel = UILabel()
     private let ageBadge = BadgeLabel()
     /// Rozet satırını sola ya da ortaya yaslayan esnek boşluklar.
     private let metaLeadingSpacer = UIView()
@@ -184,11 +187,14 @@ final class HeroCell: UICollectionViewCell {
     private var columnWidth: NSLayoutConstraint!
     private var titleSlotHeight: NSLayoutConstraint!
     private var logoHeight: NSLayoutConstraint!
+    private var logoMaxWidth: NSLayoutConstraint!
     private var logoAspect: NSLayoutConstraint?
     private var logoLeading: NSLayoutConstraint!
     private var logoCenterX: NSLayoutConstraint!
     private var metaSpacersEqual: NSLayoutConstraint!
     private var metaRowHeight: NSLayoutConstraint!
+    private var imdbLogoHeight: NSLayoutConstraint!
+    private var imdbLogoAspect: NSLayoutConstraint!
     private var plotHeight: NSLayoutConstraint!
     private var indicatorBottom: NSLayoutConstraint?
 
@@ -346,6 +352,7 @@ final class HeroCell: UICollectionViewCell {
 
         titleSlotHeight = titleSlot.heightAnchor.constraint(equalToConstant: 80)
         logoHeight = logoView.heightAnchor.constraint(equalToConstant: 80)
+        logoMaxWidth = logoView.widthAnchor.constraint(lessThanOrEqualToConstant: 280)
         // Geniş logolarda yüksekliği kolon genişliği belirliyor; bu yüzden
         // yükseklik zorunlu değil, oran ve sağ kenar zorunlu.
         logoHeight.priority = .defaultHigh
@@ -356,6 +363,7 @@ final class HeroCell: UICollectionViewCell {
         NSLayoutConstraint.activate([
             titleSlotHeight,
             logoHeight,
+            logoMaxWidth,
             logoLeading,
             logoView.bottomAnchor.constraint(equalTo: titleSlot.bottomAnchor),
             logoView.topAnchor.constraint(greaterThanOrEqualTo: titleSlot.topAnchor),
@@ -373,6 +381,27 @@ final class HeroCell: UICollectionViewCell {
         metaLabel.textColor = UIColor.white.withAlphaComponent(0.92)
         metaLabel.lineBreakMode = .byTruncatingTail
 
+        imdbLogoView.contentMode = .scaleAspectFit
+        imdbLogoView.image = UIImage(named: "imdb_logo") ?? Self.renderIMDbBadge()
+        imdbLogoView.setContentHuggingPriority(.required, for: .horizontal)
+        imdbLogoView.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        imdbRatingLabel.textColor = AppPalette.imdbGold
+        imdbRatingLabel.setContentHuggingPriority(.required, for: .horizontal)
+        imdbRatingLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        imdbRow.axis = .horizontal
+        imdbRow.alignment = .center
+        imdbRow.spacing = 6
+        imdbRow.translatesAutoresizingMaskIntoConstraints = false
+        [imdbLogoView, imdbRatingLabel].forEach(imdbRow.addArrangedSubview)
+
+        imdbLogoHeight = imdbLogoView.heightAnchor.constraint(equalToConstant: 16)
+        imdbLogoAspect = imdbLogoView.widthAnchor.constraint(
+            equalTo: imdbLogoView.heightAnchor, multiplier: 575.0 / 290.0
+        )
+        NSLayoutConstraint.activate([imdbLogoHeight, imdbLogoAspect])
+
         ageBadge.textColor = UIColor.white.withAlphaComponent(0.92)
         ageBadge.backgroundColor = UIColor.white.withAlphaComponent(0.22)
         ageBadge.layer.cornerRadius = 4
@@ -384,7 +413,7 @@ final class HeroCell: UICollectionViewCell {
 
         metaRow.axis = .horizontal
         metaRow.alignment = .center
-        metaRow.spacing = 8
+        metaRow.spacing = 10
         metaRow.translatesAutoresizingMaskIntoConstraints = false
         // Satırın içeriği kısa; kalan yeri esnek boşluklar dolduruyor.
         // Yalnızca sondaki açıkken içerik sola, ikisi birden açıkken ortaya
@@ -394,7 +423,7 @@ final class HeroCell: UICollectionViewCell {
             spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
         metaLeadingSpacer.isHidden = true
-        [metaLeadingSpacer, metaLabel, ageBadge, metaTrailingSpacer]
+        [metaLeadingSpacer, metaLabel, imdbRow, ageBadge, metaTrailingSpacer]
             .forEach(metaRow.addArrangedSubview)
         metaSpacersEqual = metaLeadingSpacer.widthAnchor.constraint(
             equalTo: metaTrailingSpacer.widthAnchor
@@ -536,6 +565,7 @@ final class HeroCell: UICollectionViewCell {
         /// Logo yuvanın tamamını doldurmuyor: iki satırlık başlık kadar yer
         /// tutan bir yuvada logo devasa duruyordu.
         var logoHeight: CGFloat
+        var logoMaxWidth: CGFloat
         var metaFont: UIFont
         var badgeFont: UIFont
         var plotFont: UIFont
@@ -584,8 +614,9 @@ final class HeroCell: UICollectionViewCell {
 
         return Layout(
             titleFont: metrics.titleFont,
-            titleSlotHeight: (titleSize * 1.6).rounded(),
-            logoHeight: (titleSize * 0.82).rounded(),
+            titleSlotHeight: (titleSize * 1.3).rounded(),
+            logoHeight: (titleSize * 0.56).rounded(),
+            logoMaxWidth: width >= 900 ? 280 : 160,
             metaFont: .systemFont(ofSize: secondary, weight: .medium),
             badgeFont: .systemFont(ofSize: max(11, secondary - 3), weight: .semibold),
             plotFont: .systemFont(ofSize: secondary),
@@ -614,10 +645,13 @@ final class HeroCell: UICollectionViewCell {
         titleLabel.font = layout.titleFont
         titleSlotHeight.constant = layout.titleSlotHeight
         logoHeight.constant = layout.logoHeight
+        logoMaxWidth.constant = layout.logoMaxWidth
 
         metaLabel.font = layout.metaFont
+        imdbRatingLabel.font = layout.metaFont
         ageBadge.font = layout.badgeFont
-        metaRowHeight.constant = layout.metaFont.lineHeight.rounded(.up)
+        imdbLogoHeight.constant = (layout.metaFont.pointSize * 0.85).rounded()
+        metaRowHeight.constant = max(layout.metaFont.lineHeight, imdbLogoHeight.constant).rounded(.up)
 
         plotLabel.font = layout.plotFont
         plotHeight.constant = (layout.plotFont.lineHeight * 2).rounded(.up)
@@ -859,42 +893,25 @@ final class HeroCell: UICollectionViewCell {
         let slide = slides[item.id]
         let images = artworks[item.id]
 
-        let apply = { [self] in
-            let logo = images?.logo
-            setLogo(logo)
-            titleLabel.text = item.title
-            titleLabel.isHidden = logo != nil
+        let logo = images?.logo
+        setLogo(logo)
+        titleLabel.text = item.title
+        titleLabel.isHidden = logo != nil
 
-            metaLabel.text = Self.metaText(for: item, slide: slide)
+        metaLabel.text = Self.metaText(for: item, slide: slide)
 
-            let age = Self.ageBadgeText(for: item)
-            ageBadge.text = age
-            ageBadge.isHidden = age == nil
-
-            plotLabel.text = Self.plotText(for: item, slide: slide)
-        }
-
-        if animated, window != nil {
-            UIView.transition(
-                with: textBlock,
-                duration: Self.transitionDuration,
-                options: [.transitionCrossDissolve, .allowUserInteraction]
-            ) {
-                // Değişim animasyonsuz uygulanıyor, geçişi yalnızca çapraz
-                // erime veriyor.
-                //
-                // Aksi hâlde blok bir animasyon bağlamının içinde olduğu için
-                // düzen değişimi de animasyona giriyor: her içeriğin logosu
-                // farklı oranda olduğundan logo bir öncekinin çerçevesinden
-                // yenisininkine doğru kayarak/büyüyerek geliyordu.
-                UIView.performWithoutAnimation {
-                    apply()
-                    self.textBlock.layoutIfNeeded()
-                }
-            }
+        if let rating = item.ratingFormatted {
+            imdbRatingLabel.text = rating
+            imdbRow.isHidden = false
         } else {
-            apply()
+            imdbRow.isHidden = true
         }
+
+        let age = Self.ageBadgeText(for: item)
+        ageBadge.text = age
+        ageBadge.isHidden = age == nil
+
+        plotLabel.text = Self.plotText(for: item, slide: slide)
 
         updateFavoriteButton(animated: animated)
         renderBackdrop(images?.backdrop, animated: animated)
@@ -977,8 +994,34 @@ final class HeroCell: UICollectionViewCell {
         var parts = [item.kind.title]
         if let genre = genres.first { parts.append(genre) }
         if let year = item.yearText { parts.append(year) }
-        if let percent = item.ratingPercent { parts.append("%\(percent)") }
         return parts.joined(separator: " · ")
+    }
+
+    private static func renderIMDbBadge() -> UIImage {
+        let size = CGSize(width: 48, height: 24)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { _ in
+            let rect = CGRect(origin: .zero, size: size)
+            let path = UIBezierPath(roundedRect: rect, cornerRadius: 4)
+            AppPalette.imdbGold.setFill()
+            path.fill()
+
+            let text = "IMDb"
+            let font = UIFont.systemFont(ofSize: 14, weight: .heavy)
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: UIColor.black
+            ]
+            let str = NSAttributedString(string: text, attributes: attrs)
+            let strSize = str.size()
+            let strRect = CGRect(
+                x: (size.width - strSize.width) / 2,
+                y: (size.height - strSize.height) / 2,
+                width: strSize.width,
+                height: strSize.height
+            )
+            str.draw(in: strRect)
+        }
     }
 
     /// Açıklama iki satıra sığdığı için satır sonları boşluğa çevriliyor:

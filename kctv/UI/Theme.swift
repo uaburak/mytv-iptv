@@ -27,6 +27,7 @@ enum AppPalette {
     static let primaryText = UIColor.white
     static let secondaryText = UIColor.white.withAlphaComponent(0.62)
     static let accent = UIColor(red: 0.16, green: 0.62, blue: 1.0, alpha: 1.0)
+    static let imdbGold = UIColor(red: 0.961, green: 0.773, blue: 0.094, alpha: 1.0)
 
     /// Kategori kartlarının zemin renkleri.
     ///

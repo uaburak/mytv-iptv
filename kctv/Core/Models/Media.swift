@@ -106,6 +106,11 @@ struct MediaItem: Identifiable, Hashable, Codable, Sendable {
         guard let rating, rating > 0 else { return nil }
         return Int((rating * 10).rounded())
     }
+
+    var ratingFormatted: String? {
+        guard let rating, rating > 0 else { return nil }
+        return String(format: "%.1f", rating)
+    }
 }
 
 extension String {
