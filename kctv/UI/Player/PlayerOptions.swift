@@ -3,7 +3,9 @@ import KSPlayer
 
 /// Oynatıcı seçenekleri.
 ///
-/// Tek işi tamponun dolu sayılma ölçütünü ses çıkışına uydurmak. Ses
+/// Tek işi tamponun dolu sayılma ölçütünü ses çıkışına uydurmak — ve yalnızca
+/// çıkış `AudioRendererPlayer` olduğunda; `AudioEnginePlayer` yolunda
+/// kütüphanenin kendi ölçütü olduğu gibi geçerli. Ses
 /// `AudioRendererPlayer` ile çalındığından çözülmüş kareler
 /// `AVSampleBufferAudioRenderer`ın kuyruğunda birikiyor; `MEPlayerItemTrack`
 /// ise `frameCount`u kendi `outputRenderQueue`undan okuyor ve renderer o
@@ -28,6 +30,13 @@ import KSPlayer
 /// yüzden dokunulmuyor.
 final class PlayerOptions: KSOptions {
     override func playable(capacitys: [CapacityProtocol], isFirst: Bool, isSeek: Bool) -> LoadingState {
+        // Yalnızca sesi renderer çalarken geçerli. `AudioEnginePlayer` çekme
+        // tabanlı: her render çağrısında bir kare alıyor, kuyruk dolu kalıyor
+        // ve kütüphanenin ölçütü doğru çalışıyor. Orada sesin veto hakkını
+        // kaldırmak yanlış olur — tampon gerçekten zayıfken oynatmayı sürdürür.
+        guard KSOptions.audioPlayerType == AudioRendererPlayer.self else {
+            return super.playable(capacitys: capacitys, isFirst: isFirst, isSeek: isSeek)
+        }
         // Saatin doğru damgaya bağlanması gereken anlar: kütüphane karar versin.
         guard !isFirst, !isSeek else {
             return super.playable(capacitys: capacitys, isFirst: isFirst, isSeek: isSeek)

@@ -106,7 +106,7 @@
       "location" : "https://github.com/uaburak/KSPlayer",
       "state" : {
         "branch" : "fix/audio-renderer-clock-anchor",
-        "revision" : "9a9b49afbaab35e0b8eb1272bb432a440a30aa86"
+        "revision" : "4f581d9b2a3af321f89b75362cd858a04c6e060c"
       }
     },
     {

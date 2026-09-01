@@ -401,6 +401,10 @@ final class PlayerViewController: UIViewController {
     /// En son menü kurulduğundaki ses parçası kümesi. Bkz. `refreshTrackMenusIfChanged`.
     private var audioTrackSignature: String?
     private static let progressSaveInterval: TimeInterval = 30
+    #if DEBUG
+    /// Çizim hızının son yazıldığı an. Bkz. `logRenderHealth`.
+    private var lastRenderLog = Date.distantPast
+    #endif
 
     /// Arayüzün kendiliğinden solmasına kalan süre. Kısa tutulunca kullanıcı
     /// daha okumaya fırsat bulmadan künye ve ilerleme kayboluyordu.
@@ -717,7 +721,50 @@ final class PlayerViewController: UIViewController {
         // `AudioRendererPlayer` taşımayı `AVSampleBufferRenderSynchronizer`ın
         // zaman tabanına devrediyor: durdurma ve başlatma AirPlay cihazına
         // zamanlanmış olarak iniyor, boru hattı hiç yıkılmıyor.
+        //
+        // Yalnızca tvOS'ta: çözdüğü sorun Apple TV'nin HomePod'u varsayılan
+        // hoparlör olarak kullanmasına özgü, telefonda karşılığı yok.
+        //
+        // Kanal sayısıyla ilgisi yok: iPhone hoparlörü `.moviePlayback`
+        // kipinde `isSpatialAudioEnabled`ı hep açık bildirdiği için
+        // `KSOptions.outputNumberOfChannels` 5.1'i iki oynatıcı yolunda da
+        // altı kanal olarak bırakıyor — `maximumOutputNumberOfChannels` 2
+        // olsa bile. Uygulama tarafından bunu değiştirmenin yolu yok
+        // (`setSupportsMultichannelContent(false)` bayrağı etkilemiyor,
+        // denendi) ve gerek de yok: ağır çekimin sebebi ses değil,
+        // `CADisplayLink`in kaynağın kare hızına kilitlenmesiydi.
+        #if os(tvOS)
         KSOptions.audioPlayerType = AudioRendererPlayer.self
+        #endif
+
+        // `MetalPlayView`, `CADisplayLink`i kaynağın kare hızına kilitliyor:
+        // `CAFrameRateRange(minimum: fps, maximum: 2 * fps, preferred: fps)`.
+        // Çizim döngüsü her uyanışta kuyruktan en fazla bir kare tüketiyor,
+        // dolayısıyla bu ayar tüketim hızını kaynağın hızına eşitliyor ve
+        // arada hiç pay bırakmıyor.
+        //
+        // Pay olmayınca `videoClockSync`in telafi yolu da çalışmıyor. Geri
+        // kalan videoyu ancak kare atlayarak ya da izi boşaltarak toparlıyor;
+        // ikisi de "bir uyanışta birden fazla kare ilerlemek" demek. Bir kez
+        // geri kalındığında — açılışta ses ile ilk video karesi arasındaki
+        // fark kadarı bile yeter — açık bir daha kapanmıyor: kayıtta
+        // `delay count` hiç sıfırlanmadan 250'ye kadar tırmanıyor, `delay`
+        // saniyeye dayanıyor, arada `flush video track` ile bir sıçrama olup
+        // baştan başlıyor. Ses 1.0 hızda akarken video ağır çekimde kalıyor
+        // ve sesi yakalamak için atlıyor — bildirilen tablo bu.
+        //
+        // Kapatınca `CADisplayLink` panelin kendi hızında (60 Hz) uyanıyor.
+        // Sırası gelmemiş kare için `videoClockSync` `.remain` döndürüyor ve
+        // çizim erken çıkıyor, yani boşa uyanışın maliyeti bir karşılaştırma;
+        // sırası gelince de saniyede 60 kareye kadar tüketebildiği için
+        // telafi gerçekten işliyor.
+        //
+        // tvOS dışarıda: orada `AVDisplayCriteria` televizyonu içeriğin
+        // hızına geçiriyor, yani kilit zaten panelin kendisinde ve bugünkü
+        // davranış çalışıyor.
+        #if !os(tvOS)
+        KSOptions.preferredFrame = false
+        #endif
 
         let options = PlayerOptions()
         options.userAgent = context.headers["User-Agent"] ?? "VLC/3.0.20 LibVLC/3.0.20"
@@ -1769,11 +1816,36 @@ extension PlayerViewController: KSPlayerLayerDelegate {
             saveProgress()
         }
 
+        #if DEBUG
+        logRenderHealth()
+        #endif
+
         // Geri çağrı saniyede birkaç kez geliyor; kontroller gizliyken
         // görünmeyen etiketleri yeniden çizmenin anlamı yok.
         guard isControlsVisible else { return }
         refreshTimeLabels()
     }
+
+    #if DEBUG
+    /// Videonun sese yetişip yetişemediğini tek satırda gösteriyor.
+    ///
+    /// Ağır çekim şikâyetinde ayırt edilmesi gereken iki şey var: çözücü mü
+    /// yetişemiyor, yoksa çözülmüş kareler ekrana yeterince sık mı
+    /// verilmiyor. `displayFPS` ikincisini doğrudan ölçüyor — kaynağın kare
+    /// hızının belirgin altındaysa darboğaz tüketen taraftadır, yani
+    /// `CADisplayLink`. `syncDiff` eksiye gidiyorsa video sesin gerisinde.
+    private func logRenderHealth() {
+        guard Date().timeIntervalSince(lastRenderLog) >= 2 else { return }
+        lastRenderLog = Date()
+        guard let info = playerLayer?.player.dynamicInfo else { return }
+        print(String(
+            format: "[render] displayFPS=%.1f syncDiff=%.3f dropped=%u",
+            info.displayFPS,
+            info.audioVideoSyncDiff,
+            info.droppedVideoFrameCount
+        ))
+    }
+    #endif
 
     func player(layer: KSPlayerLayer, finish error: (any Error)?) {
         if let error {
